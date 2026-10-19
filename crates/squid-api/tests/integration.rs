@@ -565,6 +565,92 @@ async fn rest_cursor_pagination_and_order_by_match_contract() {
         .collect();
     assert_eq!(names, vec!["Amy", "Mia", "Zoe"]);
 
+    let filtered = send(
+        &app,
+        authorized(
+            "GET",
+            "/rest/people?filter=name.firstName%5BstartsWith%5D%3AA",
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(filtered.status, StatusCode::OK, "body: {}", filtered.body);
+    assert_eq!(filtered.body["totalCount"], 1);
+    assert_eq!(
+        filtered.body["data"]["people"][0]["name"]["firstName"],
+        "Amy"
+    );
+
+    let filtered_page = send(
+        &app,
+        authorized(
+            "GET",
+            "/rest/people?limit=1&filter=jobTitle%5Beq%5D%3AEngineer",
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(
+        filtered_page.status,
+        StatusCode::OK,
+        "body: {}",
+        filtered_page.body
+    );
+    assert_eq!(filtered_page.body["totalCount"], 3);
+    assert_eq!(filtered_page.body["pageInfo"]["hasNextPage"], true);
+    let filtered_cursor = filtered_page.body["pageInfo"]["endCursor"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let filtered_next = send(
+        &app,
+        authorized(
+            "GET",
+            &format!(
+                "/rest/people?limit=1&filter=jobTitle%5Beq%5D%3AEngineer&starting_after={filtered_cursor}"
+            ),
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(
+        filtered_next.status,
+        StatusCode::OK,
+        "body: {}",
+        filtered_next.body
+    );
+    assert_eq!(
+        filtered_next.body["data"]["people"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(filtered_next.body["pageInfo"]["hasPreviousPage"], true);
+
+    let either = send(
+        &app,
+        authorized(
+            "GET",
+            "/rest/people?filter=or%28name.firstName%5Beq%5D%3AZoe%2Cname.firstName%5Beq%5D%3AMia%29",
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(either.status, StatusCode::OK, "body: {}", either.body);
+    assert_eq!(either.body["totalCount"], 2);
+
+    let bad_filter = send(
+        &app,
+        authorized("GET", "/rest/people?filter=bogus%5Beq%5D%3Ax", &token, None),
+    )
+    .await;
+    assert_eq!(bad_filter.status, StatusCode::BAD_REQUEST);
+
     let bad_order = send(
         &app,
         authorized("GET", "/rest/people?order_by=-createdAt", &token, None),
@@ -654,6 +740,23 @@ async fn graphql_connection_pagination() {
     assert_eq!(connection["edges"].as_array().unwrap().len(), 1);
     assert_eq!(connection["pageInfo"]["hasNextPage"], false);
     assert_eq!(connection["pageInfo"]["hasPreviousPage"], true);
+
+    let filtered = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "{ people(filter: { or: [ { name: { firstName: { eq: \"Amy\" } } }, { name: { firstName: { eq: \"Mia\" } } } ] }) { totalCount edges { node { name { firstName } } } } }"
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(filtered.status, StatusCode::OK, "body: {}", filtered.body);
+    let connection = &filtered.body["data"]["people"];
+    assert_eq!(connection["totalCount"], 2);
+    assert_eq!(connection["edges"].as_array().unwrap().len(), 2);
 }
 
 #[tokio::test]

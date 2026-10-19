@@ -11,8 +11,8 @@ use serde::de::DeserializeOwned;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
 use squid_core::{
-    Actor, ApiKey, CreatePersonInput, Emails, FullName, Person, Role, UpdatePersonInput, User,
-    Workspace,
+    Actor, ApiKey, CreatePersonInput, DateOp, Emails, FilterExpr, FullName, Person, Role, StringOp,
+    UpdatePersonInput, User, UuidOp, Workspace,
 };
 use uuid::Uuid;
 
@@ -41,6 +41,220 @@ pub struct SessionRow {
     pub user_id: Uuid,
     pub workspace_id: Uuid,
     pub expires_at: DateTime<Utc>,
+}
+
+#[derive(Debug)]
+enum Bind {
+    Uuid(Uuid),
+    Uuids(Vec<Uuid>),
+    Text(String),
+    Texts(Vec<String>),
+    Timestamp(DateTime<Utc>),
+    Timestamps(Vec<DateTime<Utc>>),
+}
+
+struct FilterSql {
+    sql: String,
+    binds: Vec<Bind>,
+}
+
+fn compile_filter(expr: &FilterExpr, start: usize) -> FilterSql {
+    let mut binds = Vec::new();
+    let sql = compile_expr(expr, &mut binds, start);
+    FilterSql { sql, binds }
+}
+
+fn placeholder(binds: &mut Vec<Bind>, value: Bind, start: usize) -> String {
+    binds.push(value);
+    format!("${}", start + binds.len() - 1)
+}
+
+fn compile_expr(expr: &FilterExpr, binds: &mut Vec<Bind>, start: usize) -> String {
+    match expr {
+        FilterExpr::Id(op) => compile_uuid("id", op, binds, start),
+        FilterExpr::CreatedAt(op) => compile_date("created_at", op, binds, start),
+        FilterExpr::UpdatedAt(op) => compile_date("updated_at", op, binds, start),
+        FilterExpr::FirstName(op) => compile_string("name_first", op, binds, start),
+        FilterExpr::LastName(op) => compile_string("name_last", op, binds, start),
+        FilterExpr::PrimaryEmail(op) => compile_string("primary_email", op, binds, start),
+        FilterExpr::JobTitle(op) => compile_string("job_title", op, binds, start),
+        FilterExpr::And(exprs) => compile_join("AND", exprs, "TRUE", binds, start),
+        FilterExpr::Or(exprs) => compile_join("OR", exprs, "FALSE", binds, start),
+        FilterExpr::Not(expr) => format!("NOT ({})", compile_expr(expr, binds, start)),
+    }
+}
+
+fn compile_join(
+    operator: &str,
+    exprs: &[FilterExpr],
+    empty: &str,
+    binds: &mut Vec<Bind>,
+    start: usize,
+) -> String {
+    if exprs.is_empty() {
+        return empty.to_string();
+    }
+    let parts: Vec<String> = exprs
+        .iter()
+        .map(|expr| compile_expr(expr, binds, start))
+        .collect();
+    format!("({})", parts.join(&format!(" {operator} ")))
+}
+
+fn compile_string(column: &str, op: &StringOp, binds: &mut Vec<Bind>, start: usize) -> String {
+    match op {
+        StringOp::Eq(value) => format!(
+            "{column} = {}",
+            placeholder(binds, Bind::Text(value.clone()), start)
+        ),
+        StringOp::Neq(value) => format!(
+            "{column} <> {}",
+            placeholder(binds, Bind::Text(value.clone()), start)
+        ),
+        StringOp::Gt(value) => format!(
+            "{column} > {}",
+            placeholder(binds, Bind::Text(value.clone()), start)
+        ),
+        StringOp::Gte(value) => format!(
+            "{column} >= {}",
+            placeholder(binds, Bind::Text(value.clone()), start)
+        ),
+        StringOp::Lt(value) => format!(
+            "{column} < {}",
+            placeholder(binds, Bind::Text(value.clone()), start)
+        ),
+        StringOp::Lte(value) => format!(
+            "{column} <= {}",
+            placeholder(binds, Bind::Text(value.clone()), start)
+        ),
+        StringOp::In(values) if values.is_empty() => "FALSE".to_string(),
+        StringOp::In(values) => format!(
+            "{column} = ANY({})",
+            placeholder(binds, Bind::Texts(values.clone()), start)
+        ),
+        StringOp::StartsWith(value) => format!(
+            "{column} LIKE {}",
+            placeholder(binds, Bind::Text(format!("{}%", escape_like(value))), start)
+        ),
+        StringOp::EndsWith(value) => format!(
+            "{column} LIKE {}",
+            placeholder(binds, Bind::Text(format!("%{}", escape_like(value))), start)
+        ),
+        StringOp::Like(value) => format!(
+            "{column} LIKE {}",
+            placeholder(binds, Bind::Text(value.clone()), start)
+        ),
+        StringOp::ILike(value) => format!(
+            "{column} ILIKE {}",
+            placeholder(binds, Bind::Text(value.clone()), start)
+        ),
+        StringOp::Regex(value) => format!(
+            "{column} ~ {}",
+            placeholder(binds, Bind::Text(value.clone()), start)
+        ),
+        StringOp::IRegex(value) => format!(
+            "{column} ~* {}",
+            placeholder(binds, Bind::Text(value.clone()), start)
+        ),
+        StringOp::IsNull(true) => format!("{column} IS NULL"),
+        StringOp::IsNull(false) => format!("{column} IS NOT NULL"),
+    }
+}
+
+fn compile_uuid(column: &str, op: &UuidOp, binds: &mut Vec<Bind>, start: usize) -> String {
+    match op {
+        UuidOp::Eq(value) => format!(
+            "{column} = {}",
+            placeholder(binds, Bind::Uuid(*value), start)
+        ),
+        UuidOp::Neq(value) => format!(
+            "{column} <> {}",
+            placeholder(binds, Bind::Uuid(*value), start)
+        ),
+        UuidOp::In(values) if values.is_empty() => "FALSE".to_string(),
+        UuidOp::In(values) => format!(
+            "{column} = ANY({})",
+            placeholder(binds, Bind::Uuids(values.clone()), start)
+        ),
+        UuidOp::IsNull(true) => format!("{column} IS NULL"),
+        UuidOp::IsNull(false) => format!("{column} IS NOT NULL"),
+    }
+}
+
+fn compile_date(column: &str, op: &DateOp, binds: &mut Vec<Bind>, start: usize) -> String {
+    match op {
+        DateOp::Eq(value) => format!(
+            "{column} = {}",
+            placeholder(binds, Bind::Timestamp(*value), start)
+        ),
+        DateOp::Neq(value) => format!(
+            "{column} <> {}",
+            placeholder(binds, Bind::Timestamp(*value), start)
+        ),
+        DateOp::Gt(value) => format!(
+            "{column} > {}",
+            placeholder(binds, Bind::Timestamp(*value), start)
+        ),
+        DateOp::Gte(value) => format!(
+            "{column} >= {}",
+            placeholder(binds, Bind::Timestamp(*value), start)
+        ),
+        DateOp::Lt(value) => format!(
+            "{column} < {}",
+            placeholder(binds, Bind::Timestamp(*value), start)
+        ),
+        DateOp::Lte(value) => format!(
+            "{column} <= {}",
+            placeholder(binds, Bind::Timestamp(*value), start)
+        ),
+        DateOp::In(values) if values.is_empty() => "FALSE".to_string(),
+        DateOp::In(values) => format!(
+            "{column} = ANY({})",
+            placeholder(binds, Bind::Timestamps(values.clone()), start)
+        ),
+        DateOp::IsNull(true) => format!("{column} IS NULL"),
+        DateOp::IsNull(false) => format!("{column} IS NOT NULL"),
+    }
+}
+
+fn escape_like(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+}
+
+type PgQuery<'a> = sqlx::query::Query<'a, sqlx::Postgres, sqlx::postgres::PgArguments>;
+
+fn bind_filter<'a>(mut query: PgQuery<'a>, binds: &[Bind]) -> PgQuery<'a> {
+    for value in binds {
+        query = match value {
+            Bind::Uuid(value) => query.bind(*value),
+            Bind::Uuids(values) => query.bind(values.clone()),
+            Bind::Text(value) => query.bind(value.clone()),
+            Bind::Texts(values) => query.bind(values.clone()),
+            Bind::Timestamp(value) => query.bind(*value),
+            Bind::Timestamps(values) => query.bind(values.clone()),
+        };
+    }
+    query
+}
+
+type PgScalarQuery<'a> =
+    sqlx::query::QueryScalar<'a, sqlx::Postgres, i64, sqlx::postgres::PgArguments>;
+
+fn bind_filter_scalar<'a>(mut query: PgScalarQuery<'a>, binds: &[Bind]) -> PgScalarQuery<'a> {
+    for value in binds {
+        query = match value {
+            Bind::Uuid(value) => query.bind(*value),
+            Bind::Uuids(values) => query.bind(values.clone()),
+            Bind::Text(value) => query.bind(value.clone()),
+            Bind::Texts(values) => query.bind(values.clone()),
+            Bind::Timestamp(value) => query.bind(*value),
+            Bind::Timestamps(values) => query.bind(values.clone()),
+        };
+    }
+    query
 }
 
 const API_KEY_SELECT: &str = "id, name, role, expires_at, revoked_at, created_at, updated_at";
@@ -519,6 +733,7 @@ impl Db {
     // ----- person --------------------------------------------------------
 
     /// One page of people plus connection metadata.
+    #[allow(clippy::too_many_arguments)]
     pub async fn list_persons_page(
         &self,
         workspace_id: Uuid,
@@ -527,11 +742,12 @@ impl Db {
         starting_after: Option<Uuid>,
         ending_before: Option<Uuid>,
         order: &[OrderTerm],
+        filter: Option<&FilterExpr>,
     ) -> anyhow::Result<PersonPage> {
         let schema = Self::workspace_schema_name(workspace_id);
         assert_valid_schema(&schema)?;
 
-        let total = self.count_persons(workspace_id).await?;
+        let total = self.count_persons_filtered(workspace_id, filter).await?;
         let limit = limit.clamp(1, 1000);
         let fetch = limit + 1;
 
@@ -539,39 +755,58 @@ impl Db {
         let has_previous_page;
         let mut rows = if let Some(cursor_id) = starting_after {
             let cursor_created_at = self.person_created_at(&schema, cursor_id).await?;
+            let filter = filter.map(|filter| compile_filter(filter, 3));
+            let filter_sql = filter
+                .as_ref()
+                .map(|filter| format!(" AND ({})", filter.sql))
+                .unwrap_or_default();
+            let limit_index = 3 + filter.as_ref().map_or(0, |filter| filter.binds.len());
             has_previous_page = true;
-            let rows = sqlx::query(&format!(
+            let sql = format!(
                 "SELECT {PERSON_SELECT} FROM {schema}.person
-                 WHERE deleted_at IS NULL AND (created_at, id) > ($1, $2)
+                 WHERE deleted_at IS NULL AND (created_at, id) > ($1, $2){filter_sql}
                  ORDER BY created_at ASC, id ASC
-                 LIMIT $3"
-            ))
-            .bind(cursor_created_at)
-            .bind(cursor_id)
-            .bind(fetch)
-            .fetch_all(&self.pool)
-            .await?;
+                 LIMIT ${limit_index}"
+            );
+            let mut query = sqlx::query(&sql).bind(cursor_created_at).bind(cursor_id);
+            if let Some(filter) = &filter {
+                query = bind_filter(query, &filter.binds);
+            }
+            let rows = query.bind(fetch).fetch_all(&self.pool).await?;
             has_next_page = rows.len() as i64 > limit;
             rows
         } else if let Some(cursor_id) = ending_before {
             let cursor_created_at = self.person_created_at(&schema, cursor_id).await?;
-            let mut rows = sqlx::query(&format!(
+            let filter = filter.map(|filter| compile_filter(filter, 3));
+            let filter_sql = filter
+                .as_ref()
+                .map(|filter| format!(" AND ({})", filter.sql))
+                .unwrap_or_default();
+            let limit_index = 3 + filter.as_ref().map_or(0, |filter| filter.binds.len());
+            let sql = format!(
                 "SELECT {PERSON_SELECT} FROM {schema}.person
-                 WHERE deleted_at IS NULL AND (created_at, id) < ($1, $2)
+                 WHERE deleted_at IS NULL AND (created_at, id) < ($1, $2){filter_sql}
                  ORDER BY created_at DESC, id DESC
-                 LIMIT $3"
-            ))
-            .bind(cursor_created_at)
-            .bind(cursor_id)
-            .bind(fetch)
-            .fetch_all(&self.pool)
-            .await?;
+                 LIMIT ${limit_index}"
+            );
+            let mut query = sqlx::query(&sql).bind(cursor_created_at).bind(cursor_id);
+            if let Some(filter) = &filter {
+                query = bind_filter(query, &filter.binds);
+            }
+            let mut rows = query.bind(fetch).fetch_all(&self.pool).await?;
             has_previous_page = rows.len() as i64 > limit;
             has_next_page = true;
             rows.truncate(limit as usize);
             rows.reverse();
             rows
         } else {
+            let filter = filter.map(|filter| compile_filter(filter, 1));
+            let filter_sql = filter
+                .as_ref()
+                .map(|filter| format!(" AND ({})", filter.sql))
+                .unwrap_or_default();
+            let limit_index = 1 + filter.as_ref().map_or(0, |filter| filter.binds.len());
+            let offset_index = limit_index + 1;
             let order_sql = if order.is_empty() {
                 "created_at ASC NULLS FIRST, id ASC".to_string()
             } else {
@@ -584,16 +819,17 @@ impl Db {
                         .join(", ")
                 )
             };
-            let rows = sqlx::query(&format!(
+            let sql = format!(
                 "SELECT {PERSON_SELECT} FROM {schema}.person
-                 WHERE deleted_at IS NULL
+                 WHERE deleted_at IS NULL{filter_sql}
                  ORDER BY {order_sql}
-                 LIMIT $1 OFFSET $2"
-            ))
-            .bind(limit)
-            .bind(offset)
-            .fetch_all(&self.pool)
-            .await?;
+                 LIMIT ${limit_index} OFFSET ${offset_index}"
+            );
+            let mut query = sqlx::query(&sql);
+            if let Some(filter) = &filter {
+                query = bind_filter(query, &filter.binds);
+            }
+            let rows = query.bind(limit).bind(offset).fetch_all(&self.pool).await?;
             // Upstream leaves hasPreviousPage false for pure offset paging.
             has_previous_page = false;
             has_next_page = offset + (rows.len() as i64) < total;
@@ -626,13 +862,28 @@ impl Db {
     }
 
     pub async fn count_persons(&self, workspace_id: Uuid) -> anyhow::Result<i64> {
+        self.count_persons_filtered(workspace_id, None).await
+    }
+
+    pub async fn count_persons_filtered(
+        &self,
+        workspace_id: Uuid,
+        filter: Option<&FilterExpr>,
+    ) -> anyhow::Result<i64> {
         let schema = Self::workspace_schema_name(workspace_id);
         assert_valid_schema(&schema)?;
-        let count: i64 = sqlx::query_scalar(&format!(
-            "SELECT count(*) FROM {schema}.person WHERE deleted_at IS NULL"
-        ))
-        .fetch_one(&self.pool)
-        .await?;
+        let filter = filter.map(|filter| compile_filter(filter, 1));
+        let filter_sql = filter
+            .as_ref()
+            .map(|filter| format!(" AND ({})", filter.sql))
+            .unwrap_or_default();
+        let sql =
+            format!("SELECT count(*) FROM {schema}.person WHERE deleted_at IS NULL{filter_sql}");
+        let mut query = sqlx::query_scalar::<_, i64>(&sql);
+        if let Some(filter) = &filter {
+            query = bind_filter_scalar(query, &filter.binds);
+        }
+        let count = query.fetch_one(&self.pool).await?;
         Ok(count)
     }
 

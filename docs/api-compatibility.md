@@ -205,6 +205,16 @@ REST record fields observed on create/list:
 - REST cursors are base64 JSON (`{"id": "<uuid>"}` in the fixtures) and must
   round-trip. `hasPreviousPage` stays `false` for pure `offset` paging even when
   `offset > 0`.
+- REST filters use the documented mini-language:
+  `?filter=createdAt[gte]:"2024-01-01",name.firstName[startsWith]:A`,
+  `or(...)`, `not(...)`, quoted values, and `(a,b)` lists for `in`.
+  Implemented fields: `id`, `createdAt`, `updatedAt`, `name.firstName`,
+  `name.lastName`, `emails.primaryEmail`, `jobTitle`; comparators: `eq`, `neq`,
+  `contains`, `startsWith`, `endsWith`, `like`, `ilike`, `gt`, `gte`, `lt`,
+  `lte`, `in`, `is` (`NULL`/`NOT_NULL`). Unknown fields/comparators are `400`.
+- GraphQL filters accept the same structured operators under
+  `PersonFilterInput` (`and`/`or`/`not`, `id`, `name`, `emails`, `jobTitle`,
+  dates). Filtered `totalCount` matches the filtered set.
 
 ## 7. Tenant isolation
 
@@ -247,8 +257,8 @@ Known remaining divergences (do not claim parity):
 | Data-API auth | API keys only | API keys **and** access token/cookie | tighten before release |
 | Workspace bootstrap | `PENDING_CREATION` + `activateWorkspace` | atomic signup + immediate schema | document; add lifecycle |
 | Workspace prefill | sample people/companies on activation | none (new workspace has 0 people) | implement prefill |
-| GraphQL filter grammar | full `and`/`or`/`not`, composite filters | `id.eq` only; other filters return `BAD_USER_INPUT` | expand filter compiler |
-| REST sort errors | `FIELD_NOT_FOUND` for unknown fields | `400 BadRequestException` text | align error code |
+| Filter coverage | all person fields/relations | scalar person fields (`id`, name, email, jobTitle, timestamps); relation filters absent | expand as metadata lands |
+| REST sort/filter errors | `FIELD_NOT_FOUND` for unknown fields | `400 BadRequestException` text | align error code |
 | GraphQL nullability | `name`/`emails`/`linkedinLink`/`phones`/`avatarUrl` nullable | non-null | align schema |
 | GraphQL scalars | `Position`, `TSVector`, `ConnectionCursor` | `Float`, `String`, `Cursor` | add scalar types |
 | `createdBy`/`updatedBy` | actor name = workspace member | `name: "API"` | populate from principal |

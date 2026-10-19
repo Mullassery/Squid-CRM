@@ -9,7 +9,7 @@
 - [x] GraphQL login flow + person query/mutations.
 - [x] REST people list/get/create/delete with upstream envelope + error contract.
 - [x] Tenant isolation enforced and tested against real PostgreSQL.
-- [x] 14 unit + 11 integration tests passing; clippy clean; live smoke test.
+- [x] 15 unit + 11 integration tests passing; clippy clean; live smoke test.
 - [x] Dockerfile, docker-compose, CI workflow, Makefile, smoke script.
 
 ## Phase 2 (contracts)
@@ -34,7 +34,7 @@
 - [x] `order_by=field[DescNullsLast],...` grammar (REST + GraphQL); `-createdAt`
       rejected.
 - [x] Serve auth mutations on `/metadata` and add API-key lifecycle for the data API.
-- [ ] Full `filter` grammar (`and`/`or`/`not`, composite fields).
+- [x] Person filter grammar (`and`/`or`/`not`, scalar/composite fields) for REST and GraphQL.
 - [ ] Remaining pagination (`first`/`last`/`before`/`after`), `fields`, `depth`,
       `viewId` with upstream semantics.
 - [ ] Tighten the data API to API keys only (access tokens work today).
@@ -51,7 +51,7 @@
 ## Phase 5 (module migration)
 - [ ] Metadata engine (object/field/view/role) and dynamic schema generation.
 - [ ] Companies, opportunities, tasks, notes.
-- [ ] Views/filters/sorts/groups parity.
+- [ ] Views/filters/sorts/groups parity (relation filters and view semantics).
 - [ ] Search, files, export/import.
 - [ ] Jobs/cron, webhooks, workflows, integrations.
 

@@ -15,7 +15,8 @@ use base64::Engine;
 use serde::Deserialize;
 use serde_json::json;
 use squid_core::{
-    AppError, AppResult, CreatePersonInput, FindManyResponse, PageInfo, Person, UpdatePersonInput,
+    AppError, AppResult, CreatePersonInput, DateOp, FilterExpr, FindManyResponse, PageInfo, Person,
+    StringOp, UpdatePersonInput, UuidOp,
 };
 use squid_db::{OrderTerm, PersonColumn};
 use uuid::Uuid;
@@ -29,6 +30,7 @@ pub struct ListPeopleParams {
     pub starting_after: Option<String>,
     pub ending_before: Option<String>,
     pub order_by: Option<String>,
+    pub filter: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -135,6 +137,7 @@ pub async fn list_people(
         .map(decode_cursor)
         .transpose()?;
     let order = parse_order_by(params.order_by.as_deref())?;
+    let filter = params.filter.as_deref().map(parse_filter).transpose()?;
 
     let page = state
         .db
@@ -145,6 +148,7 @@ pub async fn list_people(
             starting_after,
             ending_before,
             &order,
+            filter.as_ref(),
         )
         .await
         .map_err(AppError::Internal)?;
@@ -382,6 +386,337 @@ fn parse_order_by(raw: Option<&str>) -> AppResult<Vec<OrderTerm>> {
     Ok(terms)
 }
 
+/// Parse the REST filter mini-language, e.g.
+/// `createdAt[gte]:"2024-01-01",name.firstName[startsWith]:A`.
+fn parse_filter(raw: &str) -> AppResult<FilterExpr> {
+    let mut parser = FilterParser::new(raw);
+    let expr = parser.parse_list(')')?;
+    parser.skip_whitespace();
+    if !parser.at_end() {
+        return Err(AppError::BadRequest(format!(
+            "Invalid filter near '{}'",
+            parser.remaining()
+        )));
+    }
+    Ok(expr)
+}
+
+struct FilterParser {
+    chars: Vec<char>,
+    pos: usize,
+}
+
+impl FilterParser {
+    fn new(input: &str) -> Self {
+        Self {
+            chars: input.chars().collect(),
+            pos: 0,
+        }
+    }
+
+    fn at_end(&self) -> bool {
+        self.pos >= self.chars.len()
+    }
+
+    fn peek(&self) -> Option<char> {
+        self.chars.get(self.pos).copied()
+    }
+
+    fn bump(&mut self) -> Option<char> {
+        let value = self.peek();
+        if value.is_some() {
+            self.pos += 1;
+        }
+        value
+    }
+
+    fn skip_whitespace(&mut self) {
+        while self.peek().is_some_and(char::is_whitespace) {
+            self.pos += 1;
+        }
+    }
+
+    fn remaining(&self) -> String {
+        self.chars[self.pos..].iter().collect()
+    }
+
+    fn expect(&mut self, expected: char) -> AppResult<()> {
+        self.skip_whitespace();
+        if self.bump() == Some(expected) {
+            Ok(())
+        } else {
+            Err(AppError::BadRequest(format!(
+                "Expected '{expected}' in filter near '{}'",
+                self.remaining()
+            )))
+        }
+    }
+
+    fn read_ident(&mut self) -> String {
+        self.skip_whitespace();
+        let start = self.pos;
+        while self
+            .peek()
+            .is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '.')
+        {
+            self.pos += 1;
+        }
+        self.chars[start..self.pos].iter().collect()
+    }
+
+    fn parse_list(&mut self, terminator: char) -> AppResult<FilterExpr> {
+        let mut items = vec![self.parse_expr()?];
+        loop {
+            self.skip_whitespace();
+            if self.peek() == Some(',') {
+                self.pos += 1;
+                items.push(self.parse_expr()?);
+            } else if self.peek() == Some(terminator) || self.at_end() {
+                break;
+            } else {
+                return Err(AppError::BadRequest(format!(
+                    "Unexpected token in filter near '{}'",
+                    self.remaining()
+                )));
+            }
+        }
+        Ok(if items.len() == 1 {
+            items.pop().unwrap()
+        } else {
+            FilterExpr::And(items)
+        })
+    }
+
+    fn parse_expr(&mut self) -> AppResult<FilterExpr> {
+        self.skip_whitespace();
+        let ident = self.read_ident();
+        if ident == "or" && self.peek() == Some('(') {
+            self.pos += 1;
+            let mut items = Vec::new();
+            loop {
+                items.push(self.parse_expr()?);
+                self.skip_whitespace();
+                match self.bump() {
+                    Some(',') => continue,
+                    Some(')') => break,
+                    _ => {
+                        return Err(AppError::BadRequest(
+                            "Unbalanced or() in filter".to_string(),
+                        ))
+                    }
+                }
+            }
+            return Ok(FilterExpr::Or(items));
+        }
+        if ident == "not" && self.peek() == Some('(') {
+            self.pos += 1;
+            let expr = self.parse_expr()?;
+            self.expect(')')?;
+            return Ok(FilterExpr::Not(Box::new(expr)));
+        }
+        if ident.is_empty() {
+            return Err(AppError::BadRequest(format!(
+                "Expected a field name in filter near '{}'",
+                self.remaining()
+            )));
+        }
+
+        self.expect('[')?;
+        let start = self.pos;
+        while self.peek().is_some_and(|c| c != ']') {
+            self.pos += 1;
+        }
+        let operator: String = self.chars[start..self.pos].iter().collect();
+        self.expect(']')?;
+        self.expect(':')?;
+        let values = self.read_values()?;
+
+        build_filter_leaf(&ident, operator.trim(), &values)
+    }
+
+    fn read_values(&mut self) -> AppResult<Vec<String>> {
+        self.skip_whitespace();
+        let mut values = Vec::new();
+        if self.peek() == Some('(') || self.peek() == Some('[') {
+            let close = if self.bump() == Some('(') { ')' } else { ']' };
+            loop {
+                values.push(self.read_value()?);
+                self.skip_whitespace();
+                match self.bump() {
+                    Some(',') => continue,
+                    Some(c) if c == close => break,
+                    _ => {
+                        return Err(AppError::BadRequest(
+                            "Unbalanced value list in filter".to_string(),
+                        ))
+                    }
+                }
+            }
+        } else {
+            values.push(self.read_value()?);
+        }
+        Ok(values)
+    }
+
+    fn read_value(&mut self) -> AppResult<String> {
+        self.skip_whitespace();
+        match self.bump() {
+            Some('"') | Some('\'') => {
+                let quote = self.chars[self.pos - 1];
+                let start = self.pos;
+                while self.peek().is_some_and(|c| c != quote) {
+                    self.pos += 1;
+                }
+                let value: String = self.chars[start..self.pos].iter().collect();
+                self.expect(quote)?;
+                Ok(value)
+            }
+            Some(first) => {
+                let mut value = String::from(first);
+                while self
+                    .peek()
+                    .is_some_and(|c| c != ',' && c != ')' && c != ']')
+                {
+                    value.push(self.chars[self.pos]);
+                    self.pos += 1;
+                }
+                Ok(value.trim().to_string())
+            }
+            None => Err(AppError::BadRequest("Missing filter value".to_string())),
+        }
+    }
+}
+
+fn build_filter_leaf(field: &str, operator: &str, values: &[String]) -> AppResult<FilterExpr> {
+    let value = values.first().cloned().unwrap_or_default();
+    let is_null = match operator {
+        "is" => Some(match value.to_ascii_uppercase().as_str() {
+            "NULL" => true,
+            "NOT_NULL" => false,
+            _ => {
+                return Err(AppError::BadRequest(format!(
+                    "Invalid filter value '{value}' for is (expected NULL or NOT_NULL)"
+                )))
+            }
+        }),
+        _ => None,
+    };
+
+    macro_rules! string_op {
+        ($variant:ident, $expr:ident) => {
+            FilterExpr::$expr(StringOp::$variant(value.clone()))
+        };
+    }
+
+    match (field, operator) {
+        ("id", "eq") => Ok(FilterExpr::Id(UuidOp::Eq(parse_uuid(&value)?))),
+        ("id", "neq") => Ok(FilterExpr::Id(UuidOp::Neq(parse_uuid(&value)?))),
+        ("id", "in") => Ok(FilterExpr::Id(UuidOp::In(
+            values
+                .iter()
+                .map(|value| parse_uuid(value))
+                .collect::<AppResult<_>>()?,
+        ))),
+        ("id", "is") => Ok(FilterExpr::Id(UuidOp::IsNull(
+            is_null.expect("is operator"),
+        ))),
+        ("createdAt", op) => Ok(FilterExpr::CreatedAt(build_date_op(op, values, is_null)?)),
+        ("updatedAt", op) => Ok(FilterExpr::UpdatedAt(build_date_op(op, values, is_null)?)),
+        ("name.firstName", "eq") => Ok(string_op!(Eq, FirstName)),
+        ("name.firstName", "neq") => Ok(string_op!(Neq, FirstName)),
+        ("name.firstName", "contains") => {
+            Ok(FilterExpr::FirstName(StringOp::Like(format!("%{value}%"))))
+        }
+        ("name.firstName", "startsWith") => Ok(string_op!(StartsWith, FirstName)),
+        ("name.firstName", "endsWith") => Ok(string_op!(EndsWith, FirstName)),
+        ("name.firstName", "like") => Ok(string_op!(Like, FirstName)),
+        ("name.firstName", "ilike") => Ok(string_op!(ILike, FirstName)),
+        ("name.firstName", "is") => Ok(FilterExpr::FirstName(StringOp::IsNull(
+            is_null.expect("is operator"),
+        ))),
+        ("name.lastName", "eq") => Ok(string_op!(Eq, LastName)),
+        ("name.lastName", "neq") => Ok(string_op!(Neq, LastName)),
+        ("name.lastName", "contains") => {
+            Ok(FilterExpr::LastName(StringOp::Like(format!("%{value}%"))))
+        }
+        ("name.lastName", "startsWith") => Ok(string_op!(StartsWith, LastName)),
+        ("name.lastName", "endsWith") => Ok(string_op!(EndsWith, LastName)),
+        ("name.lastName", "like") => Ok(string_op!(Like, LastName)),
+        ("name.lastName", "ilike") => Ok(string_op!(ILike, LastName)),
+        ("name.lastName", "is") => Ok(FilterExpr::LastName(StringOp::IsNull(
+            is_null.expect("is operator"),
+        ))),
+        ("emails.primaryEmail", "eq") => Ok(string_op!(Eq, PrimaryEmail)),
+        ("emails.primaryEmail", "neq") => Ok(string_op!(Neq, PrimaryEmail)),
+        ("emails.primaryEmail", "contains") => Ok(FilterExpr::PrimaryEmail(StringOp::Like(
+            format!("%{value}%"),
+        ))),
+        ("emails.primaryEmail", "startsWith") => Ok(string_op!(StartsWith, PrimaryEmail)),
+        ("emails.primaryEmail", "endsWith") => Ok(string_op!(EndsWith, PrimaryEmail)),
+        ("emails.primaryEmail", "like") => Ok(string_op!(Like, PrimaryEmail)),
+        ("emails.primaryEmail", "ilike") => Ok(string_op!(ILike, PrimaryEmail)),
+        ("emails.primaryEmail", "is") => Ok(FilterExpr::PrimaryEmail(StringOp::IsNull(
+            is_null.expect("is operator"),
+        ))),
+        ("jobTitle", "eq") => Ok(string_op!(Eq, JobTitle)),
+        ("jobTitle", "neq") => Ok(string_op!(Neq, JobTitle)),
+        ("jobTitle", "contains") => Ok(FilterExpr::JobTitle(StringOp::Like(format!("%{value}%")))),
+        ("jobTitle", "startsWith") => Ok(string_op!(StartsWith, JobTitle)),
+        ("jobTitle", "endsWith") => Ok(string_op!(EndsWith, JobTitle)),
+        ("jobTitle", "like") => Ok(string_op!(Like, JobTitle)),
+        ("jobTitle", "ilike") => Ok(string_op!(ILike, JobTitle)),
+        ("jobTitle", "is") => Ok(FilterExpr::JobTitle(StringOp::IsNull(
+            is_null.expect("is operator"),
+        ))),
+        _ => Err(AppError::BadRequest(format!(
+            "Unsupported filter: {field}[{operator}]"
+        ))),
+    }
+}
+
+fn build_date_op(operator: &str, values: &[String], is_null: Option<bool>) -> AppResult<DateOp> {
+    let value = values.first().map(String::as_str).unwrap_or_default();
+    match operator {
+        "eq" => Ok(DateOp::Eq(parse_datetime(value)?)),
+        "neq" => Ok(DateOp::Neq(parse_datetime(value)?)),
+        "gt" => Ok(DateOp::Gt(parse_datetime(value)?)),
+        "gte" => Ok(DateOp::Gte(parse_datetime(value)?)),
+        "lt" => Ok(DateOp::Lt(parse_datetime(value)?)),
+        "lte" => Ok(DateOp::Lte(parse_datetime(value)?)),
+        "in" => Ok(DateOp::In(
+            values
+                .iter()
+                .map(|value| parse_datetime(value))
+                .collect::<AppResult<_>>()?,
+        )),
+        "is" => Ok(DateOp::IsNull(is_null.expect("is operator"))),
+        _ => Err(AppError::BadRequest(format!(
+            "Unsupported date comparator '{operator}'"
+        ))),
+    }
+}
+
+fn parse_uuid(raw: &str) -> AppResult<Uuid> {
+    Uuid::parse_str(raw.trim()).map_err(|_| AppError::BadRequest(format!("Invalid UUID '{raw}'")))
+}
+
+fn parse_datetime(raw: &str) -> AppResult<chrono::DateTime<chrono::Utc>> {
+    if let Ok(value) = chrono::DateTime::parse_from_rfc3339(raw) {
+        return Ok(value.with_timezone(&chrono::Utc));
+    }
+    for format in ["%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"] {
+        if let Ok(value) = chrono::NaiveDateTime::parse_from_str(raw, format) {
+            return Ok(value.and_utc());
+        }
+        if let Ok(value) = chrono::NaiveDate::parse_from_str(raw, format) {
+            if let Some(value) = value.and_hms_opt(0, 0, 0) {
+                return Ok(value.and_utc());
+            }
+        }
+    }
+    Err(AppError::BadRequest(format!("Invalid date value '{raw}'")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -400,6 +735,33 @@ mod tests {
     #[test]
     fn rejects_invalid_cursor() {
         assert!(decode_cursor("not-base64").is_err());
+    }
+
+    #[test]
+    fn parses_rest_filter_language() {
+        assert_eq!(
+            parse_filter("jobTitle[eq]:Engineer").unwrap(),
+            FilterExpr::JobTitle(StringOp::Eq("Engineer".to_string()))
+        );
+        assert_eq!(
+            parse_filter("createdAt[gte]:\"2024-01-01\"").unwrap(),
+            FilterExpr::CreatedAt(DateOp::Gte(
+                chrono::DateTime::parse_from_rfc3339("2024-01-01T00:00:00Z")
+                    .unwrap()
+                    .with_timezone(&chrono::Utc)
+            ))
+        );
+        assert!(matches!(
+            parse_filter("or(name.firstName[eq]:Ada,name.firstName[eq]:Alan)").unwrap(),
+            FilterExpr::Or(items) if items.len() == 2
+        ));
+        assert!(matches!(
+            parse_filter("not(id[is]:NULL)").unwrap(),
+            FilterExpr::Not(_)
+        ));
+        assert!(parse_filter("jobTitle[is]:MAYBE").is_err());
+        assert!(parse_filter("bogus[eq]:x").is_err());
+        assert!(parse_filter("name.firstName[eq]").is_err());
     }
 
     #[test]

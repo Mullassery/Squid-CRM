@@ -248,6 +248,60 @@ pub struct UpdatePersonInput {
     pub company_id: Option<Uuid>,
 }
 
+/// Backend-neutral filter AST. REST/GraphQL parsers produce this; the DB layer
+/// compiles it to parameterised SQL (column names never come from input).
+#[derive(Debug, Clone, PartialEq)]
+pub enum FilterExpr {
+    Id(UuidOp),
+    CreatedAt(DateOp),
+    UpdatedAt(DateOp),
+    FirstName(StringOp),
+    LastName(StringOp),
+    PrimaryEmail(StringOp),
+    JobTitle(StringOp),
+    And(Vec<FilterExpr>),
+    Or(Vec<FilterExpr>),
+    Not(Box<FilterExpr>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum UuidOp {
+    Eq(Uuid),
+    Neq(Uuid),
+    In(Vec<Uuid>),
+    IsNull(bool),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum StringOp {
+    Eq(String),
+    Neq(String),
+    Gt(String),
+    Gte(String),
+    Lt(String),
+    Lte(String),
+    In(Vec<String>),
+    StartsWith(String),
+    EndsWith(String),
+    Like(String),
+    ILike(String),
+    Regex(String),
+    IRegex(String),
+    IsNull(bool),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum DateOp {
+    Eq(chrono::DateTime<chrono::Utc>),
+    Neq(chrono::DateTime<chrono::Utc>),
+    Gt(chrono::DateTime<chrono::Utc>),
+    Gte(chrono::DateTime<chrono::Utc>),
+    Lt(chrono::DateTime<chrono::Utc>),
+    Lte(chrono::DateTime<chrono::Utc>),
+    In(Vec<chrono::DateTime<chrono::Utc>>),
+    IsNull(bool),
+}
+
 /// REST find-many envelope: `{ data: { <plural>: [...] }, totalCount, pageInfo }`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FindManyResponse<T> {

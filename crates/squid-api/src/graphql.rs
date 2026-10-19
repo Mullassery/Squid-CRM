@@ -15,8 +15,8 @@ use chrono::{DateTime, Utc};
 use squid_auth::AuthToken;
 use squid_auth::{hash_password, hash_token, verify_password, AuthContext};
 use squid_core::{
-    ApiKey, AppError, AppResult, CreatePersonInput, GqlJson, PageInfo, Person, UpdatePersonInput,
-    User, Workspace,
+    ApiKey, AppError, AppResult, CreatePersonInput, DateOp, FilterExpr, GqlJson, PageInfo, Person,
+    StringOp, UpdatePersonInput, User, UuidOp, Workspace,
 };
 use squid_db::{OrderTerm, PersonColumn};
 
@@ -229,36 +229,233 @@ impl From<PersonUpdateInputGql> for UpdatePersonInput {
     }
 }
 
-#[derive(Debug, InputObject)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, async_graphql::Enum)]
+pub enum FilterIs {
+    #[graphql(name = "NULL")]
+    Null,
+    #[graphql(name = "NOT_NULL")]
+    NotNull,
+}
+
+#[derive(Debug, Default, InputObject)]
 pub struct UuidFilter {
     pub eq: Option<uuid::Uuid>,
+    pub neq: Option<uuid::Uuid>,
+    pub r#in: Option<Vec<uuid::Uuid>>,
+    pub is: Option<FilterIs>,
 }
 
-#[derive(Debug, InputObject)]
+#[derive(Debug, Default, InputObject)]
 pub struct StringFilter {
     pub eq: Option<String>,
+    pub neq: Option<String>,
+    pub gt: Option<String>,
+    pub gte: Option<String>,
+    pub lt: Option<String>,
+    pub lte: Option<String>,
+    pub r#in: Option<Vec<String>>,
+    pub starts_with: Option<String>,
+    pub ends_with: Option<String>,
+    pub like: Option<String>,
+    pub ilike: Option<String>,
+    pub regex: Option<String>,
+    pub iregex: Option<String>,
+    pub is: Option<FilterIs>,
 }
 
-#[derive(Debug, InputObject)]
+#[derive(Debug, Default, InputObject)]
+pub struct DateTimeFilter {
+    pub eq: Option<chrono::DateTime<chrono::Utc>>,
+    pub neq: Option<chrono::DateTime<chrono::Utc>>,
+    pub gt: Option<chrono::DateTime<chrono::Utc>>,
+    pub gte: Option<chrono::DateTime<chrono::Utc>>,
+    pub lt: Option<chrono::DateTime<chrono::Utc>>,
+    pub lte: Option<chrono::DateTime<chrono::Utc>>,
+    pub r#in: Option<Vec<chrono::DateTime<chrono::Utc>>>,
+    pub is: Option<FilterIs>,
+}
+
+#[derive(Debug, Default, InputObject)]
+pub struct FullNameFilterInput {
+    pub first_name: Option<StringFilter>,
+    pub last_name: Option<StringFilter>,
+}
+
+#[derive(Debug, Default, InputObject)]
+pub struct EmailsFilterInput {
+    pub primary_email: Option<StringFilter>,
+}
+
+#[derive(Debug, Default, InputObject)]
 pub struct PersonFilterInput {
     pub id: Option<UuidFilter>,
+    pub created_at: Option<DateTimeFilter>,
+    pub updated_at: Option<DateTimeFilter>,
+    pub name: Option<FullNameFilterInput>,
+    pub emails: Option<EmailsFilterInput>,
     pub job_title: Option<StringFilter>,
     pub and: Option<Vec<PersonFilterInput>>,
     pub or: Option<Vec<PersonFilterInput>>,
     pub not: Option<Box<PersonFilterInput>>,
 }
 
-impl PersonFilterInput {
-    fn id_eq(&self) -> Option<uuid::Uuid> {
-        self.id.as_ref().and_then(|id| id.eq)
-    }
+fn is_null(is: FilterIs) -> bool {
+    matches!(is, FilterIs::Null)
+}
 
-    fn is_empty(&self) -> bool {
-        self.id_eq().is_none()
-            && self.job_title.is_none()
-            && self.and.as_ref().is_none_or(Vec::is_empty)
-            && self.or.as_ref().is_none_or(Vec::is_empty)
-            && self.not.is_none()
+fn string_ops(filter: &StringFilter) -> Vec<StringOp> {
+    let mut ops = Vec::new();
+    if let Some(value) = &filter.eq {
+        ops.push(StringOp::Eq(value.clone()));
+    }
+    if let Some(value) = &filter.neq {
+        ops.push(StringOp::Neq(value.clone()));
+    }
+    if let Some(value) = &filter.gt {
+        ops.push(StringOp::Gt(value.clone()));
+    }
+    if let Some(value) = &filter.gte {
+        ops.push(StringOp::Gte(value.clone()));
+    }
+    if let Some(value) = &filter.lt {
+        ops.push(StringOp::Lt(value.clone()));
+    }
+    if let Some(value) = &filter.lte {
+        ops.push(StringOp::Lte(value.clone()));
+    }
+    if let Some(values) = &filter.r#in {
+        ops.push(StringOp::In(values.clone()));
+    }
+    if let Some(value) = &filter.starts_with {
+        ops.push(StringOp::StartsWith(value.clone()));
+    }
+    if let Some(value) = &filter.ends_with {
+        ops.push(StringOp::EndsWith(value.clone()));
+    }
+    if let Some(value) = &filter.like {
+        ops.push(StringOp::Like(value.clone()));
+    }
+    if let Some(value) = &filter.ilike {
+        ops.push(StringOp::ILike(value.clone()));
+    }
+    if let Some(value) = &filter.regex {
+        ops.push(StringOp::Regex(value.clone()));
+    }
+    if let Some(value) = &filter.iregex {
+        ops.push(StringOp::IRegex(value.clone()));
+    }
+    if let Some(is) = filter.is {
+        ops.push(StringOp::IsNull(is_null(is)));
+    }
+    ops
+}
+
+fn uuid_ops(filter: &UuidFilter) -> Vec<UuidOp> {
+    let mut ops = Vec::new();
+    if let Some(value) = filter.eq {
+        ops.push(UuidOp::Eq(value));
+    }
+    if let Some(value) = filter.neq {
+        ops.push(UuidOp::Neq(value));
+    }
+    if let Some(values) = &filter.r#in {
+        ops.push(UuidOp::In(values.clone()));
+    }
+    if let Some(is) = filter.is {
+        ops.push(UuidOp::IsNull(is_null(is)));
+    }
+    ops
+}
+
+fn date_ops(filter: &DateTimeFilter) -> Vec<DateOp> {
+    let mut ops = Vec::new();
+    if let Some(value) = filter.eq {
+        ops.push(DateOp::Eq(value));
+    }
+    if let Some(value) = filter.neq {
+        ops.push(DateOp::Neq(value));
+    }
+    if let Some(value) = filter.gt {
+        ops.push(DateOp::Gt(value));
+    }
+    if let Some(value) = filter.gte {
+        ops.push(DateOp::Gte(value));
+    }
+    if let Some(value) = filter.lt {
+        ops.push(DateOp::Lt(value));
+    }
+    if let Some(value) = filter.lte {
+        ops.push(DateOp::Lte(value));
+    }
+    if let Some(values) = &filter.r#in {
+        ops.push(DateOp::In(values.clone()));
+    }
+    if let Some(is) = filter.is {
+        ops.push(DateOp::IsNull(is_null(is)));
+    }
+    ops
+}
+
+impl PersonFilterInput {
+    fn to_expr(&self) -> Option<FilterExpr> {
+        let mut items = Vec::new();
+        if let Some(id) = &self.id {
+            items.extend(uuid_ops(id).into_iter().map(FilterExpr::Id));
+        }
+        if let Some(created_at) = &self.created_at {
+            items.extend(date_ops(created_at).into_iter().map(FilterExpr::CreatedAt));
+        }
+        if let Some(updated_at) = &self.updated_at {
+            items.extend(date_ops(updated_at).into_iter().map(FilterExpr::UpdatedAt));
+        }
+        if let Some(name) = &self.name {
+            if let Some(first_name) = &name.first_name {
+                items.extend(
+                    string_ops(first_name)
+                        .into_iter()
+                        .map(FilterExpr::FirstName),
+                );
+            }
+            if let Some(last_name) = &name.last_name {
+                items.extend(string_ops(last_name).into_iter().map(FilterExpr::LastName));
+            }
+        }
+        if let Some(emails) = &self.emails {
+            if let Some(primary_email) = &emails.primary_email {
+                items.extend(
+                    string_ops(primary_email)
+                        .into_iter()
+                        .map(FilterExpr::PrimaryEmail),
+                );
+            }
+        }
+        if let Some(job_title) = &self.job_title {
+            items.extend(string_ops(job_title).into_iter().map(FilterExpr::JobTitle));
+        }
+        if let Some(and) = &self.and {
+            let exprs: Vec<FilterExpr> =
+                and.iter().filter_map(PersonFilterInput::to_expr).collect();
+            if !exprs.is_empty() {
+                items.push(FilterExpr::And(exprs));
+            }
+        }
+        if let Some(or) = &self.or {
+            let exprs: Vec<FilterExpr> = or.iter().filter_map(PersonFilterInput::to_expr).collect();
+            if !exprs.is_empty() {
+                items.push(FilterExpr::Or(exprs));
+            }
+        }
+        if let Some(not) = &self.not {
+            if let Some(expr) = not.to_expr() {
+                items.push(FilterExpr::Not(Box::new(expr)));
+            }
+        }
+
+        match items.len() {
+            0 => None,
+            1 => items.pop(),
+            _ => Some(FilterExpr::And(items)),
+        }
     }
 }
 
@@ -304,16 +501,6 @@ pub struct PersonConnection {
     pub page_info: PageInfo,
 }
 
-fn empty_filter() -> PersonFilterInput {
-    PersonFilterInput {
-        id: None,
-        job_title: None,
-        and: None,
-        or: None,
-        not: None,
-    }
-}
-
 fn direction_flags(direction: OrderByDirection) -> (bool, bool) {
     match direction {
         OrderByDirection::AscNullsFirst => (false, true),
@@ -349,13 +536,6 @@ fn order_terms(input: &[PersonOrderByInput]) -> Vec<OrderTerm> {
         push(PersonColumn::JobTitle, order.job_title);
     }
     terms
-}
-
-fn connection(people: Vec<Person>, limit: i64) -> PersonConnection {
-    let total = people.len() as i64;
-    let has_next_page = total > limit;
-    let people: Vec<Person> = people.into_iter().take(limit as usize).collect();
-    connection_with(people, total, has_next_page, false)
 }
 
 fn connection_from_page(page: squid_db::PersonPage) -> PersonConnection {
@@ -504,21 +684,8 @@ impl QueryRoot {
             .map_err(gql_err)?;
         let order = order_terms(order_by.as_deref().unwrap_or_default());
 
-        let filter = filter.unwrap_or_else(empty_filter);
-        if let Some(id) = filter.id_eq() {
-            let person = state
-                .db
-                .get_person(auth.workspace_id, id)
-                .await
-                .map_err(|e| gql_err(AppError::Internal(e)))?;
-            let people: Vec<Person> = person.into_iter().collect();
-            return Ok(connection(people, limit));
-        }
-        if !filter.is_empty() {
-            return Err(gql_err(AppError::BadRequest(
-                "Unsupported filter: only id.eq is implemented".to_string(),
-            )));
-        }
+        let filter = filter.unwrap_or_default();
+        let filter = filter.to_expr();
 
         let page = state
             .db
@@ -529,6 +696,7 @@ impl QueryRoot {
                 starting_after,
                 ending_before,
                 &order,
+                filter.as_ref(),
             )
             .await
             .map_err(|e| gql_err(AppError::Internal(e)))?;
@@ -564,16 +732,17 @@ impl QueryRoot {
         filter: PersonFilterInput,
     ) -> async_graphql::Result<Option<Person>> {
         let auth = require_auth(ctx)?;
-        let id = filter.id_eq().ok_or_else(|| {
+        let filter = filter.to_expr().ok_or_else(|| {
             gql_err(AppError::BadRequest(
-                "person requires filter.id.eq".to_string(),
+                "person requires a non-empty filter".to_string(),
             ))
         })?;
-        state(ctx)
+        let page = state(ctx)
             .db
-            .get_person(auth.workspace_id, id)
+            .list_persons_page(auth.workspace_id, 1, 0, None, None, &[], Some(&filter))
             .await
-            .map_err(|e| gql_err(AppError::Internal(e)))
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        Ok(page.persons.into_iter().next())
     }
 }
 
