@@ -1,0 +1,47 @@
+{
+  "data": {
+    "person": {
+      "id": "6c774d80-730f-4e23-b707-39053977cbff",
+      "createdAt": "2026-10-19T21:55:27.301Z",
+      "updatedAt": "2026-10-19T21:55:27.301Z",
+      "deletedAt": null,
+      "name": {
+        "firstName": "Ada",
+        "lastName": "Lovelace"
+      },
+      "emails": {
+        "primaryEmail": "ada@example.com",
+        "additionalEmails": []
+      },
+      "linkedinLink": {
+        "primaryLinkLabel": "",
+        "primaryLinkUrl": "",
+        "secondaryLinks": []
+      },
+      "jobTitle": "Mathematician",
+      "phones": {
+        "primaryPhoneNumber": "",
+        "primaryPhoneCountryCode": "",
+        "primaryPhoneCallingCode": "",
+        "additionalPhones": []
+      },
+      "avatarUrl": "",
+      "avatarFile": null,
+      "position": 0,
+      "createdBy": {
+        "source": "API",
+        "workspaceMemberId": null,
+        "name": "contract-capture",
+        "context": {}
+      },
+      "updatedBy": {
+        "source": "API",
+        "workspaceMemberId": null,
+        "name": "contract-capture",
+        "context": {}
+      },
+      "searchVector": "'ada':1 'ada@example.com':3 'example.com':4 'lovelace':2 'mathematician':5",
+      "companyId": null
+    }
+  }
+}

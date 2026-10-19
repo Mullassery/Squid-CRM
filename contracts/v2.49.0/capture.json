@@ -1,0 +1,48 @@
+{
+  "tag": "v2.49.0",
+  "baseUrl": "http://localhost:3000",
+  "capturedAt": "2026-10-19T21:56:10Z",
+  "testUser": "contract-1792446646-5534ea21@squid.test",
+  "workspaceId": "b7868fd4-31dd-4919-b87a-03d413e52b21",
+  "schemas": {
+    "graphql": {
+      "file": "graphql-introspection.json",
+      "types": 716,
+      "queryType": "Query",
+      "mutationType": "Mutation",
+      "sdl": "graphql.graphql"
+    },
+    "metadata": {
+      "file": "metadata-introspection.json",
+      "types": 655,
+      "queryType": "Query",
+      "mutationType": "Mutation",
+      "sdl": "metadata.graphql"
+    },
+    "admin": {
+      "file": "admin-introspection.json",
+      "types": 109,
+      "queryType": "Query",
+      "mutationType": "Mutation",
+      "sdl": "admin.graphql"
+    }
+  },
+  "openapi": {
+    "openapi-core": {
+      "file": "openapi-core.json",
+      "status": 200,
+      "contentType": "application/json; charset=utf-8"
+    },
+    "openapi-metadata": {
+      "file": "openapi-metadata.json",
+      "status": 200,
+      "contentType": "application/json; charset=utf-8"
+    }
+  },
+  "endpoints": {
+    "/client-config": {
+      "status": 200,
+      "contentType": "application/json; charset=utf-8"
+    }
+  }
+}

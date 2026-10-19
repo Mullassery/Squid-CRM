@@ -1,0 +1,7 @@
+{
+  "statusCode": 404,
+  "error": "NotFoundException",
+  "messages": [
+    "Record not found"
+  ]
+}

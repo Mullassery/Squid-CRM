@@ -1,134 +1,222 @@
 # API Compatibility Contract
 
-Derived from `twentyhq/twenty@08a0e5f1` (server `2.50.0`). This document is the
-authority for what the Rust backend must reproduce and what the Phase 4 slice
+Authority for what the Rust backend must reproduce, and what the Phase 4 slice
 currently implements.
 
-## 1. Transports and prefixes
+Sources, in order of precedence:
+
+1. Golden fixtures from a live `twentycrm/twenty:v2.49.0` in `contracts/v2.49.0/`
+   (captured 2026-10-19, see `contracts/README.md`).
+2. Source inspection of `twentyhq/twenty@08a0e5f1` (`TWENTY_CURRENT_VERSION =
+   2.50.0`) for behaviour not exercised by the fixtures.
+
+The image is one release behind the pinned source; re-capture at v2.50.0 when
+published. Every claim below is marked `[fixture]` or `[source]`.
+
+## 1. Endpoints
 
 | Prefix | Upstream purpose | Rust status |
 | --- | --- | --- |
-| `/graphql` | Workspace data + auth GraphQL | **partial** (auth + person) |
-| `/metadata` | Metadata GraphQL | not started |
+| `/graphql` | Workspace **data** GraphQL | **partial** (person, auth helpers) |
+| `/metadata` | Metadata GraphQL **and auth mutations** | **partial** (auth helpers) |
 | `/admin-panel` | Admin GraphQL | excluded (licence) |
 | `/rest` | REST CRUD | **partial** (people) |
-| `/open-api` | Generated OpenAPI document | not started |
-| `/auth` | Sign-up/in, OAuth callbacks | **partial** (local email/password) |
-| `/files`, `/file-upload`, `/file` | File storage | not started |
-| `/webhooks` | Inbound webhooks | not started |
-| `/client-config` | Frontend runtime config | not started |
+| `/open-api/core`, `/open-api/metadata` | OpenAPI JSON | not implemented |
+| `/auth` | OAuth/SSO callbacks only | **partial** (local REST auth) |
+| `/client-config` | Frontend runtime config | not implemented |
+| `/files`, `/file-upload`, `/file` | File storage | not implemented |
+| `/webhooks` | Inbound webhooks | not implemented |
 | `/healthz` | Health | **implemented** |
 
-## 2. Authentication
+Note: `GET /open-api` itself is **404**; only `/open-api/core` and
+`/open-api/metadata` exist `[fixture]`.
 
-Upstream supports JWT bearer, cookie sessions (`twenty-session`, HttpOnly), API
-keys, app tokens, Google/Microsoft OAuth, SAML/OIDC (Enterprise) and 2FA.
+## 2. Authentication — actual upstream model
 
-Implemented in the slice:
+- GraphQL auth mutations (`signUp`, `signUpInWorkspace`, `signUpInNewWorkspace`,
+  `getLoginTokenFromCredentials`, `getAuthTokensFromLoginToken`,
+  `activateWorkspace`, API-key management) are served on **`/metadata`**
+  `[fixture]`.
+- Workspaces start in `PENDING_CREATION`. `activateWorkspace(data: {})` must run
+  before the workspace schema (and therefore the data schema) exists `[fixture]`.
+- The **data API** (`/graphql`, `/rest`) accepts **API keys** as
+  `Authorization: Bearer <token>` `[fixture]`. A user access token is rejected:
+  - REST → `400` `{"statusCode":400,"error":"Error","messages":["Authentication context is invalid"],"code":"NO_AUTHENTICATION_CONTEXT"}`
+  - GraphQL resolver → `INVALID_AUTH_CONTEXT`
+- API key creation `[fixture]`:
+  `createApiKey(input: { name, expiresAt, roleId })` then
+  `generateApiKeyToken(apiKeyId, expiresAt)`; the latter returns the bearer token.
+- Unauthenticated REST `[fixture]`:
+  `403` `{"statusCode":403,"messages":["Missing authentication token"],"error":"FORBIDDEN_EXCEPTION"}`
+  (no `code` member).
+- The frontend uses a `twenty-session` HttpOnly cookie; cookie issuance is
+  restricted to an allowed origin `[source]`.
 
-- `POST /auth/signup` — `{ email, password, workspaceName? }`; atomically creates
-  user + workspace + OWNER membership, creates the workspace schema, returns
-  tokens and sets `twenty-session`.
-- `POST /auth/signin` — `{ email, password }`; returns tokens and sets the cookie.
-- `POST /auth/signout` — clears the session and cookie.
-- `Authorization: Bearer <access JWT>` — `typ=access` claim required.
-- Cookie session — opaque 32-byte token, stored **only as SHA-256 hash**.
-- Login tokens — `typ=login`, short-lived, cannot be replayed as access tokens.
+Implemented in the Rust slice (documented divergences in §8):
 
-GraphQL equivalents: `signUp`, `signIn`, `getLoginTokenFromCredentials`,
-`getAuthTokensFromLoginToken`, `signOut`.
+- `POST /auth/signup`, `/auth/signin`, `/auth/signout`.
+- GraphQL `signUp`, `signIn`, `getLoginTokenFromCredentials`,
+  `getAuthTokensFromLoginToken`, `signOut`.
+- Argon2id passwords; HS256 JWTs with typed `typ` claims; opaque 32-byte session
+  tokens stored as SHA-256 hashes.
+- Bearer access tokens and the session cookie are accepted for both REST and
+  GraphQL (more permissive than upstream).
 
-**Not yet implemented:** API keys, app tokens, OAuth providers, 2FA, refresh-token
-rotation endpoint, workspace switching, SSO (Enterprise, excluded).
+## 3. REST data contract `[fixture]`
 
-## 3. REST envelope (must not drift)
-
-List (`GET /rest/people`):
+List — `GET /rest/people?limit=2`:
 
 ```json
 {
-  "data": { "people": [ /* records */ ] },
-  "totalCount": 1,
+  "data": { "people": [ { "id": "...", "name": { "firstName": "Ada" } } ] },
+  "totalCount": 6,
   "pageInfo": {
-    "hasNextPage": false,
-    "hasPreviousPage": false,
-    "startCursor": null,
-    "endCursor": null
+    "startCursor": "eyJpZCI6IjZjNzc0ZDgwLTczMGYtNGUyMy1iNzA3LTM5MDUzOTc3Y2JmZiJ9",
+    "endCursor": "eyJpZCI6IjdhOTNkMWU1LTNmNzQtNDk0NS04YTY1LWQ3Zjk5NjA4M2Y3MiJ9",
+    "hasNextPage": true,
+    "hasPreviousPage": false
   }
 }
 ```
 
-Create: `201` with `{ "data": { "person": { ... } } }`.
-Get one: `200` with `{ "data": { "person": { ... } } }`.
-Delete: soft delete; subsequent read returns `404`.
+- Cursor is base64 of `{"id":"<uuid>"}`.
+- `hasPreviousPage` was `false` for `offset=1`; do not assume parity from
+  `offset > 0` without further fixtures.
+- `limit`, `offset` and `order_by` are accepted.
 
-Errors (all REST failures):
+Create — `POST /rest/people` → `201`:
 
 ```json
-{ "statusCode": 401, "error": "UnauthorizedException",
-  "messages": ["Authentication required"], "code": "UNAUTHENTICATED" }
+{ "data": { "createPerson": { "id": "...", "name": { ... } } } }
 ```
 
-Status names follow upstream: `BadRequestException`, `UnauthorizedException`,
-`ForbiddenException`, `NotFoundException`, `ConflictException`,
-`UnprocessableEntityException`, `TooManyRequestsException`,
-`PayloadTooLargeException`, `InternalServerErrorException`.
+Get one — `GET /rest/people/{id}` → `{ "data": { "person": { ... } } }`.
 
-## 4. Object shape — Person (Phase 4 subset)
+Delete — `DELETE /rest/people/{id}` → `200`:
 
-Implemented fields:
+```json
+{ "data": { "deletePerson": { "id": "..." } } }
+```
+
+Errors `[fixture]`:
+
+```json
+{ "statusCode": 404, "error": "NotFoundException", "messages": ["Record not found"] }
+{ "statusCode": 400, "error": "BadRequestException",
+  "messages": ["Invalid string value 'not-an-email' for email field \"emails.primaryEmail\""] }
+```
+
+There is no `code` member on these two. The `NO_AUTHENTICATION_CONTEXT` body
+does include `code`.
+
+## 4. GraphQL data contract `[fixture]`
+
+```graphql
+people(first: Int, last: Int, offset: Int, before: String, after: String,
+       filter: PersonFilterInput, orderBy: [PersonOrderByInput]): PersonConnection
+person(filter: PersonFilterInput!): Person
+createPerson(data: PersonCreateInput!, upsert: Boolean, shareWith: [ShareWithInput!]): Person
+updatePerson(id: UUID!, data: PersonUpdateInput!): Person
+deletePerson(id: UUID!): Person
+destroyPerson(id: UUID!): Person
+restorePerson(id: UUID!): Person
+mergePeople(ids: [UUID!]!, conflictPriorityIndex: Int!, dryRun: Boolean): Person
+createPeople(data: [PersonCreateInput!]!, upsert: Boolean, shareWith: [ShareWithInput!]): [Person!]
+updatePeople(data: PersonUpdateInput!, filter: PersonFilterInput!): [Person!]
+deletePeople(filter: PersonFilterInput!): [Person!]
+destroyPeople(filter: PersonFilterInput!): [Person!]
+restorePeople(filter: PersonFilterInput!): [Person!]
+
+type PersonConnection {
+  totalCount: Int
+  edges: [PersonEdge!]!
+  pageInfo: PageInfo!
+}
+type PersonEdge { node: Person! cursor: Cursor! }
+type PageInfo {
+  startCursor: ConnectionCursor
+  endCursor: ConnectionCursor
+  hasNextPage: Boolean!
+  hasPreviousPage: Boolean!
+}
+```
+
+Example fixture: `contracts/v2.49.0/examples/gql-people-connection.json`.
+
+## 5. Person shape `[fixture]`
+
+REST record fields observed on create/list:
 
 ```json
 {
   "id": "uuid",
+  "createdAt": "2026-10-19T21:55:27.301Z",
+  "updatedAt": "2026-10-19T21:55:27.301Z",
+  "deletedAt": null,
   "name": { "firstName": "Ada", "lastName": "Lovelace" },
-  "emails": { "primaryEmail": "ada@example.com", "additionalEmails": null },
-  "jobTitle": "Engineer",
-  "createdAt": "2026-01-01T00:00:00Z",
-  "updatedAt": "2026-01-01T00:00:00Z"
+  "emails": { "primaryEmail": "ada@example.com", "additionalEmails": [] },
+  "linkedinLink": { "primaryLinkLabel": "", "primaryLinkUrl": "", "secondaryLinks": [] },
+  "jobTitle": "Mathematician",
+  "phones": { "primaryPhoneNumber": "", "primaryPhoneCountryCode": "",
+              "primaryPhoneCallingCode": "", "additionalPhones": [] },
+  "avatarUrl": "",
+  "avatarFile": null,
+  "position": 0,
+  "createdBy": { "source": "API", "workspaceMemberId": null,
+                 "name": "contract-capture", "context": {} },
+  "updatedBy": { "source": "API", "workspaceMemberId": null,
+                 "name": "contract-capture", "context": {} },
+  "searchVector": "'ada':1 'ada@example.com':3 ...",
+  "companyId": null
 }
 ```
 
-Upstream also has `phones`, `linkedinLink`, `avatarFile`, `position`, `createdBy`,
-`updatedBy`, `company`, relations and `searchVector`. Those are **not yet**
-implemented and are tracked in `migration-matrix.md`.
+`additionalEmails` and `additionalPhones` are **empty arrays**, not `null`.
 
-## 5. Pagination, sorting, filtering
+## 6. Pagination, sorting, filtering `[fixture]` / `[source]`
 
-Upstream uses cursor pagination (`starting_after`, `ending_before`), `limit`,
-`order_by`, `filter`, `fields`, `depth`, `viewId`.
-
-Slice implements `limit` (clamped to `MAX_PAGE_SIZE`) and `offset`, and returns
-`pageInfo` with cursor fields set to `null`. **This is a known gap**: cursor
-semantics, `order_by`, `filter` grammar and field selection must be implemented
-before parity. The frontend's Apollo cache also expects cursor-based connections.
-
-## 6. Idempotency and retries
-
-Not yet implemented. Upstream retry/idempotency behaviour must be mapped in a
-later phase (webhooks and job queues are the main consumers). No claim is made
-that current behaviour matches.
+- GraphQL connections use `first`/`last`/`before`/`after`/`offset`.
+- REST paging parameters are `limit`, `offset`, `starting_after`, `ending_before`.
+  `starting_after=<cursor>` is exclusive and flips `hasPreviousPage` to `true`;
+  plain `after=` is not the REST spelling.
+- REST sorting: `order_by=field` (ascending, `AscNullsFirst` by default), with
+  optional direction in brackets and comma-separated fields:
+  `?order_by=createdAt[DescNullsLast],name.firstName[AscNullsFirst]`.
+  `-createdAt` is **not** accepted (`FIELD_NOT_FOUND`).
+- REST cursors are base64 JSON (`{"id": "<uuid>"}` in the fixtures) and must
+  round-trip. `hasPreviousPage` stays `false` for pure `offset` paging even when
+  `offset > 0`.
 
 ## 7. Tenant isolation
 
-Every workspace-scoped query resolves `workspace_id` from the authenticated
-principal and derives a validated schema name (`workspace_<32 hex>`). No client
-input reaches a schema identifier. Integration test
-`tenant_isolation_blocks_cross_workspace_reads` proves workspace B receives
-`404` for workspace A's records and an empty list.
+Every workspace-scoped query resolves `workspace_id` from the principal and
+derives a validated schema name (`workspace_<32 hex>`). Integration test
+`tenant_isolation_blocks_cross_workspace_reads` proves workspace B cannot read,
+list or delete workspace A's records.
 
-## 8. GraphQL specifics
+## 8. Divergences in the current Rust slice
 
-- Input and output types with the same name cannot coexist in `async-graphql`;
-  `CreatePersonInput` is exposed as an input object and `Person` as output.
-- Field naming is camelCase (matches the frontend fragments).
-- Errors carry `extensions.code` where applicable.
+| Area | Upstream | Rust today | Action |
+| --- | --- | --- | --- |
+| REST create | `data.createPerson` | `data.person` | fix |
+| REST delete | `data.deletePerson.id` | `data.id` | fix |
+| REST unauth | `403` `FORBIDDEN_EXCEPTION` | `401` `UNAUTHORIZED` | fix |
+| REST 404 | `NotFoundException`, no `code` | includes `code`, different message | fix |
+| Cursors | base64 `{"id"}` | `null` | fix |
+| `additionalEmails` | `[]` | `null` | fix |
+| Person fields | phones, links, avatar, position, actors, deletedAt, searchVector | name/emails/jobTitle/timestamps | staged |
+| GraphQL `people` | `PersonConnection` | `[Person!]!` | fix |
+| GraphQL `person` | `(filter: PersonFilterInput!)` | `(id: UUID!)` | fix |
+| GraphQL create | `(data: PersonCreateInput!)` | `(input: ...)` | fix |
+| GraphQL auth host | `/metadata` | `/graphql` (and `/auth`) | document; add `/metadata` |
+| Data-API auth | API keys | access token/cookie | add API keys |
+| Workspace bootstrap | create → `activateWorkspace` | atomic signup | document |
+| REST validation | metadata grammar | basic validation | staged |
 
-## 9. Compatibility verification method
+## 9. Verification method
 
-- Rust integration tests (`crates/squid-api/tests/integration.rs`) assert the
-  envelopes above against real PostgreSQL.
-- Contract fixtures captured from the running upstream are **not yet** in
-  `contracts/` (blocked on the reference stack booting in this environment).
-  Until captured, compatibility is asserted from source inspection, not from
-  live golden files. This limitation is recorded in `TODO.md`.
+- Golden fixtures: `contracts/v2.49.0/` (SDL, OpenAPI, examples).
+- Capture script: `scripts/capture-contracts.py` (reproducible).
+- Rust integration tests assert the implemented subset against real PostgreSQL.
+- Divergences above are asserted as **known**; tests must not claim parity for
+  them. No performance claims are made.

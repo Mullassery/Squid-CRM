@@ -12,15 +12,29 @@
 - [x] 11 unit + 4 integration tests passing; clippy clean; live smoke test.
 - [x] Dockerfile, docker-compose, CI workflow, Makefile, smoke script.
 
-## Phase 2 (contracts — next)
-- [ ] Boot the pinned upstream stack and capture GraphQL SDL + OpenAPI + example
-      responses into `contracts/<commit>/`.
-- [ ] Diff the captured contracts against `docs/api-compatibility.md`.
+## Phase 2 (contracts)
+- [x] Boot upstream via Docker (`twentycrm/twenty:v2.49.0`) and capture SDL,
+      OpenAPI and REST/GraphQL examples into `contracts/v2.49.0/`.
+- [x] Diff captured contracts against `docs/api-compatibility.md` (divergence
+      table §8).
+- [ ] Re-capture at `v2.50.0` (no image published at capture time) or build the
+      pinned source and capture from it.
 - [ ] Map every frontend operation in `twenty-front/src/generated/graphql.ts`.
 
-## Phase 4 follow-ups (compatibility gaps)
-- [ ] Cursor pagination (`starting_after`/`ending_before`), `order_by`, `filter`,
-      `fields`, `depth` with upstream semantics.
+## Phase 4 follow-ups (contract alignment — from captured fixtures)
+- [ ] REST create returns `data.createPerson`; delete returns
+      `data.deletePerson.id`.
+- [ ] Unauthenticated REST is `403 FORBIDDEN_EXCEPTION` (no `code`); 404 has no
+      `code`.
+- [ ] Cursors = base64 `{"id":"<uuid>"}`; support `starting_after` /
+      `ending_before`; `hasPreviousPage` only for cursor paging.
+- [ ] `additionalEmails`/`additionalPhones` are `[]`, never `null`.
+- [ ] GraphQL `people` returns `PersonConnection` (edges/cursor/pageInfo);
+      `person(filter:)`, `createPerson(data:)`.
+- [ ] Serve auth mutations on `/metadata` and add API keys for the data API.
+- [ ] `order_by=field[DescNullsLast],...` grammar; `filter` grammar.
+- [ ] Remaining pagination (`first`/`last`/`before`/`after`), `fields`, `depth`,
+      `viewId` with upstream semantics.
 - [ ] Refresh-token rotation and access-token revocation.
 - [ ] CSRF protection decision for cookie auth.
 - [ ] Rate limiting on auth endpoints.

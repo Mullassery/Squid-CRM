@@ -1,0 +1,99 @@
+{
+  "data": {
+    "people": [
+      {
+        "id": "6c774d80-730f-4e23-b707-39053977cbff",
+        "createdAt": "2026-10-19T21:55:27.301Z",
+        "updatedAt": "2026-10-19T21:55:27.301Z",
+        "deletedAt": null,
+        "name": {
+          "firstName": "Ada",
+          "lastName": "Lovelace"
+        },
+        "emails": {
+          "primaryEmail": "ada@example.com",
+          "additionalEmails": []
+        },
+        "linkedinLink": {
+          "primaryLinkLabel": "",
+          "primaryLinkUrl": "",
+          "secondaryLinks": []
+        },
+        "jobTitle": "Mathematician",
+        "phones": {
+          "primaryPhoneNumber": "",
+          "primaryPhoneCountryCode": "",
+          "primaryPhoneCallingCode": "",
+          "additionalPhones": []
+        },
+        "avatarUrl": "",
+        "avatarFile": null,
+        "position": 0,
+        "createdBy": {
+          "source": "API",
+          "workspaceMemberId": null,
+          "name": "contract-capture",
+          "context": {}
+        },
+        "updatedBy": {
+          "source": "API",
+          "workspaceMemberId": null,
+          "name": "contract-capture",
+          "context": {}
+        },
+        "searchVector": "'ada':1 'ada@example.com':3 'example.com':4 'lovelace':2 'mathematician':5",
+        "companyId": null
+      },
+      {
+        "id": "7a93d1e5-3f74-4945-8a65-d7f996083f72",
+        "createdAt": "2026-10-19T21:52:58.238Z",
+        "updatedAt": "2026-10-19T21:52:58.238Z",
+        "deletedAt": null,
+        "name": {
+          "firstName": "Ivan",
+          "lastName": "Zhao"
+        },
+        "emails": {
+          "primaryEmail": "zhao@notion.com",
+          "additionalEmails": []
+        },
+        "linkedinLink": {
+          "primaryLinkLabel": "",
+          "primaryLinkUrl": "",
+          "secondaryLinks": []
+        },
+        "jobTitle": "",
+        "phones": {
+          "primaryPhoneNumber": "882261739",
+          "primaryPhoneCountryCode": "",
+          "primaryPhoneCallingCode": "+1",
+          "additionalPhones": []
+        },
+        "avatarUrl": "https://twentyhq.github.io/placeholder-images/founders/ivan-zhao.jpg",
+        "avatarFile": null,
+        "position": 5,
+        "createdBy": {
+          "source": "SYSTEM",
+          "workspaceMemberId": null,
+          "name": "System",
+          "context": null
+        },
+        "updatedBy": {
+          "source": "SYSTEM",
+          "workspaceMemberId": null,
+          "name": "System",
+          "context": null
+        },
+        "searchVector": "'+1':6 '+1882261739':7 '0882261739':9 '1882261739':8 '882261739':5 'ivan':1 'notion.com':4 'zhao':2 'zhao@notion.com':3",
+        "companyId": "06290608-8bf0-4806-99ae-a715a6a93fad"
+      }
+    ]
+  },
+  "totalCount": 6,
+  "pageInfo": {
+    "startCursor": "eyJpZCI6IjZjNzc0ZDgwLTczMGYtNGUyMy1iNzA3LTM5MDUzOTc3Y2JmZiJ9",
+    "endCursor": "eyJpZCI6IjdhOTNkMWU1LTNmNzQtNDk0NS04YTY1LWQ3Zjk5NjA4M2Y3MiJ9",
+    "hasNextPage": true,
+    "hasPreviousPage": false
+  }
+}
