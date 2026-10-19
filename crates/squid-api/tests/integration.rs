@@ -185,6 +185,25 @@ async fn signup_signin_and_person_crud_over_rest() {
     assert_eq!(fetched.status, StatusCode::OK);
     assert_eq!(fetched.body["data"]["person"]["id"], person_id);
 
+    // Update
+    let updated = send(
+        &app,
+        authorized(
+            "PATCH",
+            &format!("/rest/people/{person_id}"),
+            &token,
+            Some(json!({ "jobTitle": "Countess", "position": 3 })),
+        ),
+    )
+    .await;
+    assert_eq!(updated.status, StatusCode::OK, "body: {}", updated.body);
+    assert_eq!(updated.body["data"]["updatePerson"]["jobTitle"], "Countess");
+    assert_eq!(updated.body["data"]["updatePerson"]["position"], 3.0);
+    assert_eq!(
+        updated.body["data"]["updatePerson"]["name"]["firstName"],
+        "Ada"
+    );
+
     // Delete (soft) then get -> 404
     let deleted = send(
         &app,
@@ -278,6 +297,18 @@ async fn tenant_isolation_blocks_cross_workspace_reads() {
     )
     .await;
     assert_eq!(delete_b.status, StatusCode::NOT_FOUND);
+
+    let update_b = send(
+        &app,
+        authorized(
+            "PATCH",
+            &format!("/rest/people/{person_id}"),
+            &token_b,
+            Some(json!({ "jobTitle": "Hijacked" })),
+        ),
+    )
+    .await;
+    assert_eq!(update_b.status, StatusCode::NOT_FOUND);
 
     // And workspace A still sees it.
     let get_a = send(
@@ -402,7 +433,35 @@ async fn graphql_login_flow_and_people_query() {
         "Katherine"
     );
 
-    // Step 5: person(filter:) works.
+    // Step 5: updatePerson works.
+    let created_id = gql_create.body["data"]["createPerson"]["id"]
+        .as_str()
+        .expect("created id");
+    let gql_update = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "mutation($id: UUID!, $data: PersonUpdateInput!) { updatePerson(id:$id, data:$data) { id jobTitle } }",
+                "variables": { "id": created_id, "data": { "jobTitle": "Computer" } }
+            }),
+        )
+        .with_bearer(&access_token),
+    )
+    .await;
+    assert_eq!(
+        gql_update.status,
+        StatusCode::OK,
+        "body: {}",
+        gql_update.body
+    );
+    assert_eq!(
+        gql_update.body["data"]["updatePerson"]["jobTitle"],
+        "Computer"
+    );
+
+    // Step 6: person(filter:) works.
     let first_id = list[0]["node"]["id"].as_str().unwrap();
     let by_filter = send(
         &app,

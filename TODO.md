@@ -42,7 +42,8 @@
 - [ ] CSRF protection decision for cookie auth.
 - [ ] Rate limiting on auth endpoints.
 - [x] Person fields: phones, linkedinLink, avatarFile (JSON), companyId, actors.
-- [ ] Person relations, `avatarFile` as `FileObject`, full metadata fields.
+- [x] Person update (`PATCH /rest/people/{id}`, GraphQL `updatePerson`).
+- [ ] Person relations, `avatarFile` as `FileObject`, null-clearing updates, full metadata fields.
 - [ ] Metadata API so the real frontend can load object/field definitions.
 - [x] `client-config` endpoint.
 

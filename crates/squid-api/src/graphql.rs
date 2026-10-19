@@ -15,7 +15,8 @@ use chrono::{DateTime, Utc};
 use squid_auth::AuthToken;
 use squid_auth::{hash_password, hash_token, verify_password, AuthContext};
 use squid_core::{
-    ApiKey, AppError, AppResult, CreatePersonInput, GqlJson, PageInfo, Person, User, Workspace,
+    ApiKey, AppError, AppResult, CreatePersonInput, GqlJson, PageInfo, Person, UpdatePersonInput,
+    User, Workspace,
 };
 use squid_db::{OrderTerm, PersonColumn};
 
@@ -166,6 +167,49 @@ impl From<PersonCreateInputGql> for CreatePersonInput {
                     additional_emails: emails.additional_emails.unwrap_or_default(),
                 })
                 .unwrap_or_default(),
+            job_title: input.job_title,
+            linkedin_link: input.linkedin_link.map(|links| squid_core::Links {
+                primary_link_label: links.primary_link_label.unwrap_or_default(),
+                primary_link_url: links.primary_link_url.unwrap_or_default(),
+                secondary_links: links.secondary_links.unwrap_or_default(),
+            }),
+            phones: input.phones.map(|phones| squid_core::Phones {
+                primary_phone_number: phones.primary_phone_number.unwrap_or_default(),
+                primary_phone_country_code: phones.primary_phone_country_code.unwrap_or_default(),
+                primary_phone_calling_code: phones.primary_phone_calling_code.unwrap_or_default(),
+                additional_phones: phones.additional_phones.unwrap_or_default(),
+            }),
+            avatar_url: input.avatar_url,
+            position: input.position,
+            company_id: input.company_id,
+        }
+    }
+}
+
+#[derive(Debug, InputObject)]
+#[graphql(name = "PersonUpdateInput")]
+pub struct PersonUpdateInputGql {
+    pub name: Option<FullNameCreateInput>,
+    pub emails: Option<EmailsCreateInput>,
+    pub job_title: Option<String>,
+    pub linkedin_link: Option<LinksCreateInput>,
+    pub phones: Option<PhonesCreateInput>,
+    pub avatar_url: Option<String>,
+    pub position: Option<f64>,
+    pub company_id: Option<uuid::Uuid>,
+}
+
+impl From<PersonUpdateInputGql> for UpdatePersonInput {
+    fn from(input: PersonUpdateInputGql) -> Self {
+        UpdatePersonInput {
+            name: input.name.map(|name| squid_core::FullName {
+                first_name: name.first_name.unwrap_or_default(),
+                last_name: name.last_name.unwrap_or_default(),
+            }),
+            emails: input.emails.map(|emails| squid_core::Emails {
+                primary_email: emails.primary_email.unwrap_or_default(),
+                additional_emails: emails.additional_emails.unwrap_or_default(),
+            }),
             job_title: input.job_title,
             linkedin_link: input.linkedin_link.map(|links| squid_core::Links {
                 primary_link_label: links.primary_link_label.unwrap_or_default(),
@@ -762,6 +806,22 @@ impl MutationRoot {
             .create_person(auth.workspace_id, &input)
             .await
             .map_err(|e| gql_err(AppError::Internal(e)))
+    }
+
+    async fn update_person(
+        &self,
+        ctx: &Context<'_>,
+        id: uuid::Uuid,
+        data: PersonUpdateInputGql,
+    ) -> async_graphql::Result<Person> {
+        let auth = require_auth(ctx)?;
+        let input: UpdatePersonInput = data.into();
+        state(ctx)
+            .db
+            .update_person(auth.workspace_id, id, &input)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))
     }
 
     async fn delete_person(

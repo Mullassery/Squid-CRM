@@ -107,7 +107,9 @@ pub fn app(state: AppState) -> Router {
         )
         .route(
             "/rest/people/{id}",
-            get(rest::get_person).delete(rest::delete_person),
+            get(rest::get_person)
+                .patch(rest::update_person)
+                .delete(rest::delete_person),
         )
         .route("/rest/me", get(rest::me))
         .route("/auth/signup", post(auth::signup))

@@ -100,6 +100,13 @@ Create — `POST /rest/people` → `201`:
 
 Get one — `GET /rest/people/{id}` → `{ "data": { "person": { ... } } }`.
 
+Update — `PATCH /rest/people/{id}` with the partial `PersonForUpdate` body
+(fields directly, not wrapped in `data`) → `200`:
+
+```json
+{ "data": { "updatePerson": { "id": "...", "jobTitle": "Countess" } } }
+```
+
 Delete — `DELETE /rest/people/{id}` → `200`:
 
 ```json
@@ -218,6 +225,7 @@ Alignment completed and covered by tests:
 | REST sorting | `order_by=field[Direction],...` | aligned for whitelisted person columns |
 | `additionalEmails` / `additionalPhones` | `[]`, never `null` | aligned |
 | Person fields | phones, links, avatar, position, actors, deletedAt, searchVector, companyId | aligned (see actor/searchVector notes) |
+| REST/GraphQL update | `PATCH /rest/people/{id}`, `updatePerson` | aligned; `None` fields unchanged (no explicit null clearing yet) |
 | GraphQL `people` | `PersonConnection` with `edges`/`pageInfo` | aligned |
 | GraphQL `person(filter:)` | `PersonFilterInput!` | aligned for `id.eq` |
 | GraphQL `createPerson(data:)` | `PersonCreateInput!`, `upsert`, `shareWith` | aligned; `upsert`/`shareWith` accepted but not applied |

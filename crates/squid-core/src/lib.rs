@@ -226,6 +226,28 @@ pub struct PageInfo {
     pub end_cursor: Option<String>,
 }
 
+/// Partial person update. `None` means "leave unchanged"; clearing a nullable
+/// field requires the metadata update contract (not implemented yet).
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct UpdatePersonInput {
+    #[serde(default)]
+    pub name: Option<FullName>,
+    #[serde(default)]
+    pub emails: Option<Emails>,
+    #[serde(rename = "jobTitle", default)]
+    pub job_title: Option<String>,
+    #[serde(rename = "linkedinLink", default)]
+    pub linkedin_link: Option<Links>,
+    #[serde(default)]
+    pub phones: Option<Phones>,
+    #[serde(rename = "avatarUrl", default)]
+    pub avatar_url: Option<String>,
+    #[serde(default)]
+    pub position: Option<f64>,
+    #[serde(rename = "companyId", default)]
+    pub company_id: Option<Uuid>,
+}
+
 /// REST find-many envelope: `{ data: { <plural>: [...] }, totalCount, pageInfo }`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FindManyResponse<T> {

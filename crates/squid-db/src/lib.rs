@@ -11,7 +11,8 @@ use serde::de::DeserializeOwned;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
 use squid_core::{
-    Actor, ApiKey, CreatePersonInput, Emails, FullName, Person, Role, User, Workspace,
+    Actor, ApiKey, CreatePersonInput, Emails, FullName, Person, Role, UpdatePersonInput, User,
+    Workspace,
 };
 use uuid::Uuid;
 
@@ -665,7 +666,12 @@ impl Db {
         let links = input.linkedin_link.clone().unwrap_or_default();
         let phones = input.phones.clone().unwrap_or_default();
         let actor = Actor::default();
-        let search_vector = build_search_vector(input);
+        let search_vector = build_search_vector(
+            &input.name.first_name,
+            &input.name.last_name,
+            &input.emails.primary_email,
+            input.job_title.as_deref(),
+        );
 
         let row = sqlx::query(&format!(
             "INSERT INTO {schema}.person
@@ -693,6 +699,61 @@ impl Db {
         .await?;
 
         Ok(row_to_person(&row))
+    }
+
+    pub async fn update_person(
+        &self,
+        workspace_id: Uuid,
+        person_id: Uuid,
+        input: &UpdatePersonInput,
+    ) -> anyhow::Result<Option<Person>> {
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+
+        let Some(current) = self.get_person(workspace_id, person_id).await? else {
+            return Ok(None);
+        };
+
+        let name = input.name.clone().unwrap_or(current.name);
+        let emails = input.emails.clone().unwrap_or(current.emails);
+        let job_title = input.job_title.clone().or(current.job_title);
+        let linkedin_link = input.linkedin_link.clone().unwrap_or(current.linkedin_link);
+        let phones = input.phones.clone().unwrap_or(current.phones);
+        let avatar_url = input.avatar_url.clone().unwrap_or(current.avatar_url);
+        let position = input.position.unwrap_or(current.position);
+        let company_id = input.company_id.or(current.company_id);
+        let search_vector = build_search_vector(
+            &name.first_name,
+            &name.last_name,
+            &emails.primary_email,
+            job_title.as_deref(),
+        );
+
+        let row = sqlx::query(&format!(
+            "UPDATE {schema}.person
+             SET name_first = $2, name_last = $3, primary_email = $4,
+                 additional_emails = $5, job_title = $6, linkedin_link = $7::jsonb,
+                 phones = $8::jsonb, avatar_url = $9, position = $10,
+                 search_vector = $11, company_id = $12, updated_at = now()
+             WHERE id = $1 AND deleted_at IS NULL
+             RETURNING {PERSON_SELECT}"
+        ))
+        .bind(person_id)
+        .bind(&name.first_name)
+        .bind(&name.last_name)
+        .bind(&emails.primary_email)
+        .bind(&emails.additional_emails)
+        .bind(&job_title)
+        .bind(serde_json::to_string(&linkedin_link)?)
+        .bind(serde_json::to_string(&phones)?)
+        .bind(&avatar_url)
+        .bind(position)
+        .bind(search_vector)
+        .bind(company_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.as_ref().map(row_to_person))
     }
 
     /// Soft-delete, matching upstream's recoverable deletion semantics.
@@ -772,7 +833,12 @@ impl OrderTerm {
     }
 }
 
-fn build_search_vector(input: &CreatePersonInput) -> Option<String> {
+fn build_search_vector(
+    first_name: &str,
+    last_name: &str,
+    primary_email: &str,
+    job_title: Option<&str>,
+) -> Option<String> {
     let mut parts: Vec<(String, usize)> = Vec::new();
     let mut position = 1usize;
     let mut push = |value: &str| {
@@ -783,10 +849,10 @@ fn build_search_vector(input: &CreatePersonInput) -> Option<String> {
             }
         }
     };
-    push(&input.name.first_name);
-    push(&input.name.last_name);
-    push(&input.emails.primary_email);
-    if let Some(job_title) = input.job_title.as_deref() {
+    push(first_name);
+    push(last_name);
+    push(primary_email);
+    if let Some(job_title) = job_title {
         push(job_title);
     }
     if parts.is_empty() {

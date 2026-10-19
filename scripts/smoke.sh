@@ -46,6 +46,13 @@ assert body['data']['createPerson']['name']['firstName'] == 'Ada', body
 print('create OK: createPerson envelope matches contract')
 PY
 
+PERSON_ID=$(python3 -c "import json;print(json.load(open('/tmp/squid-smoke-create.json'))['data']['createPerson']['id'])")
+UPDATE_STATUS=$(curl -s -o /tmp/squid-smoke-update.json -w '%{http_code}' \
+  -X PATCH "${BASE}/rest/people/${PERSON_ID}" -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' \
+  -d '{"jobTitle":"Countess"}')
+test "$UPDATE_STATUS" = "200" || { echo "update failed: $UPDATE_STATUS"; cat /tmp/squid-smoke-update.json; exit 1; }
+python3 -c "import json;b=json.load(open('/tmp/squid-smoke-update.json'));assert b['data']['updatePerson']['jobTitle']=='Countess',b;print('update OK: updatePerson envelope matches contract')"
+
 LIST_STATUS=$(curl -s -o /tmp/squid-smoke-list.json -w '%{http_code}' \
   "${BASE}/rest/people?limit=10" -H "Authorization: Bearer ${TOKEN}")
 test "$LIST_STATUS" = "200" || { echo "list failed: $LIST_STATUS"; exit 1; }

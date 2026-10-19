@@ -14,7 +14,9 @@ use axum::Json;
 use base64::Engine;
 use serde::Deserialize;
 use serde_json::json;
-use squid_core::{AppError, AppResult, CreatePersonInput, FindManyResponse, PageInfo, Person};
+use squid_core::{
+    AppError, AppResult, CreatePersonInput, FindManyResponse, PageInfo, Person, UpdatePersonInput,
+};
 use squid_db::{OrderTerm, PersonColumn};
 use uuid::Uuid;
 
@@ -194,6 +196,24 @@ pub async fn create_person(
         axum::http::StatusCode::CREATED,
         Json(json!({ "data": { "createPerson": person } })),
     ))
+}
+
+pub async fn update_person(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Json(input): Json<UpdatePersonInput>,
+) -> AppResult<Json<serde_json::Value>> {
+    let auth = require(&state, &headers).await?;
+
+    let person = state
+        .db
+        .update_person(auth.workspace_id, id, &input)
+        .await
+        .map_err(AppError::Internal)?
+        .ok_or_else(|| AppError::NotFound("Record not found".to_string()))?;
+
+    Ok(Json(json!({ "data": { "updatePerson": person } })))
 }
 
 pub async fn delete_person(
