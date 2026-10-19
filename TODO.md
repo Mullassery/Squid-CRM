@@ -65,9 +65,13 @@
 
 ## Known limitations (current)
 - Static person schema; not metadata-driven.
-- Cursor pagination + `order_by` implemented for whitelisted person columns;
-  full filter grammar and view-based paging are not.
+- Cursor pagination, `order_by`, and scalar/composite filters implemented for
+  whitelisted person columns; relation filters and view-based paging are not.
 - No OpenAPI document emitted yet.
+- Workspace activation lifecycle (`PENDING_CREATION` / `activateWorkspace`) and
+  `signUpInNewWorkspace` are not implemented; `/auth/signup` activates directly.
+- Data API accepts access tokens in addition to API keys (upstream requires API
+  keys).
 - No refresh rotation, OAuth, 2FA; API keys implemented but data API still
   accepts access tokens. API-key `roleId` is ignored until metadata roles land.
 - Enterprise features excluded (licence).
