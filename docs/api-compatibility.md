@@ -243,7 +243,9 @@ Alignment completed and covered by tests:
 | Delete semantics | default hard delete, `soft_delete=true` soft, restore endpoint | aligned |
 | GraphQL lifecycle | `deletePerson`, `destroyPerson`, `restorePerson` | aligned |
 | GraphQL `people` | `PersonConnection` with `edges`/`pageInfo` | aligned |
-| GraphQL `person(filter:)` | `PersonFilterInput!` | aligned for `id.eq` |
+| GraphQL filters | `and`/`or`/`not`, composite name/emails, dates | aligned for scalar person fields; relation filters absent |
+| GraphQL batch mutations | `createPeople`, `updatePeople`, `deletePeople`, `destroyPeople`, `restorePeople` | aligned; `mergePeople` not implemented |
+| GraphQL `person(filter:)` | `PersonFilterInput!` | aligned for scalar person fields |
 | GraphQL `createPerson(data:)` | `PersonCreateInput!`, `upsert`, `shareWith` | aligned; `upsert`/`shareWith` accepted but not applied |
 | GraphQL `deletePerson(id:)` | returns `Person` | aligned |
 | GraphQL cursor type | `Cursor` scalar | aligned |

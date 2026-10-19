@@ -1076,3 +1076,130 @@ impl WithBearer for Request<Body> {
         self
     }
 }
+
+#[tokio::test]
+async fn graphql_batch_person_mutations() {
+    let app = test_app().await;
+    let email = unique_email("batch");
+    let (token, _workspace) = signup(&app, &email).await;
+
+    let created = send(
+        &app,
+        authorized(
+            "POST",
+            "/graphql",
+            &token,
+            Some(json!({
+                "query": "mutation { createPeople(data: [ { name: { firstName: \"Ada\", lastName: \"Lovelace\" }, emails: { primaryEmail: \"ada@example.com\" }, jobTitle: \"Engineer\" }, { name: { firstName: \"Alan\", lastName: \"Turing\" }, emails: { primaryEmail: \"alan@example.com\" }, jobTitle: \"Engineer\" }, { name: { firstName: \"Grace\", lastName: \"Hopper\" }, emails: { primaryEmail: \"grace@example.com\" }, jobTitle: \"Engineer\" } ]) { id name { firstName } } }"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(created.status, StatusCode::OK, "body: {}", created.body);
+    let people = created.body["data"]["createPeople"].as_array().unwrap();
+    assert_eq!(people.len(), 3);
+
+    let updated = send(
+        &app,
+        authorized(
+            "POST",
+            "/graphql",
+            &token,
+            Some(json!({
+                "query": "mutation { updatePeople(data: { jobTitle: \"Staff\" }, filter: { jobTitle: { eq: \"Engineer\" } }) { id jobTitle } }"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(updated.status, StatusCode::OK, "body: {}", updated.body);
+    let people = updated.body["data"]["updatePeople"].as_array().unwrap();
+    assert_eq!(people.len(), 3);
+    assert!(people.iter().all(|person| person["jobTitle"] == "Staff"));
+
+    let deleted = send(
+        &app,
+        authorized(
+            "POST",
+            "/graphql",
+            &token,
+            Some(json!({
+                "query": "mutation { deletePeople(filter: { jobTitle: { eq: \"Staff\" } }) { id deletedAt } }"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(deleted.status, StatusCode::OK, "body: {}", deleted.body);
+    assert_eq!(
+        deleted.body["data"]["deletePeople"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+
+    let live = send(
+        &app,
+        authorized(
+            "POST",
+            "/graphql",
+            &token,
+            Some(json!({ "query": "{ people { totalCount } }" })),
+        ),
+    )
+    .await;
+    assert_eq!(live.body["data"]["people"]["totalCount"], 0);
+
+    let restored = send(
+        &app,
+        authorized(
+            "POST",
+            "/graphql",
+            &token,
+            Some(json!({
+                "query": "mutation { restorePeople(filter: { jobTitle: { eq: \"Staff\" } }) { id deletedAt } }"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(restored.status, StatusCode::OK, "body: {}", restored.body);
+    assert_eq!(
+        restored.body["data"]["restorePeople"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+
+    let destroyed = send(
+        &app,
+        authorized(
+            "POST",
+            "/graphql",
+            &token,
+            Some(json!({
+                "query": "mutation { destroyPeople(filter: { jobTitle: { eq: \"Staff\" } }) { id } }"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(destroyed.status, StatusCode::OK, "body: {}", destroyed.body);
+    assert_eq!(
+        destroyed.body["data"]["destroyPeople"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+
+    let empty = send(
+        &app,
+        authorized(
+            "POST",
+            "/graphql",
+            &token,
+            Some(json!({ "query": "{ people { totalCount } }" })),
+        ),
+    )
+    .await;
+    assert_eq!(empty.body["data"]["people"]["totalCount"], 0);
+}

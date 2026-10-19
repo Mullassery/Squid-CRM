@@ -887,6 +887,51 @@ impl Db {
         Ok(count)
     }
 
+    pub async fn live_person_ids(
+        &self,
+        workspace_id: Uuid,
+        filter: Option<&FilterExpr>,
+    ) -> anyhow::Result<Vec<Uuid>> {
+        self.person_ids(workspace_id, filter, false).await
+    }
+
+    pub async fn deleted_person_ids(
+        &self,
+        workspace_id: Uuid,
+        filter: Option<&FilterExpr>,
+    ) -> anyhow::Result<Vec<Uuid>> {
+        self.person_ids(workspace_id, filter, true).await
+    }
+
+    async fn person_ids(
+        &self,
+        workspace_id: Uuid,
+        filter: Option<&FilterExpr>,
+        deleted: bool,
+    ) -> anyhow::Result<Vec<Uuid>> {
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let filter = filter.map(|filter| compile_filter(filter, 1));
+        let filter_sql = filter
+            .as_ref()
+            .map(|filter| format!(" AND ({})", filter.sql))
+            .unwrap_or_default();
+        let deleted_sql = if deleted {
+            "deleted_at IS NOT NULL"
+        } else {
+            "deleted_at IS NULL"
+        };
+        let sql = format!(
+            "SELECT id FROM {schema}.person WHERE {deleted_sql}{filter_sql} ORDER BY created_at ASC"
+        );
+        let mut query = sqlx::query(&sql);
+        if let Some(filter) = &filter {
+            query = bind_filter(query, &filter.binds);
+        }
+        let rows = query.fetch_all(&self.pool).await?;
+        Ok(rows.iter().map(|row| row.get("id")).collect())
+    }
+
     pub async fn get_person(
         &self,
         workspace_id: Uuid,

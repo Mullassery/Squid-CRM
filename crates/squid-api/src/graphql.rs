@@ -953,6 +953,170 @@ impl MutationRoot {
             .map_err(|e| gql_err(AppError::Internal(anyhow::anyhow!(e))))
     }
 
+    async fn create_people(
+        &self,
+        ctx: &Context<'_>,
+        data: Vec<PersonCreateInputGql>,
+        #[graphql(default)] _upsert: bool,
+        _share_with: Option<Vec<ShareWithInput>>,
+    ) -> async_graphql::Result<Vec<Person>> {
+        let auth = require_auth(ctx)?;
+        let state = state(ctx);
+        let mut people = Vec::with_capacity(data.len());
+        for data in data {
+            let input: CreatePersonInput = data.into();
+            if input.name.first_name.trim().is_empty() && input.name.last_name.trim().is_empty() {
+                return Err(gql_err(AppError::BadRequest(
+                    "A first or last name is required".to_string(),
+                )));
+            }
+            people.push(
+                state
+                    .db
+                    .create_person(auth.workspace_id, &input)
+                    .await
+                    .map_err(|e| gql_err(AppError::Internal(e)))?,
+            );
+        }
+        Ok(people)
+    }
+
+    async fn update_people(
+        &self,
+        ctx: &Context<'_>,
+        data: PersonUpdateInputGql,
+        filter: PersonFilterInput,
+    ) -> async_graphql::Result<Vec<Person>> {
+        let auth = require_auth(ctx)?;
+        let filter = filter.to_expr().ok_or_else(|| {
+            gql_err(AppError::BadRequest(
+                "updatePeople requires a non-empty filter".to_string(),
+            ))
+        })?;
+        let state = state(ctx);
+        let ids = state
+            .db
+            .live_person_ids(auth.workspace_id, Some(&filter))
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        let input: UpdatePersonInput = data.into();
+        let mut people = Vec::with_capacity(ids.len());
+        for id in ids {
+            if let Some(person) = state
+                .db
+                .update_person(auth.workspace_id, id, &input)
+                .await
+                .map_err(|e| gql_err(AppError::Internal(e)))?
+            {
+                people.push(person);
+            }
+        }
+        Ok(people)
+    }
+
+    async fn delete_people(
+        &self,
+        ctx: &Context<'_>,
+        filter: PersonFilterInput,
+    ) -> async_graphql::Result<Vec<Person>> {
+        let auth = require_auth(ctx)?;
+        let filter = filter.to_expr().ok_or_else(|| {
+            gql_err(AppError::BadRequest(
+                "deletePeople requires a non-empty filter".to_string(),
+            ))
+        })?;
+        let state = state(ctx);
+        let ids = state
+            .db
+            .live_person_ids(auth.workspace_id, Some(&filter))
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        let mut people = Vec::with_capacity(ids.len());
+        for id in ids {
+            if let Some(person) = state
+                .db
+                .get_person(auth.workspace_id, id)
+                .await
+                .map_err(|e| gql_err(AppError::Internal(e)))?
+            {
+                state
+                    .db
+                    .soft_delete_person(auth.workspace_id, id)
+                    .await
+                    .map_err(|e| gql_err(AppError::Internal(e)))?;
+                people.push(person);
+            }
+        }
+        Ok(people)
+    }
+
+    async fn destroy_people(
+        &self,
+        ctx: &Context<'_>,
+        filter: PersonFilterInput,
+    ) -> async_graphql::Result<Vec<Person>> {
+        let auth = require_auth(ctx)?;
+        let filter = filter.to_expr().ok_or_else(|| {
+            gql_err(AppError::BadRequest(
+                "destroyPeople requires a non-empty filter".to_string(),
+            ))
+        })?;
+        let state = state(ctx);
+        let ids = state
+            .db
+            .live_person_ids(auth.workspace_id, Some(&filter))
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        let mut people = Vec::with_capacity(ids.len());
+        for id in ids {
+            if let Some(person) = state
+                .db
+                .get_person(auth.workspace_id, id)
+                .await
+                .map_err(|e| gql_err(AppError::Internal(e)))?
+            {
+                state
+                    .db
+                    .destroy_person(auth.workspace_id, id)
+                    .await
+                    .map_err(|e| gql_err(AppError::Internal(e)))?;
+                people.push(person);
+            }
+        }
+        Ok(people)
+    }
+
+    async fn restore_people(
+        &self,
+        ctx: &Context<'_>,
+        filter: PersonFilterInput,
+    ) -> async_graphql::Result<Vec<Person>> {
+        let auth = require_auth(ctx)?;
+        let filter = filter.to_expr().ok_or_else(|| {
+            gql_err(AppError::BadRequest(
+                "restorePeople requires a non-empty filter".to_string(),
+            ))
+        })?;
+        let state = state(ctx);
+        let ids = state
+            .db
+            .deleted_person_ids(auth.workspace_id, Some(&filter))
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        let mut people = Vec::with_capacity(ids.len());
+        for id in ids {
+            if let Some(person) = state
+                .db
+                .restore_person(auth.workspace_id, id)
+                .await
+                .map_err(|e| gql_err(AppError::Internal(e)))?
+            {
+                people.push(person);
+            }
+        }
+        Ok(people)
+    }
+
     async fn create_person(
         &self,
         ctx: &Context<'_>,
