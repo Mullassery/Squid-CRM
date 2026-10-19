@@ -1,0 +1,24 @@
+# Read-only upstream clone (recreate with scripts/clone-reference.sh)
+/reference/
+
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock.orig
+
+# Node / frontend
+node_modules/
+dist/
+.yarn/cache/
+.yarn/install-state.gz
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/

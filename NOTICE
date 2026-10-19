@@ -1,0 +1,35 @@
+Squid-CRM
+=========
+
+Squid-CRM is a derivative work derived from Twenty (https://github.com/twentyhq/twenty),
+an open-source CRM by Twenty.com, PBC.
+
+Upstream reference pinned for this project:
+  Repository:  https://github.com/twentyhq/twenty
+  Commit:      08a0e5f1ee2e7db7c1e6ef3aeec9bcef731f4e98
+  Commit date: 2026-10-19
+  Server version constant: 2.50.0
+  LICENSE sha256: caece25ff05e7058a8fd98c34313757ed48d5e9304e0aeb7875d4b11de77bc01
+
+Attribution and licence obligations
+-----------------------------------
+The upstream project is licensed under a combination of terms:
+
+1. GNU Affero General Public License v3.0 (AGPL-3.0) — the default for the project.
+2. The "Twenty Application Exception", an additional permission under AGPLv3 §7.
+3. The Twenty.com Commercial License for files marked `/* @license Enterprise */`.
+   Such files are NOT used or redistributed by Squid-CRM without a valid subscription.
+4. MIT-licensed packages (e.g. twenty-cli, twenty-sdk, twenty-client-sdk,
+   create-twenty-app, twenty-shared, twenty-ui, packages/twenty-apps).
+
+The verbatim upstream LICENSE is reproduced in ./LICENSE and is not modified.
+This NOTICE does not alter or replace those terms.
+
+Squid-CRM modifications
+-----------------------
+Squid-CRM reimplements server behaviour in Rust against a documented compatibility
+boundary. In accordance with AGPL-3.0 §5, derivative works must carry prominent
+notices of modification and the date of modification, and must be licensed as a
+whole under AGPL-3.0 (together with any applicable §7 additional terms).
+
+Copyright of the original work remains with Twenty.com, PBC and its contributors.
