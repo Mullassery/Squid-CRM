@@ -23,7 +23,7 @@ published. Every claim below is marked `[fixture]` or `[source]`.
 | `/rest` | REST CRUD | **partial** (people) |
 | `/open-api/core`, `/open-api/metadata` | OpenAPI JSON | not implemented |
 | `/auth` | OAuth/SSO callbacks only | **partial** (local REST auth) |
-| `/client-config` | Frontend runtime config | not implemented |
+| `/client-config` | Frontend runtime config | **implemented** (static feature flags) |
 | `/files`, `/file-upload`, `/file` | File storage | not implemented |
 | `/webhooks` | Inbound webhooks | not implemented |
 | `/healthz` | Health | **implemented** |

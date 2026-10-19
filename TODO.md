@@ -9,7 +9,7 @@
 - [x] GraphQL login flow + person query/mutations.
 - [x] REST people list/get/create/delete with upstream envelope + error contract.
 - [x] Tenant isolation enforced and tested against real PostgreSQL.
-- [x] 14 unit + 8 integration tests passing; clippy clean; live smoke test.
+- [x] 14 unit + 9 integration tests passing; clippy clean; live smoke test.
 - [x] Dockerfile, docker-compose, CI workflow, Makefile, smoke script.
 
 ## Phase 2 (contracts)
@@ -44,7 +44,7 @@
 - [x] Person fields: phones, linkedinLink, avatarFile (JSON), companyId, actors.
 - [ ] Person relations, `avatarFile` as `FileObject`, full metadata fields.
 - [ ] Metadata API so the real frontend can load object/field definitions.
-- [ ] `client-config` endpoint.
+- [x] `client-config` endpoint.
 
 ## Phase 5 (module migration)
 - [ ] Metadata engine (object/field/view/role) and dynamic schema generation.

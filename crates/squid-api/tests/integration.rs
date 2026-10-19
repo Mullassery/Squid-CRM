@@ -741,6 +741,18 @@ async fn api_key_lifecycle_authenticates_data_api() {
     assert_eq!(denied.status, StatusCode::FORBIDDEN);
 }
 
+#[tokio::test]
+async fn client_config_matches_frontend_boot_contract() {
+    let app = test_app().await;
+    let response = send(&app, json_request("GET", "/client-config", json!({}))).await;
+    assert_eq!(response.status, StatusCode::OK, "body: {}", response.body);
+    assert_eq!(response.body["appVersion"], "v2.49.0");
+    assert_eq!(response.body["authProviders"]["password"], true);
+    assert_eq!(response.body["isCookieSessionEnabled"], true);
+    assert_eq!(response.body["frontDomain"], "localhost");
+    assert!(response.body["api"]["mutationMaximumAffectedRecords"].is_number());
+}
+
 trait WithBearer {
     fn with_bearer(self, token: &str) -> Request<Body>;
 }

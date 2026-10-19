@@ -100,6 +100,7 @@ pub fn app(state: AppState) -> Router {
 
     Router::new()
         .route("/healthz", get(rest::healthz))
+        .route("/client-config", get(rest::client_config))
         .route(
             "/rest/people",
             get(rest::list_people).post(rest::create_person),

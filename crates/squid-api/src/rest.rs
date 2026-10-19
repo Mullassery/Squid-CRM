@@ -29,6 +29,77 @@ pub struct ListPeopleParams {
     pub order_by: Option<String>,
 }
 
+/// Runtime configuration consumed by the frontend at boot. Mirrors the
+/// captured v2.49.0 shape; unimplemented integrations are reported as disabled.
+pub async fn client_config(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let front_domain = state
+        .config
+        .frontend_url
+        .split("://")
+        .nth(1)
+        .unwrap_or(&state.config.frontend_url)
+        .split('/')
+        .next()
+        .unwrap_or("localhost")
+        .split(':')
+        .next()
+        .unwrap_or("localhost")
+        .to_string();
+
+    Json(json!({
+        "appVersion": "v2.49.0",
+        "billing": {
+            "isBillingEnabled": false,
+            "trialPeriods": [
+                { "duration": 30, "isCreditCardRequired": true },
+                { "duration": 7, "isCreditCardRequired": false }
+            ]
+        },
+        "aiModels": [],
+        "aiEvaluationModels": [],
+        "aiModelTiers": [],
+        "authProviders": {
+            "google": false,
+            "magicLink": false,
+            "password": true,
+            "microsoft": false,
+            "sso": []
+        },
+        "signInPrefilled": false,
+        "isMultiWorkspaceEnabled": false,
+        "isEmailVerificationRequired": false,
+        "defaultSubdomain": "app",
+        "frontDomain": front_domain,
+        "serverUrl": "",
+        "publicFunctionDomain": null,
+        "support": { "supportDriver": "NONE" },
+        "sentry": { "release": "v2.49.0", "tracesSampleRate": 0.1 },
+        "captcha": {},
+        "api": { "mutationMaximumAffectedRecords": 100 },
+        "onboarding": null,
+        "isAttachmentPreviewEnabled": true,
+        "analyticsEnabled": false,
+        "canManageFeatureFlags": false,
+        "publicFeatureFlags": [],
+        "isCookieSessionEnabled": true,
+        "isMicrosoftMessagingEnabled": false,
+        "isMicrosoftCalendarEnabled": false,
+        "isGoogleMessagingEnabled": false,
+        "isGoogleCalendarEnabled": false,
+        "isConfigVariablesInDbEnabled": true,
+        "isImapSmtpCaldavEnabled": true,
+        "isEmailingDomainInDemoMode": true,
+        "allowRequestsToTwentyIcons": true,
+        "isBookCallOnboardingStepEnabled": false,
+        "isCompanyEnrichmentEnabled": false,
+        "isCloudflareIntegrationEnabled": false,
+        "isClickHouseConfigured": false,
+        "isWorkspaceSchemaDDLLocked": false,
+        "isOnboardingAiChatEnabled": false,
+        "enterpriseInstanceType": "production"
+    }))
+}
+
 pub async fn healthz() -> &'static str {
     "ok"
 }
