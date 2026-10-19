@@ -756,6 +756,40 @@ impl Db {
         Ok(row.as_ref().map(row_to_person))
     }
 
+    /// Permanently remove a person (upstream `soft_delete=false`).
+    pub async fn destroy_person(
+        &self,
+        workspace_id: Uuid,
+        person_id: Uuid,
+    ) -> anyhow::Result<bool> {
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let result = sqlx::query(&format!("DELETE FROM {schema}.person WHERE id = $1"))
+            .bind(person_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    /// Undo a soft delete.
+    pub async fn restore_person(
+        &self,
+        workspace_id: Uuid,
+        person_id: Uuid,
+    ) -> anyhow::Result<Option<Person>> {
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let row = sqlx::query(&format!(
+            "UPDATE {schema}.person SET deleted_at = NULL, updated_at = now()
+             WHERE id = $1 AND deleted_at IS NOT NULL
+             RETURNING {PERSON_SELECT}"
+        ))
+        .bind(person_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.as_ref().map(row_to_person))
+    }
+
     /// Soft-delete, matching upstream's recoverable deletion semantics.
     pub async fn soft_delete_person(
         &self,

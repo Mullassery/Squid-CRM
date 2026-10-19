@@ -31,6 +31,12 @@ pub struct ListPeopleParams {
     pub order_by: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct DeletePersonParams {
+    #[serde(default)]
+    pub soft_delete: bool,
+}
+
 /// Runtime configuration consumed by the frontend at boot. Mirrors the
 /// captured v2.49.0 shape; unimplemented integrations are reported as disabled.
 pub async fn client_config(State(state): State<AppState>) -> Json<serde_json::Value> {
@@ -220,20 +226,46 @@ pub async fn delete_person(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<Uuid>,
+    Query(params): Query<DeletePersonParams>,
 ) -> AppResult<Json<serde_json::Value>> {
     let auth = require(&state, &headers).await?;
 
-    let deleted = state
-        .db
-        .soft_delete_person(auth.workspace_id, id)
-        .await
-        .map_err(AppError::Internal)?;
+    let deleted = if params.soft_delete {
+        state
+            .db
+            .soft_delete_person(auth.workspace_id, id)
+            .await
+            .map_err(AppError::Internal)?
+    } else {
+        state
+            .db
+            .destroy_person(auth.workspace_id, id)
+            .await
+            .map_err(AppError::Internal)?
+    };
 
     if !deleted {
         return Err(AppError::NotFound("Record not found".to_string()));
     }
 
     Ok(Json(json!({ "data": { "deletePerson": { "id": id } } })))
+}
+
+pub async fn restore_person(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<serde_json::Value>> {
+    let auth = require(&state, &headers).await?;
+
+    let person = state
+        .db
+        .restore_person(auth.workspace_id, id)
+        .await
+        .map_err(AppError::Internal)?
+        .ok_or_else(|| AppError::NotFound("Record not found".to_string()))?;
+
+    Ok(Json(json!({ "data": { "restorePerson": person } })))
 }
 
 pub async fn me(

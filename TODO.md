@@ -9,7 +9,7 @@
 - [x] GraphQL login flow + person query/mutations.
 - [x] REST people list/get/create/delete with upstream envelope + error contract.
 - [x] Tenant isolation enforced and tested against real PostgreSQL.
-- [x] 14 unit + 9 integration tests passing; clippy clean; live smoke test.
+- [x] 14 unit + 11 integration tests passing; clippy clean; live smoke test.
 - [x] Dockerfile, docker-compose, CI workflow, Makefile, smoke script.
 
 ## Phase 2 (contracts)
@@ -43,6 +43,7 @@
 - [ ] Rate limiting on auth endpoints.
 - [x] Person fields: phones, linkedinLink, avatarFile (JSON), companyId, actors.
 - [x] Person update (`PATCH /rest/people/{id}`, GraphQL `updatePerson`).
+- [x] Soft/hard delete + restore (`soft_delete`, `restorePerson`, `destroyPerson`).
 - [ ] Person relations, `avatarFile` as `FileObject`, null-clearing updates, full metadata fields.
 - [ ] Metadata API so the real frontend can load object/field definitions.
 - [x] `client-config` endpoint.

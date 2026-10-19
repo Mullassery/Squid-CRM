@@ -8,7 +8,7 @@ pub mod rest;
 use std::sync::Arc;
 
 use axum::http::{HeaderMap, HeaderValue};
-use axum::routing::{get, post};
+use axum::routing::{get, patch, post};
 use axum::Router;
 use serde::{Deserialize, Serialize};
 use squid_auth::{hash_token, AuthContext, TokenKind, TokenService, SESSION_COOKIE_NAME};
@@ -111,6 +111,7 @@ pub fn app(state: AppState) -> Router {
                 .patch(rest::update_person)
                 .delete(rest::delete_person),
         )
+        .route("/rest/people/{id}/restore", patch(rest::restore_person))
         .route("/rest/me", get(rest::me))
         .route("/auth/signup", post(auth::signup))
         .route("/auth/signin", post(auth::signin))

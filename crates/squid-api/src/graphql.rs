@@ -824,6 +824,43 @@ impl MutationRoot {
             .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))
     }
 
+    async fn destroy_person(
+        &self,
+        ctx: &Context<'_>,
+        id: uuid::Uuid,
+    ) -> async_graphql::Result<Person> {
+        let auth = require_auth(ctx)?;
+        let state = state(ctx);
+        let person = state
+            .db
+            .get_person(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))?;
+
+        state
+            .db
+            .destroy_person(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+
+        Ok(person)
+    }
+
+    async fn restore_person(
+        &self,
+        ctx: &Context<'_>,
+        id: uuid::Uuid,
+    ) -> async_graphql::Result<Person> {
+        let auth = require_auth(ctx)?;
+        state(ctx)
+            .db
+            .restore_person(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))
+    }
+
     async fn delete_person(
         &self,
         ctx: &Context<'_>,

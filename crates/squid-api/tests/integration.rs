@@ -812,6 +812,153 @@ async fn client_config_matches_frontend_boot_contract() {
     assert!(response.body["api"]["mutationMaximumAffectedRecords"].is_number());
 }
 
+#[tokio::test]
+async fn soft_delete_and_restore_round_trip() {
+    let app = test_app().await;
+    let email = unique_email("restore");
+    let (token, _workspace) = signup(&app, &email).await;
+
+    let created = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/people",
+            &token,
+            Some(person_body("Soft", "Delete", "soft@example.com")),
+        ),
+    )
+    .await;
+    assert_eq!(created.status, StatusCode::CREATED);
+    let person_id = created.body["data"]["createPerson"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let soft = send(
+        &app,
+        authorized(
+            "DELETE",
+            &format!("/rest/people/{person_id}?soft_delete=true"),
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(soft.status, StatusCode::OK, "body: {}", soft.body);
+
+    let gone = send(
+        &app,
+        authorized("GET", &format!("/rest/people/{person_id}"), &token, None),
+    )
+    .await;
+    assert_eq!(gone.status, StatusCode::NOT_FOUND);
+
+    let restored = send(
+        &app,
+        json_request(
+            "PATCH",
+            &format!("/rest/people/{person_id}/restore"),
+            json!({}),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(restored.status, StatusCode::OK, "body: {}", restored.body);
+    assert_eq!(restored.body["data"]["restorePerson"]["id"], person_id);
+
+    let back = send(
+        &app,
+        authorized("GET", &format!("/rest/people/{person_id}"), &token, None),
+    )
+    .await;
+    assert_eq!(back.status, StatusCode::OK);
+
+    // Default DELETE is a hard delete (upstream `soft_delete=false`).
+    let hard = send(
+        &app,
+        authorized("DELETE", &format!("/rest/people/{person_id}"), &token, None),
+    )
+    .await;
+    assert_eq!(hard.status, StatusCode::OK);
+    let gone = send(
+        &app,
+        authorized("GET", &format!("/rest/people/{person_id}"), &token, None),
+    )
+    .await;
+    assert_eq!(gone.status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn graphql_soft_delete_restore_and_destroy() {
+    let app = test_app().await;
+    let email = unique_email("gql-destroy");
+    let (token, _workspace) = signup(&app, &email).await;
+
+    let created = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/people",
+            &token,
+            Some(person_body("Graph", "Lifecycle", "graph@example.com")),
+        ),
+    )
+    .await;
+    assert_eq!(created.status, StatusCode::CREATED);
+    let person_id = created.body["data"]["createPerson"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let deleted = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "mutation($id: UUID!) { deletePerson(id:$id) { id } }",
+                "variables": { "id": person_id }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(deleted.status, StatusCode::OK, "body: {}", deleted.body);
+    assert_eq!(deleted.body["data"]["deletePerson"]["id"], person_id);
+
+    let restored = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "mutation($id: UUID!) { restorePerson(id:$id) { id } }",
+                "variables": { "id": person_id }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(restored.status, StatusCode::OK, "body: {}", restored.body);
+    assert_eq!(restored.body["data"]["restorePerson"]["id"], person_id);
+
+    let destroyed = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "mutation($id: UUID!) { destroyPerson(id:$id) { id } }",
+                "variables": { "id": person_id }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(destroyed.status, StatusCode::OK, "body: {}", destroyed.body);
+    assert_eq!(destroyed.body["data"]["destroyPerson"]["id"], person_id);
+}
+
 trait WithBearer {
     fn with_bearer(self, token: &str) -> Request<Body>;
 }

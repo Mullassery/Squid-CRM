@@ -113,6 +113,10 @@ Delete — `DELETE /rest/people/{id}` → `200`:
 { "data": { "deletePerson": { "id": "..." } } }
 ```
 
+`?soft_delete=true` performs a recoverable delete; the default is a permanent
+delete, matching the OpenAPI default (`soft_delete=false`). Restore —
+`PATCH /rest/people/{id}/restore` → `{ "data": { "restorePerson": { ... } } }`.
+
 Errors `[fixture]`:
 
 ```json
@@ -226,6 +230,8 @@ Alignment completed and covered by tests:
 | `additionalEmails` / `additionalPhones` | `[]`, never `null` | aligned |
 | Person fields | phones, links, avatar, position, actors, deletedAt, searchVector, companyId | aligned (see actor/searchVector notes) |
 | REST/GraphQL update | `PATCH /rest/people/{id}`, `updatePerson` | aligned; `None` fields unchanged (no explicit null clearing yet) |
+| Delete semantics | default hard delete, `soft_delete=true` soft, restore endpoint | aligned |
+| GraphQL lifecycle | `deletePerson`, `destroyPerson`, `restorePerson` | aligned |
 | GraphQL `people` | `PersonConnection` with `edges`/`pageInfo` | aligned |
 | GraphQL `person(filter:)` | `PersonFilterInput!` | aligned for `id.eq` |
 | GraphQL `createPerson(data:)` | `PersonCreateInput!`, `upsert`, `shareWith` | aligned; `upsert`/`shareWith` accepted but not applied |
