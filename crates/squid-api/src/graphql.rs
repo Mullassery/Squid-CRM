@@ -14,7 +14,8 @@ use axum::response::{Html, IntoResponse, Response};
 use chrono::{DateTime, Utc};
 use squid_auth::AuthToken;
 use squid_auth::{hash_password, verify_password, AuthContext};
-use squid_core::{AppError, CreatePersonInput, Person, User, Workspace};
+use squid_core::{AppError, CreatePersonInput, GqlJson, PageInfo, Person, User, Workspace};
+use squid_db::{OrderTerm, PersonColumn};
 
 use crate::auth::{normalize_email, unique_subdomain};
 use crate::{clear_session_cookie, resolve_auth, session_cookie, AppState, AuthTokenPair};
@@ -49,39 +50,282 @@ pub struct LoginTokenPayload {
     pub login_token: AuthToken,
 }
 
-#[derive(Debug, InputObject)]
-pub struct FullNameInput {
-    pub first_name: String,
-    pub last_name: String,
+/// Upstream exposes connection cursors as a dedicated `Cursor` scalar.
+#[derive(Debug, Clone)]
+pub struct Cursor(pub String);
+
+#[async_graphql::Scalar(name = "Cursor")]
+impl async_graphql::ScalarType for Cursor {
+    fn parse(value: async_graphql::Value) -> async_graphql::InputValueResult<Self> {
+        match value {
+            async_graphql::Value::String(value) => Ok(Self(value)),
+            _ => Err(async_graphql::InputValueError::expected_type(value)),
+        }
+    }
+
+    fn to_value(&self) -> async_graphql::Value {
+        async_graphql::Value::String(self.0.clone())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, async_graphql::Enum)]
+pub enum RecordShareAccessLevelEnum {
+    Read,
+    ReadWrite,
+    Full,
+    None,
 }
 
 #[derive(Debug, InputObject)]
-pub struct EmailsInput {
-    pub primary_email: String,
+pub struct ShareWithInput {
+    pub workspace_member_id: Option<uuid::Uuid>,
+    pub role_id: Option<uuid::Uuid>,
+    pub everyone: Option<bool>,
+    pub access_level: Option<RecordShareAccessLevelEnum>,
+}
+
+#[derive(Debug, InputObject)]
+pub struct FullNameCreateInput {
+    pub first_name: Option<String>,
+    pub last_name: Option<String>,
+}
+
+#[derive(Debug, InputObject)]
+pub struct EmailsCreateInput {
+    pub primary_email: Option<String>,
     pub additional_emails: Option<Vec<String>>,
 }
 
 #[derive(Debug, InputObject)]
-#[graphql(name = "CreatePersonInput")]
-pub struct CreatePersonInputGql {
-    pub name: FullNameInput,
-    pub emails: EmailsInput,
-    pub job_title: Option<String>,
+pub struct LinksCreateInput {
+    pub primary_link_label: Option<String>,
+    pub primary_link_url: Option<String>,
+    pub secondary_links: Option<Vec<GqlJson<serde_json::Value>>>,
 }
 
-impl From<CreatePersonInputGql> for CreatePersonInput {
-    fn from(input: CreatePersonInputGql) -> Self {
+#[derive(Debug, InputObject)]
+pub struct PhonesCreateInput {
+    pub primary_phone_number: Option<String>,
+    pub primary_phone_country_code: Option<String>,
+    pub primary_phone_calling_code: Option<String>,
+    pub additional_phones: Option<Vec<GqlJson<serde_json::Value>>>,
+}
+
+#[derive(Debug, InputObject)]
+#[graphql(name = "PersonCreateInput")]
+pub struct PersonCreateInputGql {
+    pub name: Option<FullNameCreateInput>,
+    pub emails: Option<EmailsCreateInput>,
+    pub job_title: Option<String>,
+    pub linkedin_link: Option<LinksCreateInput>,
+    pub phones: Option<PhonesCreateInput>,
+    pub avatar_url: Option<String>,
+    pub position: Option<f64>,
+    pub company_id: Option<uuid::Uuid>,
+}
+
+impl From<PersonCreateInputGql> for CreatePersonInput {
+    fn from(input: PersonCreateInputGql) -> Self {
         CreatePersonInput {
-            name: squid_core::FullName {
-                first_name: input.name.first_name,
-                last_name: input.name.last_name,
-            },
-            emails: squid_core::Emails {
-                primary_email: input.emails.primary_email,
-                additional_emails: input.emails.additional_emails,
-            },
+            name: input
+                .name
+                .map(|name| squid_core::FullName {
+                    first_name: name.first_name.unwrap_or_default(),
+                    last_name: name.last_name.unwrap_or_default(),
+                })
+                .unwrap_or_default(),
+            emails: input
+                .emails
+                .map(|emails| squid_core::Emails {
+                    primary_email: emails.primary_email.unwrap_or_default(),
+                    additional_emails: emails.additional_emails.unwrap_or_default(),
+                })
+                .unwrap_or_default(),
             job_title: input.job_title,
+            linkedin_link: input.linkedin_link.map(|links| squid_core::Links {
+                primary_link_label: links.primary_link_label.unwrap_or_default(),
+                primary_link_url: links.primary_link_url.unwrap_or_default(),
+                secondary_links: links.secondary_links.unwrap_or_default(),
+            }),
+            phones: input.phones.map(|phones| squid_core::Phones {
+                primary_phone_number: phones.primary_phone_number.unwrap_or_default(),
+                primary_phone_country_code: phones.primary_phone_country_code.unwrap_or_default(),
+                primary_phone_calling_code: phones.primary_phone_calling_code.unwrap_or_default(),
+                additional_phones: phones.additional_phones.unwrap_or_default(),
+            }),
+            avatar_url: input.avatar_url,
+            position: input.position,
+            company_id: input.company_id,
         }
+    }
+}
+
+#[derive(Debug, InputObject)]
+pub struct UuidFilter {
+    pub eq: Option<uuid::Uuid>,
+}
+
+#[derive(Debug, InputObject)]
+pub struct StringFilter {
+    pub eq: Option<String>,
+}
+
+#[derive(Debug, InputObject)]
+pub struct PersonFilterInput {
+    pub id: Option<UuidFilter>,
+    pub job_title: Option<StringFilter>,
+    pub and: Option<Vec<PersonFilterInput>>,
+    pub or: Option<Vec<PersonFilterInput>>,
+    pub not: Option<Box<PersonFilterInput>>,
+}
+
+impl PersonFilterInput {
+    fn id_eq(&self) -> Option<uuid::Uuid> {
+        self.id.as_ref().and_then(|id| id.eq)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.id_eq().is_none()
+            && self.job_title.is_none()
+            && self.and.as_ref().is_none_or(Vec::is_empty)
+            && self.or.as_ref().is_none_or(Vec::is_empty)
+            && self.not.is_none()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, async_graphql::Enum)]
+pub enum OrderByDirection {
+    AscNullsFirst,
+    AscNullsLast,
+    DescNullsFirst,
+    DescNullsLast,
+}
+
+#[derive(Debug, InputObject)]
+pub struct FullNameOrderByInput {
+    pub first_name: Option<OrderByDirection>,
+    pub last_name: Option<OrderByDirection>,
+}
+
+#[derive(Debug, InputObject)]
+pub struct EmailsOrderByInput {
+    pub primary_email: Option<OrderByDirection>,
+}
+
+#[derive(Debug, InputObject)]
+pub struct PersonOrderByInput {
+    pub id: Option<OrderByDirection>,
+    pub created_at: Option<OrderByDirection>,
+    pub updated_at: Option<OrderByDirection>,
+    pub name: Option<FullNameOrderByInput>,
+    pub emails: Option<EmailsOrderByInput>,
+    pub job_title: Option<OrderByDirection>,
+}
+
+#[derive(Debug, SimpleObject)]
+pub struct PersonEdge {
+    pub node: Person,
+    pub cursor: Cursor,
+}
+
+#[derive(Debug, SimpleObject)]
+pub struct PersonConnection {
+    pub total_count: Option<i64>,
+    pub edges: Vec<PersonEdge>,
+    pub page_info: PageInfo,
+}
+
+fn empty_filter() -> PersonFilterInput {
+    PersonFilterInput {
+        id: None,
+        job_title: None,
+        and: None,
+        or: None,
+        not: None,
+    }
+}
+
+fn direction_flags(direction: OrderByDirection) -> (bool, bool) {
+    match direction {
+        OrderByDirection::AscNullsFirst => (false, true),
+        OrderByDirection::AscNullsLast => (false, false),
+        OrderByDirection::DescNullsFirst => (true, true),
+        OrderByDirection::DescNullsLast => (true, false),
+    }
+}
+
+fn order_terms(input: &[PersonOrderByInput]) -> Vec<OrderTerm> {
+    let mut terms = Vec::new();
+    for order in input {
+        let mut push = |column, direction: Option<OrderByDirection>| {
+            if let Some(direction) = direction {
+                let (descending, nulls_first) = direction_flags(direction);
+                terms.push(OrderTerm {
+                    column,
+                    descending,
+                    nulls_first,
+                });
+            }
+        };
+        push(PersonColumn::Id, order.id);
+        push(PersonColumn::CreatedAt, order.created_at);
+        push(PersonColumn::UpdatedAt, order.updated_at);
+        if let Some(name) = &order.name {
+            push(PersonColumn::NameFirst, name.first_name);
+            push(PersonColumn::NameLast, name.last_name);
+        }
+        if let Some(emails) = &order.emails {
+            push(PersonColumn::PrimaryEmail, emails.primary_email);
+        }
+        push(PersonColumn::JobTitle, order.job_title);
+    }
+    terms
+}
+
+fn connection(people: Vec<Person>, limit: i64) -> PersonConnection {
+    let total = people.len() as i64;
+    let has_next_page = total > limit;
+    let people: Vec<Person> = people.into_iter().take(limit as usize).collect();
+    connection_with(people, total, has_next_page, false)
+}
+
+fn connection_from_page(page: squid_db::PersonPage) -> PersonConnection {
+    connection_with(
+        page.persons,
+        page.total,
+        page.has_next_page,
+        page.has_previous_page,
+    )
+}
+
+fn connection_with(
+    people: Vec<Person>,
+    total: i64,
+    has_next_page: bool,
+    has_previous_page: bool,
+) -> PersonConnection {
+    let start_cursor = people
+        .first()
+        .map(|person| crate::rest::encode_cursor(person.id));
+    let end_cursor = people
+        .last()
+        .map(|person| crate::rest::encode_cursor(person.id));
+    let edges = people
+        .into_iter()
+        .map(|person| PersonEdge {
+            cursor: Cursor(crate::rest::encode_cursor(person.id)),
+            node: person,
+        })
+        .collect();
+    PersonConnection {
+        total_count: Some(total),
+        edges,
+        page_info: PageInfo {
+            has_next_page,
+            has_previous_page,
+            start_cursor,
+            end_cursor,
+        },
     }
 }
 
@@ -106,7 +350,7 @@ fn require_auth<'a>(ctx: &'a Context<'_>) -> async_graphql::Result<&'a AuthConte
 }
 
 fn gql_err(error: AppError) -> async_graphql::Error {
-    let code = error.error_code().unwrap_or("BAD_USER_INPUT");
+    let code = error.graphql_code();
     async_graphql::Error::new(error.public_message()).extend_with(|_, ext| {
         ext.set("code", code);
     })
@@ -143,30 +387,80 @@ impl QueryRoot {
             .map_err(|e| gql_err(AppError::Internal(anyhow::anyhow!(e))))
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn people(
         &self,
         ctx: &Context<'_>,
-        limit: Option<i64>,
+        first: Option<i64>,
+        last: Option<i64>,
         offset: Option<i64>,
-    ) -> async_graphql::Result<Vec<Person>> {
+        before: Option<String>,
+        after: Option<String>,
+        filter: Option<PersonFilterInput>,
+        order_by: Option<Vec<PersonOrderByInput>>,
+    ) -> async_graphql::Result<PersonConnection> {
         let auth = require_auth(ctx)?;
         let state = state(ctx);
-        let limit = limit.unwrap_or(20).clamp(1, state.config.max_page_size);
+        let limit = first
+            .or(last)
+            .unwrap_or(20)
+            .clamp(1, state.config.max_page_size);
         let offset = offset.unwrap_or(0).max(0);
+        let starting_after = after
+            .as_deref()
+            .map(crate::rest::decode_cursor)
+            .transpose()
+            .map_err(gql_err)?;
+        let ending_before = before
+            .as_deref()
+            .map(crate::rest::decode_cursor)
+            .transpose()
+            .map_err(gql_err)?;
+        let order = order_terms(order_by.as_deref().unwrap_or_default());
 
-        state
+        let filter = filter.unwrap_or_else(empty_filter);
+        if let Some(id) = filter.id_eq() {
+            let person = state
+                .db
+                .get_person(auth.workspace_id, id)
+                .await
+                .map_err(|e| gql_err(AppError::Internal(e)))?;
+            let people: Vec<Person> = person.into_iter().collect();
+            return Ok(connection(people, limit));
+        }
+        if !filter.is_empty() {
+            return Err(gql_err(AppError::BadRequest(
+                "Unsupported filter: only id.eq is implemented".to_string(),
+            )));
+        }
+
+        let page = state
             .db
-            .list_persons(auth.workspace_id, limit, offset)
+            .list_persons_page(
+                auth.workspace_id,
+                limit,
+                offset,
+                starting_after,
+                ending_before,
+                &order,
+            )
             .await
-            .map_err(|e| gql_err(AppError::Internal(e)))
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+
+        Ok(connection_from_page(page))
     }
 
     async fn person(
         &self,
         ctx: &Context<'_>,
-        id: uuid::Uuid,
+        filter: PersonFilterInput,
     ) -> async_graphql::Result<Option<Person>> {
         let auth = require_auth(ctx)?;
+        let id = filter.id_eq().ok_or_else(|| {
+            gql_err(AppError::BadRequest(
+                "person requires filter.id.eq".to_string(),
+            ))
+        })?;
         state(ctx)
             .db
             .get_person(auth.workspace_id, id)
@@ -304,11 +598,13 @@ impl MutationRoot {
     async fn create_person(
         &self,
         ctx: &Context<'_>,
-        input: CreatePersonInputGql,
+        data: PersonCreateInputGql,
+        #[graphql(default)] _upsert: bool,
+        _share_with: Option<Vec<ShareWithInput>>,
     ) -> async_graphql::Result<Person> {
         let auth = require_auth(ctx)?;
         let state = state(ctx);
-        let input: CreatePersonInput = input.into();
+        let input: CreatePersonInput = data.into();
 
         if input.name.first_name.trim().is_empty() && input.name.last_name.trim().is_empty() {
             return Err(gql_err(AppError::BadRequest(
@@ -327,13 +623,23 @@ impl MutationRoot {
         &self,
         ctx: &Context<'_>,
         id: uuid::Uuid,
-    ) -> async_graphql::Result<bool> {
+    ) -> async_graphql::Result<Person> {
         let auth = require_auth(ctx)?;
-        state(ctx)
+        let state = state(ctx);
+        let person = state
+            .db
+            .get_person(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))?;
+
+        state
             .db
             .soft_delete_person(auth.workspace_id, id)
             .await
-            .map_err(|e| gql_err(AppError::Internal(e)))
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+
+        Ok(person)
     }
 
     async fn sign_out(&self, ctx: &Context<'_>) -> async_graphql::Result<bool> {

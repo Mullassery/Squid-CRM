@@ -48,13 +48,24 @@ impl AppError {
         }
     }
 
+    /// Optional `code` member on REST errors. The captured upstream bodies omit
+    /// it for 400/403/404; authentication failures may include one.
     pub fn error_code(&self) -> Option<&'static str> {
         match self {
             AppError::Unauthorized(_) => Some("UNAUTHENTICATED"),
-            AppError::Forbidden(_) => Some("FORBIDDEN"),
-            AppError::NotFound(_) => Some("NOT_FOUND"),
-            AppError::Conflict(_) => Some("CONFLICT"),
             _ => None,
+        }
+    }
+
+    /// GraphQL error extension code (all variants get one).
+    pub fn graphql_code(&self) -> &'static str {
+        match self {
+            AppError::BadRequest(_) => "BAD_USER_INPUT",
+            AppError::Unauthorized(_) => "UNAUTHENTICATED",
+            AppError::Forbidden(_) => "FORBIDDEN",
+            AppError::NotFound(_) => "NOT_FOUND",
+            AppError::Conflict(_) => "CONFLICT",
+            AppError::Internal(_) => "INTERNAL_SERVER_ERROR",
         }
     }
 }

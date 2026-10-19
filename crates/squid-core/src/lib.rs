@@ -13,6 +13,7 @@ use uuid::Uuid;
 pub mod config;
 pub mod error;
 
+pub use async_graphql::Json as GqlJson;
 pub use config::Config;
 pub use error::{AppError, AppResult};
 
@@ -94,39 +95,117 @@ pub struct FullName {
 pub struct Emails {
     #[serde(rename = "primaryEmail")]
     pub primary_email: String,
-    #[serde(rename = "additionalEmails")]
-    pub additional_emails: Option<Vec<String>>,
+    #[serde(rename = "additionalEmails", default)]
+    pub additional_emails: Vec<String>,
 }
 
-/// Phase 4 subset of the standard `person` object.
+/// Composite `LinksMetadata` shape (`linkedinLink`).
+#[derive(
+    Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, async_graphql::SimpleObject,
+)]
+pub struct Links {
+    #[serde(rename = "primaryLinkLabel", default)]
+    pub primary_link_label: String,
+    #[serde(rename = "primaryLinkUrl", default)]
+    pub primary_link_url: String,
+    #[serde(rename = "secondaryLinks", default)]
+    pub secondary_links: Vec<async_graphql::Json<serde_json::Value>>,
+}
+
+/// Composite `PhonesMetadata` shape.
+#[derive(
+    Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, async_graphql::SimpleObject,
+)]
+pub struct Phones {
+    #[serde(rename = "primaryPhoneNumber", default)]
+    pub primary_phone_number: String,
+    #[serde(rename = "primaryPhoneCountryCode", default)]
+    pub primary_phone_country_code: String,
+    #[serde(rename = "primaryPhoneCallingCode", default)]
+    pub primary_phone_calling_code: String,
+    #[serde(rename = "additionalPhones", default)]
+    pub additional_phones: Vec<async_graphql::Json<serde_json::Value>>,
+}
+
+/// `createdBy` / `updatedBy` actor shape.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, async_graphql::SimpleObject)]
+pub struct Actor {
+    pub source: String,
+    #[serde(rename = "workspaceMemberId")]
+    pub workspace_member_id: Option<Uuid>,
+    pub name: String,
+    pub context: async_graphql::Json<serde_json::Value>,
+}
+
+impl Default for Actor {
+    fn default() -> Self {
+        Self {
+            source: "API".to_string(),
+            workspace_member_id: None,
+            name: "API".to_string(),
+            context: async_graphql::Json(serde_json::json!({})),
+        }
+    }
+}
+
+/// Phase 4 subset of the standard `person` object, aligned with the captured
+/// v2.49.0 REST/GraphQL field set.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, async_graphql::SimpleObject)]
 pub struct Person {
     pub id: Uuid,
-    pub name: FullName,
-    pub emails: Emails,
-    #[serde(rename = "jobTitle")]
-    pub job_title: Option<String>,
     #[serde(rename = "createdAt")]
     pub created_at: chrono::DateTime<chrono::Utc>,
     #[serde(rename = "updatedAt")]
     pub updated_at: chrono::DateTime<chrono::Utc>,
+    #[serde(rename = "deletedAt")]
+    pub deleted_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub name: FullName,
+    pub emails: Emails,
+    #[serde(rename = "linkedinLink")]
+    pub linkedin_link: Links,
+    #[serde(rename = "jobTitle")]
+    pub job_title: Option<String>,
+    pub phones: Phones,
+    #[serde(rename = "avatarUrl")]
+    pub avatar_url: String,
+    #[serde(rename = "avatarFile")]
+    pub avatar_file: Option<async_graphql::Json<serde_json::Value>>,
+    pub position: f64,
+    #[serde(rename = "createdBy")]
+    pub created_by: Actor,
+    #[serde(rename = "updatedBy")]
+    pub updated_by: Actor,
+    #[serde(rename = "searchVector")]
+    pub search_vector: Option<String>,
+    #[serde(rename = "companyId")]
+    pub company_id: Option<Uuid>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct CreatePersonInput {
     pub name: FullName,
     pub emails: Emails,
     #[serde(rename = "jobTitle", default)]
     pub job_title: Option<String>,
+    #[serde(rename = "linkedinLink", default)]
+    pub linkedin_link: Option<Links>,
+    #[serde(default)]
+    pub phones: Option<Phones>,
+    #[serde(rename = "avatarUrl", default)]
+    pub avatar_url: Option<String>,
+    #[serde(default)]
+    pub position: Option<f64>,
+    #[serde(rename = "companyId", default)]
+    pub company_id: Option<Uuid>,
 }
 
 /// Pagination envelope identical to the audited `PageInfo` interface.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, async_graphql::SimpleObject)]
 pub struct PageInfo {
-    #[serde(rename = "hasNextPage", skip_serializing_if = "Option::is_none")]
-    pub has_next_page: Option<bool>,
-    #[serde(rename = "hasPreviousPage", skip_serializing_if = "Option::is_none")]
-    pub has_previous_page: Option<bool>,
+    #[serde(rename = "hasNextPage")]
+    pub has_next_page: bool,
+    #[serde(rename = "hasPreviousPage")]
+    pub has_previous_page: bool,
     #[serde(rename = "startCursor")]
     pub start_cursor: Option<String>,
     #[serde(rename = "endCursor")]
@@ -175,7 +254,7 @@ fn status_name(status: StatusCode) -> &'static str {
     match status {
         StatusCode::BAD_REQUEST => "BadRequestException",
         StatusCode::UNAUTHORIZED => "UnauthorizedException",
-        StatusCode::FORBIDDEN => "ForbiddenException",
+        StatusCode::FORBIDDEN => "FORBIDDEN_EXCEPTION",
         StatusCode::NOT_FOUND => "NotFoundException",
         StatusCode::CONFLICT => "ConflictException",
         StatusCode::UNPROCESSABLE_ENTITY => "UnprocessableEntityException",

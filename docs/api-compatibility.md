@@ -196,22 +196,44 @@ list or delete workspace A's records.
 
 ## 8. Divergences in the current Rust slice
 
+Alignment completed and covered by tests:
+
+| Area | Contract | Rust status |
+| --- | --- | --- |
+| REST create | `data.createPerson` | aligned |
+| REST delete | `data.deletePerson.id` | aligned |
+| REST unauth | `403` `FORBIDDEN_EXCEPTION` + `Missing authentication token` | aligned |
+| REST 404 | `NotFoundException`, `Record not found`, no `code` | aligned |
+| REST 400 | `BadRequestException`, no `code` | aligned |
+| REST cursors | base64 `{"id":"<uuid>"}` | aligned (exact fixture cursor asserted) |
+| REST paging | `limit`, `offset`, `starting_after`, `ending_before` | aligned |
+| REST sorting | `order_by=field[Direction],...` | aligned for whitelisted person columns |
+| `additionalEmails` / `additionalPhones` | `[]`, never `null` | aligned |
+| Person fields | phones, links, avatar, position, actors, deletedAt, searchVector, companyId | aligned (see actor/searchVector notes) |
+| GraphQL `people` | `PersonConnection` with `edges`/`pageInfo` | aligned |
+| GraphQL `person(filter:)` | `PersonFilterInput!` | aligned for `id.eq` |
+| GraphQL `createPerson(data:)` | `PersonCreateInput!`, `upsert`, `shareWith` | aligned; `upsert`/`shareWith` accepted but not applied |
+| GraphQL `deletePerson(id:)` | returns `Person` | aligned |
+| GraphQL cursor type | `Cursor` scalar | aligned |
+| GraphQL `OrderByDirection` | four null-order variants | aligned |
+
+Known remaining divergences (do not claim parity):
+
 | Area | Upstream | Rust today | Action |
 | --- | --- | --- | --- |
-| REST create | `data.createPerson` | `data.person` | fix |
-| REST delete | `data.deletePerson.id` | `data.id` | fix |
-| REST unauth | `403` `FORBIDDEN_EXCEPTION` | `401` `UNAUTHORIZED` | fix |
-| REST 404 | `NotFoundException`, no `code` | includes `code`, different message | fix |
-| Cursors | base64 `{"id"}` | `null` | fix |
-| `additionalEmails` | `[]` | `null` | fix |
-| Person fields | phones, links, avatar, position, actors, deletedAt, searchVector | name/emails/jobTitle/timestamps | staged |
-| GraphQL `people` | `PersonConnection` | `[Person!]!` | fix |
-| GraphQL `person` | `(filter: PersonFilterInput!)` | `(id: UUID!)` | fix |
-| GraphQL create | `(data: PersonCreateInput!)` | `(input: ...)` | fix |
-| GraphQL auth host | `/metadata` | `/graphql` (and `/auth`) | document; add `/metadata` |
-| Data-API auth | API keys | access token/cookie | add API keys |
-| Workspace bootstrap | create → `activateWorkspace` | atomic signup | document |
-| REST validation | metadata grammar | basic validation | staged |
+| GraphQL auth host | `/metadata` | `/graphql` (and `/auth`) | add `/metadata` mount |
+| Data-API auth | API keys only | access token/cookie accepted | add API keys, then tighten |
+| Workspace bootstrap | `PENDING_CREATION` + `activateWorkspace` | atomic signup + immediate schema | document; add lifecycle |
+| Workspace prefill | sample people/companies on activation | none (new workspace has 0 people) | implement prefill |
+| GraphQL filter grammar | full `and`/`or`/`not`, composite filters | `id.eq` only; other filters return `BAD_USER_INPUT` | expand filter compiler |
+| REST sort errors | `FIELD_NOT_FOUND` for unknown fields | `400 BadRequestException` text | align error code |
+| GraphQL nullability | `name`/`emails`/`linkedinLink`/`phones`/`avatarUrl` nullable | non-null | align schema |
+| GraphQL scalars | `Position`, `TSVector`, `ConnectionCursor` | `Float`, `String`, `Cursor` | add scalar types |
+| `createdBy`/`updatedBy` | actor name = workspace member | `name: "API"` | populate from principal |
+| `searchVector` | PostgreSQL `to_tsvector` output | simplified lexeme builder | use `to_tsvector` |
+| `avatarFile` | `[FileObject]` | JSON value/null | model file objects |
+| REST `fields`/`depth`/`viewId` | supported | ignored/absent | add projection params |
+| Error `code` for auth | `NO_AUTHENTICATION_CONTEXT` on data API | none | align with API-key flow |
 
 ## 9. Verification method
 

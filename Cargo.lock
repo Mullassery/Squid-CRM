@@ -2275,6 +2275,7 @@ dependencies = [
  "async-graphql-axum",
  "axum",
  "axum-extra",
+ "base64",
  "chrono",
  "http",
  "serde",

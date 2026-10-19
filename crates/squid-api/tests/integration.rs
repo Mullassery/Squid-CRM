@@ -155,11 +155,14 @@ async fn signup_signin_and_person_crud_over_rest() {
         "body: {}",
         created.body
     );
-    let person_id = created.body["data"]["person"]["id"]
+    let person_id = created.body["data"]["createPerson"]["id"]
         .as_str()
         .expect("person id")
         .to_string();
-    assert_eq!(created.body["data"]["person"]["name"]["firstName"], "Ada");
+    assert_eq!(
+        created.body["data"]["createPerson"]["name"]["firstName"],
+        "Ada"
+    );
 
     // List: exact upstream envelope
     let listed = send(
@@ -170,7 +173,8 @@ async fn signup_signin_and_person_crud_over_rest() {
     assert_eq!(listed.status, StatusCode::OK);
     assert_eq!(listed.body["totalCount"], 1);
     assert_eq!(listed.body["data"]["people"].as_array().unwrap().len(), 1);
-    assert!(listed.body["pageInfo"]["startCursor"].is_null());
+    assert!(listed.body["pageInfo"]["startCursor"].is_string());
+    assert!(listed.body["pageInfo"]["endCursor"].is_string());
 
     // Get one
     let fetched = send(
@@ -188,6 +192,7 @@ async fn signup_signin_and_person_crud_over_rest() {
     )
     .await;
     assert_eq!(deleted.status, StatusCode::OK);
+    assert_eq!(deleted.body["data"]["deletePerson"]["id"], person_id);
 
     let gone = send(
         &app,
@@ -196,6 +201,8 @@ async fn signup_signin_and_person_crud_over_rest() {
     .await;
     assert_eq!(gone.status, StatusCode::NOT_FOUND);
     assert_eq!(gone.body["error"], "NotFoundException");
+    assert_eq!(gone.body["messages"], json!(["Record not found"]));
+    assert!(gone.body.get("code").is_none());
 
     // Sign in again works
     let signin = send(
@@ -212,13 +219,16 @@ async fn signup_signin_and_person_crud_over_rest() {
 }
 
 #[tokio::test]
-async fn unauthenticated_requests_get_contract_401() {
+async fn unauthenticated_requests_get_contract_403() {
     let app = test_app().await;
     let response = send(&app, json_request("GET", "/rest/people", json!({}))).await;
-    assert_eq!(response.status, StatusCode::UNAUTHORIZED);
-    assert_eq!(response.body["statusCode"], 401);
-    assert_eq!(response.body["error"], "UnauthorizedException");
-    assert!(response.body["messages"].is_array());
+    assert_eq!(response.status, StatusCode::FORBIDDEN);
+    assert_eq!(response.body["statusCode"], 403);
+    assert_eq!(response.body["error"], "FORBIDDEN_EXCEPTION");
+    assert_eq!(
+        response.body["messages"],
+        json!(["Missing authentication token"])
+    );
 }
 
 #[tokio::test]
@@ -240,7 +250,7 @@ async fn tenant_isolation_blocks_cross_workspace_reads() {
     )
     .await;
     assert_eq!(created.status, StatusCode::CREATED);
-    let person_id = created.body["data"]["person"]["id"]
+    let person_id = created.body["data"]["createPerson"]["id"]
         .as_str()
         .unwrap()
         .to_string();
@@ -347,18 +357,20 @@ async fn graphql_login_flow_and_people_query() {
             "POST",
             "/graphql",
             json!({
-                "query": "{ people { id name { firstName lastName } emails { primaryEmail } } }"
+                "query": "{ people { totalCount edges { node { id name { firstName lastName } emails { primaryEmail } } cursor } pageInfo { startCursor endCursor hasNextPage hasPreviousPage } } }"
             }),
         )
         .with_bearer(&access_token),
     )
     .await;
     assert_eq!(people.status, StatusCode::OK);
-    let list = people.body["data"]["people"]
+    let list = people.body["data"]["people"]["edges"]
         .as_array()
-        .expect("people array");
+        .expect("people edges");
     assert_eq!(list.len(), 1);
-    assert_eq!(list[0]["name"]["firstName"], "Alan");
+    assert_eq!(list[0]["node"]["name"]["firstName"], "Alan");
+    assert_eq!(people.body["data"]["people"]["totalCount"], 1);
+    assert!(list[0]["cursor"].is_string());
 
     // Step 4: create a person over GraphQL.
     let gql_create = send(
@@ -367,9 +379,9 @@ async fn graphql_login_flow_and_people_query() {
             "POST",
             "/graphql",
             json!({
-                "query": "mutation($input: CreatePersonInput!) { createPerson(input:$input) { id name { firstName } } }",
+                "query": "mutation($data: PersonCreateInput!) { createPerson(data:$data) { id name { firstName } } }",
                 "variables": {
-                    "input": {
+                    "data": {
                         "name": { "firstName": "Katherine", "lastName": "Johnson" },
                         "emails": { "primaryEmail": "katherine@example.com" }
                     }
@@ -389,6 +401,200 @@ async fn graphql_login_flow_and_people_query() {
         gql_create.body["data"]["createPerson"]["name"]["firstName"],
         "Katherine"
     );
+
+    // Step 5: person(filter:) works.
+    let first_id = list[0]["node"]["id"].as_str().unwrap();
+    let by_filter = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "query($id: UUID!) { person(filter: { id: { eq: $id } }) { id name { firstName } } }",
+                "variables": { "id": first_id }
+            }),
+        )
+        .with_bearer(&access_token),
+    )
+    .await;
+    assert_eq!(by_filter.status, StatusCode::OK, "body: {}", by_filter.body);
+    assert_eq!(
+        by_filter.body["data"]["person"]["name"]["firstName"],
+        "Alan"
+    );
+}
+
+#[tokio::test]
+async fn rest_cursor_pagination_and_order_by_match_contract() {
+    let app = test_app().await;
+    let email = unique_email("rest-page");
+    let (token, _workspace) = signup(&app, &email).await;
+
+    for (first, last) in [("Zoe", "Zulu"), ("Amy", "Alpha"), ("Mia", "Mike")] {
+        let created = send(
+            &app,
+            authorized(
+                "POST",
+                "/rest/people",
+                &token,
+                Some(person_body(first, last, &format!("{first}@example.com"))),
+            ),
+        )
+        .await;
+        assert_eq!(created.status, StatusCode::CREATED);
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+    }
+
+    let first_page = send(
+        &app,
+        authorized("GET", "/rest/people?limit=2", &token, None),
+    )
+    .await;
+    assert_eq!(
+        first_page.status,
+        StatusCode::OK,
+        "body: {}",
+        first_page.body
+    );
+    assert_eq!(first_page.body["totalCount"], 3);
+    assert_eq!(
+        first_page.body["data"]["people"].as_array().unwrap().len(),
+        2
+    );
+    assert_eq!(first_page.body["pageInfo"]["hasNextPage"], true);
+    assert_eq!(first_page.body["pageInfo"]["hasPreviousPage"], false);
+    let cursor = first_page.body["pageInfo"]["endCursor"]
+        .as_str()
+        .expect("end cursor")
+        .to_string();
+
+    let second_page = send(
+        &app,
+        authorized(
+            "GET",
+            &format!("/rest/people?limit=2&starting_after={cursor}"),
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(second_page.status, StatusCode::OK);
+    assert_eq!(second_page.body["totalCount"], 3);
+    assert_eq!(
+        second_page.body["data"]["people"].as_array().unwrap().len(),
+        1
+    );
+    assert_eq!(second_page.body["pageInfo"]["hasNextPage"], false);
+    assert_eq!(second_page.body["pageInfo"]["hasPreviousPage"], true);
+
+    let ordered = send(
+        &app,
+        authorized(
+            "GET",
+            "/rest/people?order_by=name.firstName[AscNullsLast]",
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(ordered.status, StatusCode::OK);
+    let names: Vec<&str> = ordered.body["data"]["people"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|person| person["name"]["firstName"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, vec!["Amy", "Mia", "Zoe"]);
+
+    let bad_order = send(
+        &app,
+        authorized("GET", "/rest/people?order_by=-createdAt", &token, None),
+    )
+    .await;
+    assert_eq!(bad_order.status, StatusCode::BAD_REQUEST);
+    assert_eq!(bad_order.body["error"], "BadRequestException");
+    assert_eq!(bad_order.body["statusCode"], 400);
+
+    let bad_cursor = send(
+        &app,
+        authorized(
+            "GET",
+            "/rest/people?starting_after=not-base64",
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(bad_cursor.status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn graphql_connection_pagination() {
+    let app = test_app().await;
+    let email = unique_email("gql-page");
+    let (token, _workspace) = signup(&app, &email).await;
+
+    for (first, last) in [("Zoe", "Zulu"), ("Amy", "Alpha"), ("Mia", "Mike")] {
+        let created = send(
+            &app,
+            authorized(
+                "POST",
+                "/rest/people",
+                &token,
+                Some(person_body(first, last, &format!("{first}@example.com"))),
+            ),
+        )
+        .await;
+        assert_eq!(created.status, StatusCode::CREATED);
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+    }
+
+    let first_page = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "{ people(first: 2) { totalCount edges { node { name { firstName } } cursor } pageInfo { hasNextPage hasPreviousPage endCursor } } }"
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(
+        first_page.status,
+        StatusCode::OK,
+        "body: {}",
+        first_page.body
+    );
+    let connection = &first_page.body["data"]["people"];
+    assert_eq!(connection["totalCount"], 3);
+    assert_eq!(connection["edges"].as_array().unwrap().len(), 2);
+    assert_eq!(connection["pageInfo"]["hasNextPage"], true);
+    assert_eq!(connection["pageInfo"]["hasPreviousPage"], false);
+    let cursor = connection["pageInfo"]["endCursor"]
+        .as_str()
+        .expect("end cursor")
+        .to_string();
+
+    let second_page = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "query($after: String!) { people(first: 2, after: $after) { totalCount edges { node { name { firstName } } } pageInfo { hasNextPage hasPreviousPage } } }",
+                "variables": { "after": cursor }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(second_page.status, StatusCode::OK);
+    let connection = &second_page.body["data"]["people"];
+    assert_eq!(connection["edges"].as_array().unwrap().len(), 1);
+    assert_eq!(connection["pageInfo"]["hasNextPage"], false);
+    assert_eq!(connection["pageInfo"]["hasPreviousPage"], true);
 }
 
 trait WithBearer {

@@ -7,13 +7,16 @@
 
 use chrono::{DateTime, Utc};
 use regex::Regex;
+use serde::de::DeserializeOwned;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
-use squid_core::{CreatePersonInput, Emails, FullName, Person, Role, User, Workspace};
+use squid_core::{Actor, CreatePersonInput, Emails, FullName, Person, Role, User, Workspace};
 use uuid::Uuid;
 
 const CORE_SCHEMA_SQL: &str = include_str!("../migrations/core/0001_core.sql");
 const WORKSPACE_PERSON_SQL: &str = include_str!("../migrations/workspace/0001_person.sql");
+const WORKSPACE_PERSON_CONTRACT_SQL: &str =
+    include_str!("../migrations/workspace/0002_person_contract.sql");
 
 #[derive(Clone)]
 pub struct Db {
@@ -357,8 +360,10 @@ impl Db {
             .execute(&self.pool)
             .await?;
 
-        let ddl = WORKSPACE_PERSON_SQL.replace("{{schema}}", &schema);
-        sqlx::raw_sql(&ddl).execute(&self.pool).await?;
+        for ddl in [WORKSPACE_PERSON_SQL, WORKSPACE_PERSON_CONTRACT_SQL] {
+            let ddl = ddl.replace("{{schema}}", &schema);
+            sqlx::raw_sql(&ddl).execute(&self.pool).await?;
+        }
 
         Ok(schema)
     }
@@ -374,29 +379,111 @@ impl Db {
 
     // ----- person --------------------------------------------------------
 
-    pub async fn list_persons(
+    /// One page of people plus connection metadata.
+    pub async fn list_persons_page(
         &self,
         workspace_id: Uuid,
         limit: i64,
         offset: i64,
-    ) -> anyhow::Result<Vec<Person>> {
+        starting_after: Option<Uuid>,
+        ending_before: Option<Uuid>,
+        order: &[OrderTerm],
+    ) -> anyhow::Result<PersonPage> {
         let schema = Self::workspace_schema_name(workspace_id);
         assert_valid_schema(&schema)?;
 
-        let rows = sqlx::query(&format!(
-            "SELECT id, name_first, name_last, primary_email, additional_emails,
-                    job_title, created_at, updated_at
-             FROM {schema}.person
-             WHERE deleted_at IS NULL
-             ORDER BY created_at ASC, id ASC
-             LIMIT $1 OFFSET $2"
-        ))
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(&self.pool)
-        .await?;
+        let total = self.count_persons(workspace_id).await?;
+        let limit = limit.clamp(1, 1000);
+        let fetch = limit + 1;
 
-        Ok(rows.iter().map(row_to_person).collect())
+        let has_next_page;
+        let has_previous_page;
+        let mut rows = if let Some(cursor_id) = starting_after {
+            let cursor_created_at = self.person_created_at(&schema, cursor_id).await?;
+            has_previous_page = true;
+            let rows = sqlx::query(&format!(
+                "SELECT {PERSON_SELECT} FROM {schema}.person
+                 WHERE deleted_at IS NULL AND (created_at, id) > ($1, $2)
+                 ORDER BY created_at ASC, id ASC
+                 LIMIT $3"
+            ))
+            .bind(cursor_created_at)
+            .bind(cursor_id)
+            .bind(fetch)
+            .fetch_all(&self.pool)
+            .await?;
+            has_next_page = rows.len() as i64 > limit;
+            rows
+        } else if let Some(cursor_id) = ending_before {
+            let cursor_created_at = self.person_created_at(&schema, cursor_id).await?;
+            let mut rows = sqlx::query(&format!(
+                "SELECT {PERSON_SELECT} FROM {schema}.person
+                 WHERE deleted_at IS NULL AND (created_at, id) < ($1, $2)
+                 ORDER BY created_at DESC, id DESC
+                 LIMIT $3"
+            ))
+            .bind(cursor_created_at)
+            .bind(cursor_id)
+            .bind(fetch)
+            .fetch_all(&self.pool)
+            .await?;
+            has_previous_page = rows.len() as i64 > limit;
+            has_next_page = true;
+            rows.truncate(limit as usize);
+            rows.reverse();
+            rows
+        } else {
+            let order_sql = if order.is_empty() {
+                "created_at ASC NULLS FIRST, id ASC".to_string()
+            } else {
+                format!(
+                    "{}, id ASC",
+                    order
+                        .iter()
+                        .map(OrderTerm::sql)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            };
+            let rows = sqlx::query(&format!(
+                "SELECT {PERSON_SELECT} FROM {schema}.person
+                 WHERE deleted_at IS NULL
+                 ORDER BY {order_sql}
+                 LIMIT $1 OFFSET $2"
+            ))
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(&self.pool)
+            .await?;
+            // Upstream leaves hasPreviousPage false for pure offset paging.
+            has_previous_page = false;
+            has_next_page = offset + (rows.len() as i64) < total;
+            rows
+        };
+
+        rows.truncate(limit as usize);
+
+        Ok(PersonPage {
+            persons: rows.iter().map(row_to_person).collect(),
+            total,
+            has_next_page,
+            has_previous_page,
+        })
+    }
+
+    async fn person_created_at(
+        &self,
+        schema: &str,
+        cursor_id: Uuid,
+    ) -> anyhow::Result<DateTime<Utc>> {
+        let row: Option<(DateTime<Utc>,)> = sqlx::query_as(&format!(
+            "SELECT created_at FROM {schema}.person WHERE id = $1"
+        ))
+        .bind(cursor_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.map(|(created_at,)| created_at)
+            .ok_or_else(|| anyhow::anyhow!("cursor not found"))
     }
 
     pub async fn count_persons(&self, workspace_id: Uuid) -> anyhow::Result<i64> {
@@ -419,9 +506,7 @@ impl Db {
         assert_valid_schema(&schema)?;
 
         let row = sqlx::query(&format!(
-            "SELECT id, name_first, name_last, primary_email, additional_emails,
-                    job_title, created_at, updated_at
-             FROM {schema}.person
+            "SELECT {PERSON_SELECT} FROM {schema}.person
              WHERE id = $1 AND deleted_at IS NULL"
         ))
         .bind(person_id)
@@ -439,20 +524,33 @@ impl Db {
         let schema = Self::workspace_schema_name(workspace_id);
         assert_valid_schema(&schema)?;
 
-        let additional = input.emails.additional_emails.clone().unwrap_or_default();
+        let links = input.linkedin_link.clone().unwrap_or_default();
+        let phones = input.phones.clone().unwrap_or_default();
+        let actor = Actor::default();
+        let search_vector = build_search_vector(input);
 
         let row = sqlx::query(&format!(
             "INSERT INTO {schema}.person
-                (name_first, name_last, primary_email, additional_emails, job_title)
-             VALUES ($1, $2, $3, $4, $5)
-             RETURNING id, name_first, name_last, primary_email, additional_emails,
-                       job_title, created_at, updated_at"
+                (name_first, name_last, primary_email, additional_emails, job_title,
+                 linkedin_link, phones, avatar_url, position, created_by, updated_by,
+                 search_vector, company_id)
+             VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9,
+                     $10::jsonb, $11::jsonb, $12, $13)
+             RETURNING {PERSON_SELECT}"
         ))
         .bind(&input.name.first_name)
         .bind(&input.name.last_name)
         .bind(&input.emails.primary_email)
-        .bind(&additional)
+        .bind(&input.emails.additional_emails)
         .bind(&input.job_title)
+        .bind(serde_json::to_string(&links)?)
+        .bind(serde_json::to_string(&phones)?)
+        .bind(input.avatar_url.clone().unwrap_or_default())
+        .bind(input.position.unwrap_or(0.0))
+        .bind(serde_json::to_string(&actor)?)
+        .bind(serde_json::to_string(&actor)?)
+        .bind(search_vector)
+        .bind(input.company_id)
         .fetch_one(&self.pool)
         .await?;
 
@@ -468,7 +566,7 @@ impl Db {
         let schema = Self::workspace_schema_name(workspace_id);
         assert_valid_schema(&schema)?;
         let result = sqlx::query(&format!(
-            "UPDATE {schema}.person SET deleted_at = now()
+            "UPDATE {schema}.person SET deleted_at = now(), updated_at = now()
              WHERE id = $1 AND deleted_at IS NULL"
         ))
         .bind(person_id)
@@ -478,26 +576,129 @@ impl Db {
     }
 }
 
+const PERSON_SELECT: &str = "id, created_at, updated_at, deleted_at, name_first, name_last, \
+     primary_email, additional_emails, job_title, linkedin_link::text AS linkedin_link, \
+     phones::text AS phones, avatar_url, avatar_file::text AS avatar_file, position, \
+     created_by::text AS created_by, updated_by::text AS updated_by, search_vector, company_id";
+
+/// A page of people with the connection flags upstream exposes.
+#[derive(Debug, Clone)]
+pub struct PersonPage {
+    pub persons: Vec<Person>,
+    pub total: i64,
+    pub has_next_page: bool,
+    pub has_previous_page: bool,
+}
+
+/// Sortable person columns. The REST/GraphQL parsers may only produce these.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PersonColumn {
+    Id,
+    CreatedAt,
+    UpdatedAt,
+    NameFirst,
+    NameLast,
+    PrimaryEmail,
+    JobTitle,
+}
+
+impl PersonColumn {
+    fn sql(self) -> &'static str {
+        match self {
+            PersonColumn::Id => "id",
+            PersonColumn::CreatedAt => "created_at",
+            PersonColumn::UpdatedAt => "updated_at",
+            PersonColumn::NameFirst => "name_first",
+            PersonColumn::NameLast => "name_last",
+            PersonColumn::PrimaryEmail => "primary_email",
+            PersonColumn::JobTitle => "job_title",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OrderTerm {
+    pub column: PersonColumn,
+    pub descending: bool,
+    pub nulls_first: bool,
+}
+
+impl OrderTerm {
+    fn sql(&self) -> String {
+        format!(
+            "{} {} NULLS {}",
+            self.column.sql(),
+            if self.descending { "DESC" } else { "ASC" },
+            if self.nulls_first { "FIRST" } else { "LAST" }
+        )
+    }
+}
+
+fn build_search_vector(input: &CreatePersonInput) -> Option<String> {
+    let mut parts: Vec<(String, usize)> = Vec::new();
+    let mut position = 1usize;
+    let mut push = |value: &str| {
+        for lexeme in value.split_whitespace() {
+            if !lexeme.is_empty() {
+                parts.push((lexeme.to_lowercase(), position));
+                position += 1;
+            }
+        }
+    };
+    push(&input.name.first_name);
+    push(&input.name.last_name);
+    push(&input.emails.primary_email);
+    if let Some(job_title) = input.job_title.as_deref() {
+        push(job_title);
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(
+            parts
+                .into_iter()
+                .map(|(lexeme, position)| format!("'{lexeme}':{position}"))
+                .collect::<Vec<_>>()
+                .join(" "),
+        )
+    }
+}
+
 fn row_to_person(row: &sqlx::postgres::PgRow) -> Person {
     let additional: Vec<String> = row.get("additional_emails");
+    let avatar_file: Option<String> = row.get("avatar_file");
     Person {
         id: row.get("id"),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+        deleted_at: row.get("deleted_at"),
         name: FullName {
             first_name: row.get("name_first"),
             last_name: row.get("name_last"),
         },
         emails: Emails {
             primary_email: row.get("primary_email"),
-            additional_emails: if additional.is_empty() {
-                None
-            } else {
-                Some(additional)
-            },
+            additional_emails: additional,
         },
+        linkedin_link: parse_json(row.get("linkedin_link")),
         job_title: row.get("job_title"),
-        created_at: row.get("created_at"),
-        updated_at: row.get("updated_at"),
+        phones: parse_json(row.get("phones")),
+        avatar_url: row.get("avatar_url"),
+        avatar_file: avatar_file.map(|raw| squid_core::GqlJson(parse_value(&raw))),
+        position: row.get("position"),
+        created_by: parse_json(row.get("created_by")),
+        updated_by: parse_json(row.get("updated_by")),
+        search_vector: row.get("search_vector"),
+        company_id: row.get("company_id"),
     }
+}
+
+fn parse_json<T: DeserializeOwned + Default>(raw: String) -> T {
+    serde_json::from_str(&raw).unwrap_or_default()
+}
+
+fn parse_value(raw: &str) -> serde_json::Value {
+    serde_json::from_str(raw).unwrap_or(serde_json::Value::Null)
 }
 
 fn assert_valid_schema(schema: &str) -> anyhow::Result<()> {

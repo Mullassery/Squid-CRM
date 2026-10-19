@@ -39,6 +39,12 @@ CREATE_STATUS=$(curl -s -o /tmp/squid-smoke-create.json -w '%{http_code}' \
   -X POST "${BASE}/rest/people" -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' \
   -d '{"name":{"firstName":"Ada","lastName":"Lovelace"},"emails":{"primaryEmail":"ada@example.com"}}')
 test "$CREATE_STATUS" = "201" || { echo "create failed: $CREATE_STATUS"; cat /tmp/squid-smoke-create.json; exit 1; }
+python3 - <<'PY'
+import json
+body = json.load(open('/tmp/squid-smoke-create.json'))
+assert body['data']['createPerson']['name']['firstName'] == 'Ada', body
+print('create OK: createPerson envelope matches contract')
+PY
 
 LIST_STATUS=$(curl -s -o /tmp/squid-smoke-list.json -w '%{http_code}' \
   "${BASE}/rest/people?limit=10" -H "Authorization: Bearer ${TOKEN}")
@@ -48,17 +54,21 @@ import json
 body = json.load(open('/tmp/squid-smoke-list.json'))
 assert body['totalCount'] == 1, body
 assert body['data']['people'][0]['name']['firstName'] == 'Ada', body
-assert 'pageInfo' in body, body
-print('list OK: totalCount=1, envelope matches contract')
+assert isinstance(body['pageInfo']['startCursor'], str), body
+assert isinstance(body['pageInfo']['endCursor'], str), body
+assert body['pageInfo']['hasNextPage'] is False, body
+print('list OK: totalCount=1, envelope and cursors match contract')
 PY
 
 UNAUTH_STATUS=$(curl -s -o /tmp/squid-smoke-unauth.json -w '%{http_code}' "${BASE}/rest/people")
-test "$UNAUTH_STATUS" = "401" || { echo "expected 401, got $UNAUTH_STATUS"; exit 1; }
+test "$UNAUTH_STATUS" = "403" || { echo "expected 403, got $UNAUTH_STATUS"; exit 1; }
 python3 - <<'PY'
 import json
 body = json.load(open('/tmp/squid-smoke-unauth.json'))
-assert body['statusCode'] == 401 and body['error'] == 'UnauthorizedException', body
-print('unauth OK: 401 contract matches')
+assert body['statusCode'] == 403, body
+assert body['error'] == 'FORBIDDEN_EXCEPTION', body
+assert body['messages'] == ['Missing authentication token'], body
+print('unauth OK: 403 contract matches')
 PY
 
 echo "SMOKE PASSED"

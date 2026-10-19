@@ -9,7 +9,7 @@
 - [x] GraphQL login flow + person query/mutations.
 - [x] REST people list/get/create/delete with upstream envelope + error contract.
 - [x] Tenant isolation enforced and tested against real PostgreSQL.
-- [x] 11 unit + 4 integration tests passing; clippy clean; live smoke test.
+- [x] 14 unit + 6 integration tests passing; clippy clean; live smoke test.
 - [x] Dockerfile, docker-compose, CI workflow, Makefile, smoke script.
 
 ## Phase 2 (contracts)
@@ -22,23 +22,26 @@
 - [ ] Map every frontend operation in `twenty-front/src/generated/graphql.ts`.
 
 ## Phase 4 follow-ups (contract alignment — from captured fixtures)
-- [ ] REST create returns `data.createPerson`; delete returns
+- [x] REST create returns `data.createPerson`; delete returns
       `data.deletePerson.id`.
-- [ ] Unauthenticated REST is `403 FORBIDDEN_EXCEPTION` (no `code`); 404 has no
+- [x] Unauthenticated REST is `403 FORBIDDEN_EXCEPTION` (no `code`); 404 has no
       `code`.
-- [ ] Cursors = base64 `{"id":"<uuid>"}`; support `starting_after` /
+- [x] Cursors = base64 `{"id":"<uuid>"}`; support `starting_after` /
       `ending_before`; `hasPreviousPage` only for cursor paging.
-- [ ] `additionalEmails`/`additionalPhones` are `[]`, never `null`.
-- [ ] GraphQL `people` returns `PersonConnection` (edges/cursor/pageInfo);
+- [x] `additionalEmails`/`additionalPhones` are `[]`, never `null`.
+- [x] GraphQL `people` returns `PersonConnection` (edges/cursor/pageInfo);
       `person(filter:)`, `createPerson(data:)`.
+- [x] `order_by=field[DescNullsLast],...` grammar (REST + GraphQL); `-createdAt`
+      rejected.
 - [ ] Serve auth mutations on `/metadata` and add API keys for the data API.
-- [ ] `order_by=field[DescNullsLast],...` grammar; `filter` grammar.
+- [ ] Full `filter` grammar (`and`/`or`/`not`, composite fields).
 - [ ] Remaining pagination (`first`/`last`/`before`/`after`), `fields`, `depth`,
       `viewId` with upstream semantics.
 - [ ] Refresh-token rotation and access-token revocation.
 - [ ] CSRF protection decision for cookie auth.
 - [ ] Rate limiting on auth endpoints.
-- [ ] Person fields: phones, linkedinLink, avatarFile, company, relations.
+- [x] Person fields: phones, linkedinLink, avatarFile (JSON), companyId, actors.
+- [ ] Person relations, `avatarFile` as `FileObject`, full metadata fields.
 - [ ] Metadata API so the real frontend can load object/field definitions.
 - [ ] `client-config` endpoint.
 
@@ -58,9 +61,11 @@
 
 ## Known limitations (current)
 - Static person schema; not metadata-driven.
-- Offset pagination only; cursors return `null`.
+- Cursor pagination + `order_by` implemented for whitelisted person columns;
+  full filter grammar and view-based paging are not.
 - No OpenAPI document emitted yet.
-- No refresh rotation, API keys, OAuth, 2FA.
+- No refresh rotation, API keys, OAuth, 2FA; data API accepts access tokens
+  (upstream requires API keys).
 - Enterprise features excluded (licence).
 - No baseline performance numbers captured; no performance claims made.
 - `reference/twenty` is git-ignored; recreate with `scripts/clone-reference.sh`.
