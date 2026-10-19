@@ -1,0 +1,19 @@
+[package]
+name = "squid-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "squid-server"
+path = "src/main.rs"
+
+[dependencies]
+squid-core = { path = "../squid-core" }
+squid-db = { path = "../squid-db" }
+squid-api = { path = "../squid-api" }
+axum.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true

@@ -1,0 +1,70 @@
+name: squid-crm
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${PG_DATABASE_USER:-postgres}
+      POSTGRES_PASSWORD: ${PG_DATABASE_PASSWORD:-postgres}
+      POSTGRES_DB: ${PG_DATABASE_NAME:-squid}
+    ports:
+      - "${PG_DATABASE_PORT:-5432}:5432"
+    volumes:
+      - squid-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgres://${PG_DATABASE_USER:-postgres}:${PG_DATABASE_PASSWORD:-postgres}@db:5432/${PG_DATABASE_NAME:-squid}
+      APP_SECRET: ${APP_SECRET:?APP_SECRET must be set}
+      BIND_ADDR: 0.0.0.0:3000
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3001}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      REDIS_URL: redis://redis:6379
+    ports:
+      - "${SERVER_PORT:-3000}:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:3000/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # The existing React frontend is kept independent. Point it at this server:
+  #   REACT_APP_SERVER_BASE_URL=http://localhost:3000
+  # and run it from the frontend package (see reference/twenty/.nvmrc: Node 24.16).
+  # frontend:
+  #   image: node:24-bookworm
+  #   working_dir: /app
+  #   command: yarn start
+  #   volumes:
+  #     - ./frontend:/app
+  #   environment:
+  #     REACT_APP_SERVER_BASE_URL: http://localhost:3000
+  #   ports:
+  #     - "3001:3001"
+
+volumes:
+  squid-db:

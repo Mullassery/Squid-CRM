@@ -8,22 +8,22 @@ Reference pin: `twentyhq/twenty@08a0e5f1ee2e7db7c1e6ef3aeec9bcef731f4e98` (serve
 | --- | --- | --- | --- | --- | --- |
 | Core config / boot | `src/engine/core-modules/twenty-config` | `squid-core` | not-started | config tests | |
 | Logger / metrics / telemetry | `core-modules/logger`, `metrics`, `telemetry`, `sentry` | `squid-core` | not-started | smoke | |
-| Auth: sessions, JWT, api-key | `core-modules/auth`, `api-key`, `app-token`, `jwt`, `session-storage` | `squid-auth` | not-started | auth integration tests | cookie + bearer |
+| Auth: sessions, JWT, api-key | `core-modules/auth`, `api-key`, `app-token`, `jwt`, `session-storage` | `squid-auth` | partial | `signup_signin_and_person_crud_over_rest`, `graphql_login_flow_and_people_query` | sessions + JWT + cookie done; api-key/app-token not started |
 | Auth: Google/Microsoft OAuth | `core-modules/auth/strategies/google*`, `microsoft*` | `squid-auth` | not-started | oauth callback tests | |
 | Auth: 2FA, captcha | `two-factor-authentication`, `captcha` | `squid-auth` | not-started | unit + integration | |
 | Auth: SAML/OIDC/SSO | `sso`, `auth/strategies/saml*`, `oidc*` | `squid-auth` | excluded (licence) | n/a | `@license Enterprise` |
-| User | `core-modules/user` | `squid-core` | not-started | | |
-| Workspace & members | `core-modules/workspace`, `workspace-invitation`, `workspace-member` | `squid-tenant` | not-started | tenant isolation tests | schema-per-workspace |
-| Roles & permissions (RBAC) | `metadata-modules/role*`, `object-permission`, `field-permission`, `permission-flag` | `squid-metadata` | not-started | authz property tests | |
+| User | `core-modules/user` | `squid-core` | partial | integration tests | email/password user only |
+| Workspace & members | `core-modules/workspace`, `workspace-invitation`, `workspace-member` | `squid-tenant` | partial | `tenant_isolation_blocks_cross_workspace_reads` | bootstrap + membership; invitations not started |
+| Roles & permissions (RBAC) | `metadata-modules/role*`, `object-permission`, `field-permission`, `permission-flag` | `squid-metadata` | partial | `AuthContext::require_admin` unit test | built-in roles only; object/field permissions not started |
 | Row-level permission predicates | `metadata-modules/row-level-permission-predicate*` | `squid-metadata` | not-started | authz tests | |
 | Object metadata (custom objects) | `metadata-modules/object-metadata` | `squid-metadata` | not-started | | |
 | Field metadata (custom fields) | `metadata-modules/field-metadata`, `search-field-metadata` | `squid-metadata` | not-started | | |
 | Views / filters / sorts / groups | `metadata-modules/view*` | `squid-metadata` | not-started | golden fixtures | exact semantics |
-| Dynamic GraphQL schema | `api/graphql/*` | `squid-graphql` | not-started | frontend op coverage | |
-| REST + OpenAPI | `api/rest/*`, `core-modules/open-api` | `squid-rest` | not-started | OpenAPI diff | |
+| Dynamic GraphQL schema | `api/graphql/*` | `squid-graphql` | partial | `graphql_login_flow_and_people_query` | static slice schema; metadata-driven generation not started |
+| REST + OpenAPI | `api/rest/*`, `core-modules/open-api` | `squid-rest` | partial | REST envelope integration tests | people only; OpenAPI doc not generated |
 | MCP endpoint | `api/mcp` | `squid-rest` | deferred | | |
-| Workspace ORM / query builder | `engine/twenty-orm/*` | `squid-orm` | not-started | query golden tests | filters/sorts/pagination |
-| People | `src/modules/person` | `squid-rest`/`squid-graphql` | not-started | Phase 4 slice | first slice |
+| Workspace ORM / query builder | `engine/twenty-orm/*` | `squid-orm` | partial | unit schema-validation tests | validated dynamic SQL; filters/sorts/cursors not implemented |
+| People | `src/modules/person` | `squid-rest`/`squid-graphql` | partial | 4 integration tests + smoke | name/emails/jobTitle; relations not implemented |
 | Companies | `src/modules/company` | — | not-started | | |
 | Opportunities | `src/modules/opportunity` | — | not-started | | |
 | Tasks | `src/modules/task` | — | not-started | | |

@@ -1,0 +1,22 @@
+[package]
+name = "squid-db"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+squid-core = { path = "../squid-core" }
+sqlx.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+regex.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+hex.workspace = true
+rand.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]

@@ -1,0 +1,11 @@
+target/
+reference/
+.git/
+.github/
+docs/
+contracts/
+*.md
+.env
+.env.*
+!.env.example
+node_modules/
