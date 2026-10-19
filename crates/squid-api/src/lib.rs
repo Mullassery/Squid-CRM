@@ -116,6 +116,10 @@ pub fn app(state: AppState) -> Router {
             "/graphql",
             post(graphql::graphql_handler).get(graphql::graphql_playground),
         )
+        .route(
+            "/metadata",
+            post(graphql::graphql_handler).get(graphql::graphql_playground),
+        )
         .layer(RequestBodyLimitLayer::new(2 * 1024 * 1024))
         .layer(TraceLayer::new_for_http())
         .layer(cors)
@@ -137,10 +141,25 @@ pub async fn resolve_auth(state: &AppState, headers: &HeaderMap) -> Option<AuthC
                         .ok()
                         .flatten()?;
                     return Some(AuthContext {
-                        user_id: verified.user_id,
+                        user_id: Some(verified.user_id),
                         workspace_id,
                         role,
                         session_id: None,
+                        api_key_id: None,
+                    });
+                }
+
+                if let Ok(Some(key)) = state
+                    .db
+                    .find_api_key_by_token_hash(&hash_token(token))
+                    .await
+                {
+                    return Some(AuthContext {
+                        user_id: None,
+                        workspace_id: key.workspace_id,
+                        role: key.role,
+                        session_id: None,
+                        api_key_id: Some(key.api_key_id),
                     });
                 }
             }
@@ -162,10 +181,11 @@ pub async fn resolve_auth(state: &AppState, headers: &HeaderMap) -> Option<AuthC
         .flatten()?;
 
     Some(AuthContext {
-        user_id: session.user_id,
+        user_id: Some(session.user_id),
         workspace_id: session.workspace_id,
         role,
         session_id: Some(session.id),
+        api_key_id: None,
     })
 }
 

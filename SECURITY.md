@@ -13,6 +13,7 @@ for a fix before disclosure.
 | Passwords | Argon2id, minimum length 8 | `crates/squid-auth/src/lib.rs` tests |
 | Tokens | HS256 JWT with `typ` claim (login/access/refresh) | `login_token_cannot_be_used_as_access_token` |
 | Sessions | 32-byte opaque token, SHA-256 at rest, expiry checked | `session_tokens_are_random_and_hashed` |
+| API keys | random `api_*` token, SHA-256 at rest, expiry + revocation checked on every request | `api_key_lifecycle_authenticates_data_api` |
 | Cookies | `twenty-session`, HttpOnly, SameSite=Lax, optional Secure | `crates/squid-api/src/lib.rs` |
 | Tenant isolation | workspace from principal, validated schema name, membership re-check | integration test |
 | SQL injection | no user text interpolated; validated schema identifiers | `rejects_injected_schema_names` |
@@ -25,7 +26,10 @@ for a fix before disclosure.
 - No rate limiting / brute-force protection on auth endpoints.
 - No CSRF token; cookie auth relies on SameSite=Lax. Cross-site POST protection
   needs review before production.
-- No API key / app token / OAuth / 2FA support yet.
+- No app token / OAuth / 2FA support yet. API-key `roleId` is accepted but
+  ignored; keys inherit the caller's built-in role until metadata roles land.
+- The data API still accepts user access tokens/cookies; upstream requires API
+  keys. Tighten before release.
 - No refresh-token rotation or server-side revocation of access tokens.
 - No field/object permission enforcement beyond built-in roles.
 - No SSRF guard yet (no outbound integrations in this slice).

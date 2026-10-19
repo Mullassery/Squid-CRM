@@ -597,6 +597,150 @@ async fn graphql_connection_pagination() {
     assert_eq!(connection["pageInfo"]["hasPreviousPage"], true);
 }
 
+#[tokio::test]
+async fn metadata_mount_serves_auth_mutations() {
+    let app = test_app().await;
+    let email = unique_email("metadata");
+
+    let signup = send(
+        &app,
+        json_request(
+            "POST",
+            "/metadata",
+            json!({
+                "query": "mutation($email:String!, $password:String!) { signUp(email:$email, password:$password, workspaceName:\"Metadata Co\") { tokens { accessOrWorkspaceAgnosticToken { token } } workspace { id } } }",
+                "variables": { "email": email, "password": "super-secret-password" }
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(signup.status, StatusCode::OK, "body: {}", signup.body);
+    let token = signup.body["data"]["signUp"]["tokens"]["accessOrWorkspaceAgnosticToken"]["token"]
+        .as_str()
+        .expect("access token");
+
+    let me = send(
+        &app,
+        json_request(
+            "POST",
+            "/metadata",
+            json!({ "query": "{ currentWorkspace { id } }" }),
+        )
+        .with_bearer(token),
+    )
+    .await;
+    assert_eq!(me.status, StatusCode::OK, "body: {}", me.body);
+    assert!(me.body["data"]["currentWorkspace"]["id"].is_string());
+}
+
+#[tokio::test]
+async fn api_key_lifecycle_authenticates_data_api() {
+    let app = test_app().await;
+    let email = unique_email("api-key");
+    let (token, _workspace) = signup(&app, &email).await;
+
+    let created = send(
+        &app,
+        json_request(
+            "POST",
+            "/metadata",
+            json!({
+                "query": "mutation($input: CreateApiKeyInput!) { createApiKey(input:$input) { id name expiresAt role } }",
+                "variables": {
+                    "input": {
+                        "name": "CI key",
+                        "expiresAt": "2030-01-01T00:00:00Z",
+                        "roleId": uuid::Uuid::new_v4()
+                    }
+                }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(created.status, StatusCode::OK, "body: {}", created.body);
+    let api_key_id = created.body["data"]["createApiKey"]["id"]
+        .as_str()
+        .expect("api key id")
+        .to_string();
+
+    let generated = send(
+        &app,
+        json_request(
+            "POST",
+            "/metadata",
+            json!({
+                "query": "mutation($id: UUID!) { generateApiKeyToken(apiKeyId:$id, expiresAt:\"2030-01-01T00:00:00Z\") { token } }",
+                "variables": { "id": api_key_id }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(generated.status, StatusCode::OK, "body: {}", generated.body);
+    let api_key_token = generated.body["data"]["generateApiKeyToken"]["token"]
+        .as_str()
+        .expect("api key token")
+        .to_string();
+
+    // The key authenticates reads and writes on the data API.
+    let list = send(
+        &app,
+        authorized("GET", "/rest/people", &api_key_token, None),
+    )
+    .await;
+    assert_eq!(list.status, StatusCode::OK, "body: {}", list.body);
+
+    let create = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/people",
+            &api_key_token,
+            Some(person_body("Api", "Key", "api-key@example.com")),
+        ),
+    )
+    .await;
+    assert_eq!(create.status, StatusCode::CREATED, "body: {}", create.body);
+
+    let gql = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({ "query": "{ people(first: 1) { totalCount } }" }),
+        )
+        .with_bearer(&api_key_token),
+    )
+    .await;
+    assert_eq!(gql.status, StatusCode::OK, "body: {}", gql.body);
+    assert_eq!(gql.body["data"]["people"]["totalCount"], 1);
+
+    // Revocation takes effect for the already-issued token.
+    let revoked = send(
+        &app,
+        json_request(
+            "POST",
+            "/metadata",
+            json!({
+                "query": "mutation($input: RevokeApiKeyInput!) { revokeApiKey(input:$input) { id revokedAt } }",
+                "variables": { "input": { "id": api_key_id } }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(revoked.status, StatusCode::OK, "body: {}", revoked.body);
+    assert!(revoked.body["data"]["revokeApiKey"]["revokedAt"].is_string());
+
+    let denied = send(
+        &app,
+        authorized("GET", "/rest/people", &api_key_token, None),
+    )
+    .await;
+    assert_eq!(denied.status, StatusCode::FORBIDDEN);
+}
+
 trait WithBearer {
     fn with_bearer(self, token: &str) -> Request<Body>;
 }

@@ -71,4 +71,48 @@ assert body['messages'] == ['Missing authentication token'], body
 print('unauth OK: 403 contract matches')
 PY
 
+TOKEN="$TOKEN" BASE="$BASE" python3 - <<'PY'
+import json, os, urllib.error, urllib.request, uuid
+
+base = os.environ["BASE"]
+token = os.environ["TOKEN"]
+
+def post(path, payload, bearer):
+    req = urllib.request.Request(base + path, data=json.dumps(payload).encode(), method="POST")
+    req.add_header("Content-Type", "application/json")
+    req.add_header("Authorization", "Bearer " + bearer)
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        return json.loads(resp.read())
+
+key = post("/metadata", {
+    "query": "mutation($i: CreateApiKeyInput!) { createApiKey(input: $i) { id } }",
+    "variables": {"i": {"name": "smoke", "expiresAt": "2030-01-01T00:00:00Z",
+                        "roleId": str(uuid.uuid4())}},
+}, token)
+key_id = key["data"]["createApiKey"]["id"]
+
+generated = post("/metadata", {
+    "query": "mutation($id: UUID!) { generateApiKeyToken(apiKeyId: $id, expiresAt: \"2030-01-01T00:00:00Z\") { token } }",
+    "variables": {"id": key_id},
+}, token)
+api_token = generated["data"]["generateApiKeyToken"]["token"]
+
+req = urllib.request.Request(base + "/rest/people", headers={"Authorization": "Bearer " + api_token})
+with urllib.request.urlopen(req, timeout=15) as resp:
+    assert resp.status == 200
+
+post("/metadata", {
+    "query": "mutation($i: RevokeApiKeyInput!) { revokeApiKey(input: $i) { id revokedAt } }",
+    "variables": {"i": {"id": key_id}},
+}, token)
+
+try:
+    urllib.request.urlopen(req, timeout=15)
+    raise AssertionError("revoked API key was accepted")
+except urllib.error.HTTPError as exc:
+    assert exc.code == 403, exc.code
+
+print("api key OK: create -> generate -> use -> revoke")
+PY
+
 echo "SMOKE PASSED"

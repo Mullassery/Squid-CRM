@@ -13,8 +13,10 @@ use axum::http::{header, HeaderMap, HeaderValue};
 use axum::response::{Html, IntoResponse, Response};
 use chrono::{DateTime, Utc};
 use squid_auth::AuthToken;
-use squid_auth::{hash_password, verify_password, AuthContext};
-use squid_core::{AppError, CreatePersonInput, GqlJson, PageInfo, Person, User, Workspace};
+use squid_auth::{hash_password, hash_token, verify_password, AuthContext};
+use squid_core::{
+    ApiKey, AppError, AppResult, CreatePersonInput, GqlJson, PageInfo, Person, User, Workspace,
+};
 use squid_db::{OrderTerm, PersonColumn};
 
 use crate::auth::{normalize_email, unique_subdomain};
@@ -82,6 +84,29 @@ pub struct ShareWithInput {
     pub role_id: Option<uuid::Uuid>,
     pub everyone: Option<bool>,
     pub access_level: Option<RecordShareAccessLevelEnum>,
+}
+
+#[derive(Debug, InputObject)]
+pub struct CreateApiKeyInput {
+    pub name: String,
+    pub expires_at: String,
+    pub revoked_at: Option<String>,
+    pub role_id: uuid::Uuid,
+}
+
+#[derive(Debug, InputObject)]
+pub struct RevokeApiKeyInput {
+    pub id: uuid::Uuid,
+}
+
+#[derive(Debug, InputObject)]
+pub struct GetApiKeyInput {
+    pub id: uuid::Uuid,
+}
+
+#[derive(Debug, SimpleObject)]
+pub struct ApiKeyToken {
+    pub token: String,
 }
 
 #[derive(Debug, InputObject)]
@@ -329,6 +354,20 @@ fn connection_with(
     }
 }
 
+fn parse_expiry(raw: &str) -> AppResult<chrono::DateTime<chrono::Utc>> {
+    if let Ok(value) = chrono::DateTime::parse_from_rfc3339(raw) {
+        return Ok(value.with_timezone(&chrono::Utc));
+    }
+    if let Ok(date) = chrono::NaiveDate::parse_from_str(raw, "%Y-%m-%d") {
+        if let Some(datetime) = date.and_hms_opt(0, 0, 0) {
+            return Ok(datetime.and_utc());
+        }
+    }
+    Err(AppError::BadRequest(format!(
+        "Invalid date value '{raw}' for expiresAt"
+    )))
+}
+
 fn schema() -> &'static SquidSchema {
     static SCHEMA: OnceLock<SquidSchema> = OnceLock::new();
     SCHEMA.get_or_init(|| Schema::build(QueryRoot, MutationRoot, EmptySubscription).finish())
@@ -366,9 +405,12 @@ impl QueryRoot {
         let Some(auth) = ctx_data(ctx).auth.as_ref() else {
             return Ok(None);
         };
+        let Some(user_id) = auth.user_id else {
+            return Ok(None);
+        };
         state(ctx)
             .db
-            .find_user_by_id(auth.user_id)
+            .find_user_by_id(user_id)
             .await
             .map_err(|e| gql_err(AppError::Internal(anyhow::anyhow!(e))))
     }
@@ -448,6 +490,28 @@ impl QueryRoot {
             .map_err(|e| gql_err(AppError::Internal(e)))?;
 
         Ok(connection_from_page(page))
+    }
+
+    async fn api_keys(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<ApiKey>> {
+        let auth = require_auth(ctx)?;
+        state(ctx)
+            .db
+            .list_api_keys(auth.workspace_id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(anyhow::anyhow!(e))))
+    }
+
+    async fn api_key(
+        &self,
+        ctx: &Context<'_>,
+        input: GetApiKeyInput,
+    ) -> async_graphql::Result<Option<ApiKey>> {
+        let auth = require_auth(ctx)?;
+        state(ctx)
+            .db
+            .get_api_key(auth.workspace_id, input.id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(anyhow::anyhow!(e))))
     }
 
     async fn person(
@@ -593,6 +657,87 @@ impl MutationRoot {
             user,
             workspace,
         })
+    }
+
+    async fn create_api_key(
+        &self,
+        ctx: &Context<'_>,
+        input: CreateApiKeyInput,
+    ) -> async_graphql::Result<ApiKey> {
+        let auth = require_auth(ctx)?;
+        let Some(user_id) = auth.user_id else {
+            return Err(gql_err(AppError::Forbidden(
+                "API keys cannot create API keys".to_string(),
+            )));
+        };
+        if input.name.trim().is_empty() {
+            return Err(gql_err(AppError::BadRequest(
+                "API key name is required".to_string(),
+            )));
+        }
+        let expires_at = parse_expiry(&input.expires_at).map_err(gql_err)?;
+
+        state(ctx)
+            .db
+            .create_api_key(
+                auth.workspace_id,
+                Some(user_id),
+                input.name.trim(),
+                auth.role,
+                expires_at,
+            )
+            .await
+            .map_err(|e| gql_err(AppError::Internal(anyhow::anyhow!(e))))
+    }
+
+    async fn generate_api_key_token(
+        &self,
+        ctx: &Context<'_>,
+        api_key_id: uuid::Uuid,
+        expires_at: String,
+    ) -> async_graphql::Result<ApiKeyToken> {
+        let auth = require_auth(ctx)?;
+        let expires_at = parse_expiry(&expires_at).map_err(gql_err)?;
+        let state = state(ctx);
+
+        state
+            .db
+            .get_api_key(auth.workspace_id, api_key_id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(anyhow::anyhow!(e))))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))?;
+
+        let token = format!(
+            "api_{}{}",
+            uuid::Uuid::new_v4().simple(),
+            uuid::Uuid::new_v4().simple()
+        );
+        state
+            .db
+            .set_api_key_token(
+                auth.workspace_id,
+                api_key_id,
+                &hash_token(&token),
+                expires_at,
+            )
+            .await
+            .map_err(|e| gql_err(AppError::Internal(anyhow::anyhow!(e))))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))?;
+
+        Ok(ApiKeyToken { token })
+    }
+
+    async fn revoke_api_key(
+        &self,
+        ctx: &Context<'_>,
+        input: RevokeApiKeyInput,
+    ) -> async_graphql::Result<Option<ApiKey>> {
+        let auth = require_auth(ctx)?;
+        state(ctx)
+            .db
+            .revoke_api_key(auth.workspace_id, input.id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(anyhow::anyhow!(e))))
     }
 
     async fn create_person(

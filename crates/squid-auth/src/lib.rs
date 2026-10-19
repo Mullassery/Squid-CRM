@@ -71,10 +71,12 @@ pub struct VerifiedToken {
 /// The authenticated identity for a request.
 #[derive(Debug, Clone)]
 pub struct AuthContext {
-    pub user_id: Uuid,
+    /// `None` for workspace API keys, which are not tied to a user.
+    pub user_id: Option<Uuid>,
     pub workspace_id: Uuid,
     pub role: Role,
     pub session_id: Option<Uuid>,
+    pub api_key_id: Option<Uuid>,
 }
 
 impl AuthContext {

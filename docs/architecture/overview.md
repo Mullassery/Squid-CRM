@@ -16,7 +16,7 @@ flowchart LR
   API --> DBLAYER
   DBLAYER -->|SQLx| PG[(PostgreSQL 16)]
   subgraph PG
-    CORE_SCHEMA[(core schema\nusers, workspaces,\nmembers, sessions)]
+    CORE_SCHEMA[(core schema\nusers, workspaces,\nmembers, sessions, api_keys)]
     WS_A[(workspace_<id>\nperson ...)]
     WS_B[(workspace_<id>\nperson ...)]
   end
@@ -91,6 +91,7 @@ the current slice), mirroring upstream.
 
 - Credentials: Argon2id password hashes; HS256 JWTs with typed claims.
 - Sessions: opaque tokens, SHA-256 hashed at rest, HttpOnly/SameSite=Lax cookie
+- API keys: `api_*` bearer tokens, SHA-256 hashed at rest, expiry/revocation checks
   (Secure in production).
 - Tenancy: `workspace_id` from the principal only; validated schema identifiers.
 - Transport: credentialed CORS restricted to `FRONTEND_URL`; 2 MiB body limit.

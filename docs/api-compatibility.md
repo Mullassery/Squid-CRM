@@ -18,7 +18,7 @@ published. Every claim below is marked `[fixture]` or `[source]`.
 | Prefix | Upstream purpose | Rust status |
 | --- | --- | --- |
 | `/graphql` | Workspace **data** GraphQL | **partial** (person, auth helpers) |
-| `/metadata` | Metadata GraphQL **and auth mutations** | **partial** (auth helpers) |
+| `/metadata` | Metadata GraphQL **and auth mutations** | **partial** (auth helpers, API keys) |
 | `/admin-panel` | Admin GraphQL | excluded (licence) |
 | `/rest` | REST CRUD | **partial** (people) |
 | `/open-api/core`, `/open-api/metadata` | OpenAPI JSON | not implemented |
@@ -61,6 +61,14 @@ Implemented in the Rust slice (documented divergences in §8):
   tokens stored as SHA-256 hashes.
 - Bearer access tokens and the session cookie are accepted for both REST and
   GraphQL (more permissive than upstream).
+- `/metadata` is mounted with the same GraphQL schema, so auth mutations and
+  API-key management are reachable there. Metadata object/field queries are not
+  implemented.
+- API keys: `createApiKey(input: { name, expiresAt, roleId })`,
+  `generateApiKeyToken(apiKeyId, expiresAt)`, `revokeApiKey(input: { id })`,
+  `apiKeys`, `apiKey(input: { id })`. Tokens are `api_<random>`, stored as
+  SHA-256 hashes; revocation is immediate. `roleId` is accepted but the key
+  inherits the caller's built-in role until the metadata role engine lands.
 
 ## 3. REST data contract `[fixture]`
 
@@ -221,8 +229,8 @@ Known remaining divergences (do not claim parity):
 
 | Area | Upstream | Rust today | Action |
 | --- | --- | --- | --- |
-| GraphQL auth host | `/metadata` | `/graphql` (and `/auth`) | add `/metadata` mount |
-| Data-API auth | API keys only | access token/cookie accepted | add API keys, then tighten |
+| GraphQL auth host | `/metadata` | `/metadata`, `/graphql` and `/auth` | tighten later |
+| Data-API auth | API keys only | API keys **and** access token/cookie | tighten before release |
 | Workspace bootstrap | `PENDING_CREATION` + `activateWorkspace` | atomic signup + immediate schema | document; add lifecycle |
 | Workspace prefill | sample people/companies on activation | none (new workspace has 0 people) | implement prefill |
 | GraphQL filter grammar | full `and`/`or`/`not`, composite filters | `id.eq` only; other filters return `BAD_USER_INPUT` | expand filter compiler |
@@ -233,7 +241,8 @@ Known remaining divergences (do not claim parity):
 | `searchVector` | PostgreSQL `to_tsvector` output | simplified lexeme builder | use `to_tsvector` |
 | `avatarFile` | `[FileObject]` | JSON value/null | model file objects |
 | REST `fields`/`depth`/`viewId` | supported | ignored/absent | add projection params |
-| Error `code` for auth | `NO_AUTHENTICATION_CONTEXT` on data API | none | align with API-key flow |
+| API-key roles | metadata role entity | caller's built-in role; `roleId` ignored | wire role engine |
+| Error `code` for auth | `NO_AUTHENTICATION_CONTEXT` on data API | none | align once access tokens are rejected |
 
 ## 9. Verification method
 

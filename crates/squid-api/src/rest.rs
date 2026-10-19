@@ -150,10 +150,13 @@ pub async fn me(
     headers: HeaderMap,
 ) -> AppResult<Json<serde_json::Value>> {
     let auth = require(&state, &headers).await?;
+    let user_id = auth
+        .user_id
+        .ok_or_else(|| AppError::Forbidden("API keys have no user profile".to_string()))?;
 
     let user = state
         .db
-        .find_user_by_id(auth.user_id)
+        .find_user_by_id(user_id)
         .await?
         .ok_or_else(|| AppError::Unauthorized("Authentication required".to_string()))?;
     let workspace = state

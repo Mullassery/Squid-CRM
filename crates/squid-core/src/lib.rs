@@ -77,6 +77,20 @@ pub struct WorkspaceMember {
     pub role: Role,
 }
 
+/// Workspace API key metadata (the secret token is only returned once and is
+/// stored hashed).
+#[derive(Debug, Clone, Serialize, Deserialize, async_graphql::SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiKey {
+    pub id: Uuid,
+    pub name: String,
+    pub role: Role,
+    pub expires_at: chrono::DateTime<chrono::Utc>,
+    pub revoked_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
 /// Composite `FullNameMetadata` shape used by upstream for `person.name`.
 #[derive(
     Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, async_graphql::SimpleObject,

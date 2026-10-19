@@ -10,17 +10,28 @@ use regex::Regex;
 use serde::de::DeserializeOwned;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
-use squid_core::{Actor, CreatePersonInput, Emails, FullName, Person, Role, User, Workspace};
+use squid_core::{
+    Actor, ApiKey, CreatePersonInput, Emails, FullName, Person, Role, User, Workspace,
+};
 use uuid::Uuid;
 
 const CORE_SCHEMA_SQL: &str = include_str!("../migrations/core/0001_core.sql");
 const WORKSPACE_PERSON_SQL: &str = include_str!("../migrations/workspace/0001_person.sql");
 const WORKSPACE_PERSON_CONTRACT_SQL: &str =
     include_str!("../migrations/workspace/0002_person_contract.sql");
+const CORE_API_KEYS_SQL: &str = include_str!("../migrations/core/0002_api_keys.sql");
 
 #[derive(Clone)]
 pub struct Db {
     pub pool: PgPool,
+}
+
+#[derive(Debug, Clone)]
+pub struct ApiKeyAuth {
+    pub api_key_id: Uuid,
+    pub workspace_id: Uuid,
+    pub role: Role,
+    pub expires_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone)]
@@ -29,6 +40,20 @@ pub struct SessionRow {
     pub user_id: Uuid,
     pub workspace_id: Uuid,
     pub expires_at: DateTime<Utc>,
+}
+
+const API_KEY_SELECT: &str = "id, name, role, expires_at, revoked_at, created_at, updated_at";
+
+fn row_to_api_key(row: &sqlx::postgres::PgRow) -> ApiKey {
+    ApiKey {
+        id: row.get("id"),
+        name: row.get("name"),
+        role: Role::parse(row.get("role")).unwrap_or(Role::Member),
+        expires_at: row.get("expires_at"),
+        revoked_at: row.get("revoked_at"),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+    }
 }
 
 impl Db {
@@ -53,7 +78,13 @@ impl Db {
             .execute(&mut *conn)
             .await?;
 
-        let result = sqlx::raw_sql(CORE_SCHEMA_SQL).execute(&mut *conn).await;
+        let mut result = Ok(());
+        for ddl in [CORE_SCHEMA_SQL, CORE_API_KEYS_SQL] {
+            result = sqlx::raw_sql(ddl).execute(&mut *conn).await.map(|_| ());
+            if result.is_err() {
+                break;
+            }
+        }
 
         let _ = sqlx::query("SELECT pg_advisory_unlock($1)")
             .bind(MIGRATION_LOCK)
@@ -375,6 +406,113 @@ impl Db {
             .execute(&self.pool)
             .await?;
         Ok(())
+    }
+
+    // ----- api keys ------------------------------------------------------
+
+    pub async fn create_api_key(
+        &self,
+        workspace_id: Uuid,
+        created_by: Option<Uuid>,
+        name: &str,
+        role: Role,
+        expires_at: DateTime<Utc>,
+    ) -> sqlx::Result<ApiKey> {
+        let row = sqlx::query(&format!(
+            "INSERT INTO core.api_keys (workspace_id, created_by, name, role, expires_at)
+             VALUES ($1, $2, $3, $4, $5)
+             RETURNING {API_KEY_SELECT}"
+        ))
+        .bind(workspace_id)
+        .bind(created_by)
+        .bind(name)
+        .bind(role.as_str())
+        .bind(expires_at)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row_to_api_key(&row))
+    }
+
+    pub async fn list_api_keys(&self, workspace_id: Uuid) -> sqlx::Result<Vec<ApiKey>> {
+        let rows = sqlx::query(&format!(
+            "SELECT {API_KEY_SELECT} FROM core.api_keys
+             WHERE workspace_id = $1 ORDER BY created_at ASC"
+        ))
+        .bind(workspace_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.iter().map(row_to_api_key).collect())
+    }
+
+    pub async fn get_api_key(&self, workspace_id: Uuid, id: Uuid) -> sqlx::Result<Option<ApiKey>> {
+        let row = sqlx::query(&format!(
+            "SELECT {API_KEY_SELECT} FROM core.api_keys
+             WHERE id = $1 AND workspace_id = $2"
+        ))
+        .bind(id)
+        .bind(workspace_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.as_ref().map(row_to_api_key))
+    }
+
+    pub async fn set_api_key_token(
+        &self,
+        workspace_id: Uuid,
+        id: Uuid,
+        token_hash: &str,
+        expires_at: DateTime<Utc>,
+    ) -> sqlx::Result<Option<ApiKey>> {
+        let row = sqlx::query(&format!(
+            "UPDATE core.api_keys
+             SET token_hash = $3, expires_at = $4, updated_at = now()
+             WHERE id = $1 AND workspace_id = $2 AND revoked_at IS NULL
+             RETURNING {API_KEY_SELECT}"
+        ))
+        .bind(id)
+        .bind(workspace_id)
+        .bind(token_hash)
+        .bind(expires_at)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.as_ref().map(row_to_api_key))
+    }
+
+    pub async fn revoke_api_key(
+        &self,
+        workspace_id: Uuid,
+        id: Uuid,
+    ) -> sqlx::Result<Option<ApiKey>> {
+        let row = sqlx::query(&format!(
+            "UPDATE core.api_keys
+             SET revoked_at = now(), token_hash = NULL, updated_at = now()
+             WHERE id = $1 AND workspace_id = $2 AND revoked_at IS NULL
+             RETURNING {API_KEY_SELECT}"
+        ))
+        .bind(id)
+        .bind(workspace_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.as_ref().map(row_to_api_key))
+    }
+
+    pub async fn find_api_key_by_token_hash(
+        &self,
+        token_hash: &str,
+    ) -> sqlx::Result<Option<ApiKeyAuth>> {
+        let row = sqlx::query(
+            "SELECT id, workspace_id, role, expires_at FROM core.api_keys
+             WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > now()",
+        )
+        .bind(token_hash)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|row| ApiKeyAuth {
+            api_key_id: row.get("id"),
+            workspace_id: row.get("workspace_id"),
+            role: Role::parse(row.get("role")).unwrap_or(Role::Member),
+            expires_at: row.get("expires_at"),
+        }))
     }
 
     // ----- person --------------------------------------------------------
