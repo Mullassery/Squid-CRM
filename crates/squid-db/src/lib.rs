@@ -1173,6 +1173,191 @@ impl Db {
         Ok(result.rows_affected() == 1)
     }
 
+    /// Merge people into the record at `conflict_priority_index`.
+    ///
+    /// Relations (opportunities, task/note targets) are re-pointed at the
+    /// surviving record and the other records are soft-deleted. `dry_run`
+    /// returns the merged preview without writing anything.
+    pub async fn merge_people(
+        &self,
+        workspace_id: Uuid,
+        ids: &[Uuid],
+        conflict_priority_index: usize,
+        dry_run: bool,
+    ) -> anyhow::Result<Option<Person>> {
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        if ids.is_empty() || conflict_priority_index >= ids.len() {
+            anyhow::bail!("conflictPriorityIndex is out of range");
+        }
+        let mut unique_ids = Vec::with_capacity(ids.len());
+        for id in ids {
+            if !unique_ids.contains(id) {
+                unique_ids.push(*id);
+            }
+        }
+        let target_id = unique_ids[conflict_priority_index];
+        let Some(target) = self.get_person(workspace_id, target_id).await? else {
+            return Ok(None);
+        };
+        let mut sources = Vec::new();
+        for id in unique_ids.iter().filter(|id| **id != target_id) {
+            match self.get_person(workspace_id, *id).await? {
+                Some(person) => sources.push(person),
+                None => return Ok(None),
+            }
+        }
+
+        let mut merged = target.clone();
+        for source in &sources {
+            if merged.name.first_name.is_empty() {
+                merged.name.first_name = source.name.first_name.clone();
+            }
+            if merged.name.last_name.is_empty() {
+                merged.name.last_name = source.name.last_name.clone();
+            }
+            if merged.emails.primary_email.is_empty() {
+                merged.emails.primary_email = source.emails.primary_email.clone();
+            }
+            for email in std::iter::once(&source.emails.primary_email)
+                .chain(source.emails.additional_emails.iter())
+            {
+                if email.is_empty()
+                    || email.eq_ignore_ascii_case(&merged.emails.primary_email)
+                    || merged
+                        .emails
+                        .additional_emails
+                        .iter()
+                        .any(|existing| existing.eq_ignore_ascii_case(email))
+                {
+                    continue;
+                }
+                merged.emails.additional_emails.push(email.clone());
+            }
+            if merged.job_title.is_none() {
+                merged.job_title = source.job_title.clone();
+            }
+            if merged.company_id.is_none() {
+                merged.company_id = source.company_id;
+            }
+            if merged.avatar_url.is_empty() {
+                merged.avatar_url = source.avatar_url.clone();
+            }
+            if merged.linkedin_link.primary_link_url.is_empty() {
+                merged.linkedin_link.primary_link_url =
+                    source.linkedin_link.primary_link_url.clone();
+                merged.linkedin_link.primary_link_label =
+                    source.linkedin_link.primary_link_label.clone();
+            }
+            if merged.phones.primary_phone_number.is_empty() {
+                merged.phones.primary_phone_number = source.phones.primary_phone_number.clone();
+                merged.phones.primary_phone_country_code =
+                    source.phones.primary_phone_country_code.clone();
+                merged.phones.primary_phone_calling_code =
+                    source.phones.primary_phone_calling_code.clone();
+            }
+            for phone in source.phones.additional_phones.iter() {
+                if !merged.phones.additional_phones.iter().any(|p| p == phone) {
+                    merged.phones.additional_phones.push(phone.clone());
+                }
+            }
+        }
+        merged.search_vector = build_search_vector(
+            &merged.name.first_name,
+            &merged.name.last_name,
+            &merged.emails.primary_email,
+            merged.job_title.as_deref(),
+        );
+        if dry_run {
+            return Ok(Some(merged));
+        }
+
+        let mut tx = self.pool.begin().await?;
+        for source in &sources {
+            let source_id = source.id;
+            sqlx::query(&format!(
+                "DELETE FROM {schema}.task_target loser
+                 USING {schema}.task_target winner
+                 WHERE loser.target_person_id = $1 AND winner.target_person_id = $2
+                   AND loser.task_id = winner.task_id
+                   AND loser.deleted_at IS NULL AND winner.deleted_at IS NULL
+                   AND loser.id <> winner.id"
+            ))
+            .bind(source_id)
+            .bind(target_id)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(&format!(
+                "UPDATE {schema}.task_target SET target_person_id = $1, updated_at = now()
+                 WHERE target_person_id = $2"
+            ))
+            .bind(target_id)
+            .bind(source_id)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(&format!(
+                "DELETE FROM {schema}.note_target loser
+                 USING {schema}.note_target winner
+                 WHERE loser.target_person_id = $1 AND winner.target_person_id = $2
+                   AND loser.note_id = winner.note_id
+                   AND loser.deleted_at IS NULL AND winner.deleted_at IS NULL
+                   AND loser.id <> winner.id"
+            ))
+            .bind(source_id)
+            .bind(target_id)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(&format!(
+                "UPDATE {schema}.note_target SET target_person_id = $1, updated_at = now()
+                 WHERE target_person_id = $2"
+            ))
+            .bind(target_id)
+            .bind(source_id)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(&format!(
+                "UPDATE {schema}.opportunity SET point_of_contact_id = $1, updated_at = now()
+                 WHERE point_of_contact_id = $2"
+            ))
+            .bind(target_id)
+            .bind(source_id)
+            .execute(&mut *tx)
+            .await?;
+        }
+        sqlx::query(&format!(
+            "UPDATE {schema}.person SET
+                name_first = $2, name_last = $3, primary_email = $4,
+                additional_emails = $5, job_title = $6, linkedin_link = $7::jsonb,
+                phones = $8::jsonb, avatar_url = $9, search_vector = $10,
+                company_id = $11, updated_at = now()
+             WHERE id = $1 AND deleted_at IS NULL"
+        ))
+        .bind(target_id)
+        .bind(&merged.name.first_name)
+        .bind(&merged.name.last_name)
+        .bind(&merged.emails.primary_email)
+        .bind(&merged.emails.additional_emails)
+        .bind(&merged.job_title)
+        .bind(serde_json::to_string(&merged.linkedin_link)?)
+        .bind(serde_json::to_string(&merged.phones)?)
+        .bind(&merged.avatar_url)
+        .bind(&merged.search_vector)
+        .bind(merged.company_id)
+        .execute(&mut *tx)
+        .await?;
+        for source in &sources {
+            sqlx::query(&format!(
+                "UPDATE {schema}.person SET deleted_at = now(), updated_at = now()
+                 WHERE id = $1 AND deleted_at IS NULL"
+            ))
+            .bind(source.id)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        self.get_person(workspace_id, target_id).await
+    }
+
     /// Idempotently seed the standard `person` object and its fields.
     pub async fn ensure_person_metadata(&self, workspace_id: Uuid) -> anyhow::Result<()> {
         let mut tx = self.pool.begin().await?;

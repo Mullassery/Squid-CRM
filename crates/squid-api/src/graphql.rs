@@ -4041,6 +4041,37 @@ impl MutationRoot {
         Ok(people)
     }
 
+    async fn merge_people(
+        &self,
+        ctx: &Context<'_>,
+        ids: Vec<Uuid>,
+        conflict_priority_index: i32,
+        dry_run: Option<bool>,
+    ) -> async_graphql::Result<Person> {
+        let auth = require_auth(ctx)?;
+        let Ok(conflict_priority_index) = usize::try_from(conflict_priority_index) else {
+            return Err(gql_err(AppError::BadRequest(
+                "conflictPriorityIndex is out of range".to_string(),
+            )));
+        };
+        if ids.is_empty() || conflict_priority_index >= ids.len() {
+            return Err(gql_err(AppError::BadRequest(
+                "conflictPriorityIndex is out of range".to_string(),
+            )));
+        }
+        state(ctx)
+            .db
+            .merge_people(
+                auth.workspace_id,
+                &ids,
+                conflict_priority_index,
+                dry_run.unwrap_or(false),
+            )
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Person not found".to_string())))
+    }
+
     async fn create_person(
         &self,
         ctx: &Context<'_>,

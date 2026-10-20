@@ -4275,3 +4275,238 @@ async fn view_batches_and_groups() {
         destroyed_field_group.body
     );
 }
+
+#[tokio::test]
+async fn merge_people_repoints_relations_and_honours_dry_run() {
+    let app = test_app().await;
+    let email = unique_email("merge");
+    let (token, _workspace) = signup(&app, &email).await;
+
+    let target = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/people",
+            &token,
+            Some(json!({
+                "name": { "firstName": "Ada", "lastName": "Target" },
+                "emails": { "primaryEmail": "ada.target@example.com" }
+            })),
+        ),
+    )
+    .await;
+    let target_id = target.body["data"]["createPerson"]["id"]
+        .as_str()
+        .expect("target id")
+        .to_string();
+
+    let source = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/people",
+            &token,
+            Some(person_body("Grace", "Source", "grace.source@example.com")),
+        ),
+    )
+    .await;
+    let source_id = source.body["data"]["createPerson"]["id"]
+        .as_str()
+        .expect("source id")
+        .to_string();
+
+    let company = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/companies",
+            &token,
+            Some(json!({ "name": "Merged Co" })),
+        ),
+    )
+    .await;
+    let company_id = company.body["data"]["createCompany"]["id"]
+        .as_str()
+        .expect("company id")
+        .to_string();
+
+    let source_update = send(
+        &app,
+        authorized(
+            "PATCH",
+            &format!("/rest/people/{source_id}"),
+            &token,
+            Some(json!({ "jobTitle": "CTO", "companyId": company_id })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        source_update.status,
+        StatusCode::OK,
+        "body: {}",
+        source_update.body
+    );
+
+    let task = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/tasks",
+            &token,
+            Some(json!({ "title": "Merge relation" })),
+        ),
+    )
+    .await;
+    let task_id = task.body["data"]["createTask"]["id"]
+        .as_str()
+        .expect("task id")
+        .to_string();
+    let target_link = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/taskTargets",
+            &token,
+            Some(json!({ "taskId": task_id, "targetPersonId": source_id })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        target_link.status,
+        StatusCode::CREATED,
+        "body: {}",
+        target_link.body
+    );
+
+    let opportunity = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/opportunities",
+            &token,
+            Some(json!({
+                "name": "Merge deal",
+                "amount": { "amountMicros": 1000000, "currencyCode": "USD" },
+                "closeDate": "2026-12-31T00:00:00Z",
+                "stage": "PROPOSAL",
+                "pointOfContactId": source_id
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        opportunity.status,
+        StatusCode::CREATED,
+        "body: {}",
+        opportunity.body
+    );
+    let opportunity_id = opportunity.body["data"]["createOpportunity"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let preview = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "mutation($ids: [UUID!]!) { mergePeople(ids: $ids, conflictPriorityIndex: 1, dryRun: true) { id name { firstName lastName } jobTitle emails { primaryEmail additionalEmails } companyId } }",
+                "variables": { "ids": [source_id, target_id] }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(preview.status, StatusCode::OK, "body: {}", preview.body);
+    let preview_person = &preview.body["data"]["mergePeople"];
+    assert_eq!(preview_person["id"], target_id);
+    assert_eq!(preview_person["jobTitle"], "CTO");
+    assert_eq!(preview_person["companyId"], company_id);
+    let preview_emails = preview_person["emails"]["additionalEmails"]
+        .as_array()
+        .unwrap();
+    assert!(preview_emails
+        .iter()
+        .any(|value| value == "grace.source@example.com"));
+
+    let untouched = send(
+        &app,
+        authorized("GET", &format!("/rest/people/{target_id}"), &token, None),
+    )
+    .await;
+    assert!(untouched.body["data"]["person"]["jobTitle"].is_null());
+    let source_still_active = send(
+        &app,
+        authorized("GET", &format!("/rest/people/{source_id}"), &token, None),
+    )
+    .await;
+    assert!(source_still_active.body["data"]["person"]["deletedAt"].is_null());
+
+    let merged = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "mutation($ids: [UUID!]!) { mergePeople(ids: $ids, conflictPriorityIndex: 1) { id jobTitle companyId emails { primaryEmail additionalEmails } } }",
+                "variables": { "ids": [source_id, target_id] }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(merged.status, StatusCode::OK, "body: {}", merged.body);
+    assert_eq!(merged.body["data"]["mergePeople"]["id"], target_id);
+    assert_eq!(merged.body["data"]["mergePeople"]["jobTitle"], "CTO");
+    assert_eq!(merged.body["data"]["mergePeople"]["companyId"], company_id);
+
+    let source_deleted = send(
+        &app,
+        authorized("GET", &format!("/rest/people/{source_id}"), &token, None),
+    )
+    .await;
+    assert_eq!(source_deleted.status, StatusCode::NOT_FOUND);
+
+    let linked_targets = send(&app, authorized("GET", "/rest/taskTargets", &token, None)).await;
+    assert_eq!(linked_targets.status, StatusCode::OK);
+    assert_eq!(linked_targets.body["totalCount"], 1);
+    assert_eq!(
+        linked_targets.body["data"]["taskTargets"][0]["targetPersonId"],
+        target_id
+    );
+
+    let linked_opportunity = send(
+        &app,
+        authorized(
+            "GET",
+            &format!("/rest/opportunities/{opportunity_id}"),
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(
+        linked_opportunity.body["data"]["opportunity"]["pointOfContactId"],
+        target_id
+    );
+
+    let invalid = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "mutation($ids: [UUID!]!) { mergePeople(ids: $ids, conflictPriorityIndex: 4) { id } }",
+                "variables": { "ids": [source_id, target_id] }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(invalid.status, StatusCode::OK);
+    assert_eq!(
+        invalid.body["errors"][0]["extensions"]["code"],
+        "BAD_USER_INPUT"
+    );
+}

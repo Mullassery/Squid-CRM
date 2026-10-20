@@ -45,7 +45,8 @@
 - [x] Person update (`PATCH /rest/people/{id}`, GraphQL `updatePerson`).
 - [x] Person batch mutations (`createPeople`, `updatePeople`, `deletePeople`, `destroyPeople`, `restorePeople`).
 - [x] Soft/hard delete + restore (`soft_delete`, `restorePerson`, `destroyPerson`).
-- [ ] `mergePeople`, `Person.avatarFile` as `FileObject`, null-clearing updates, full metadata fields.
+- [x] `mergePeople` with conflict priority, dry run, relation re-pointing and soft delete.
+- [ ] `Person.avatarFile` as `FileObject`, null-clearing updates, full metadata fields.
 - [x] `client-config` endpoint.
 
 ## Phase 5 (module migration)
