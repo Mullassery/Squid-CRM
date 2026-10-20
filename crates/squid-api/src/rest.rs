@@ -24,11 +24,15 @@ use squid_core::{
 use squid_db::{OrderTerm, PersonColumn};
 use uuid::Uuid;
 
+use crate::filtering::{self, parse_generic_filter};
 use crate::graphql::{
     sort_companies, sort_note_targets, sort_notes, sort_opportunities, sort_task_targets,
     sort_tasks,
 };
-use crate::sorting::SortTerm;
+use crate::sorting::{
+    company_value, note_target_value, note_value, opportunity_value, task_target_value, task_value,
+    SortTerm,
+};
 use crate::{resolve_auth, AppState};
 
 #[derive(Debug, Deserialize)]
@@ -296,7 +300,27 @@ pub async fn list_companies(
     Query(params): Query<ListCompaniesParams>,
 ) -> AppResult<Json<FindManyResponse<Company>>> {
     let auth = require(&state, &headers).await?;
-    let _ = &params.filter;
+    let filter = params
+        .filter
+        .as_deref()
+        .map(|raw| {
+            parse_generic_filter(
+                raw,
+                &[
+                    "id",
+                    "createdAt",
+                    "updatedAt",
+                    "deletedAt",
+                    "name",
+                    "position",
+                    "accountOwnerId",
+                    "searchVector",
+                    "annualRevenue",
+                    "annualRevenue.amountMicros",
+                ],
+            )
+        })
+        .transpose()?;
     let order = parse_generic_order_by(
         params.order_by.as_deref(),
         &[
@@ -328,11 +352,16 @@ pub async fn list_companies(
         .map(decode_cursor)
         .transpose()?;
 
-    let (mut companies, total) = state
+    let (mut companies, _) = state
         .db
         .list_companies(auth.workspace_id, 10_000, 0)
         .await
         .map_err(AppError::Internal)?;
+    if let Some(filter) = &filter {
+        companies
+            .retain(|company| filtering::matches(filter, &|field| company_value(company, field)));
+    }
+    let total = companies.len() as i64;
     sort_companies(&mut companies, &order);
 
     if let Some(after) = starting_after {
@@ -476,7 +505,31 @@ pub async fn list_opportunities(
     Query(params): Query<ListOpportunitiesParams>,
 ) -> AppResult<Json<FindManyResponse<Opportunity>>> {
     let auth = require(&state, &headers).await?;
-    let _ = &params.filter;
+    let filter = params
+        .filter
+        .as_deref()
+        .map(|raw| {
+            parse_generic_filter(
+                raw,
+                &[
+                    "id",
+                    "createdAt",
+                    "updatedAt",
+                    "deletedAt",
+                    "name",
+                    "amount",
+                    "closeDate",
+                    "stage",
+                    "position",
+                    "companyId",
+                    "pointOfContactId",
+                    "ownerId",
+                    "searchVector",
+                    "amount.amountMicros",
+                ],
+            )
+        })
+        .transpose()?;
     let order = parse_generic_order_by(
         params.order_by.as_deref(),
         &[
@@ -512,11 +565,17 @@ pub async fn list_opportunities(
         .map(decode_cursor)
         .transpose()?;
 
-    let (mut opportunities, total) = state
+    let (mut opportunities, _) = state
         .db
         .list_opportunities(auth.workspace_id, 10_000, 0)
         .await
         .map_err(AppError::Internal)?;
+    if let Some(filter) = &filter {
+        opportunities.retain(|opportunity| {
+            filtering::matches(filter, &|field| opportunity_value(opportunity, field))
+        });
+    }
+    let total = opportunities.len() as i64;
     sort_opportunities(&mut opportunities, &order);
 
     if let Some(after) = starting_after {
@@ -656,7 +715,27 @@ pub async fn list_tasks(
     Query(params): Query<ListOpportunitiesParams>,
 ) -> AppResult<Json<FindManyResponse<Task>>> {
     let auth = require(&state, &headers).await?;
-    let _ = &params.filter;
+    let filter = params
+        .filter
+        .as_deref()
+        .map(|raw| {
+            parse_generic_filter(
+                raw,
+                &[
+                    "id",
+                    "createdAt",
+                    "updatedAt",
+                    "deletedAt",
+                    "position",
+                    "title",
+                    "dueAt",
+                    "status",
+                    "assigneeId",
+                    "searchVector",
+                ],
+            )
+        })
+        .transpose()?;
     let order = parse_generic_order_by(
         params.order_by.as_deref(),
         &[
@@ -689,11 +768,15 @@ pub async fn list_tasks(
         .map(decode_cursor)
         .transpose()?;
 
-    let (mut tasks, total) = state
+    let (mut tasks, _) = state
         .db
         .list_tasks(auth.workspace_id, 10_000, 0)
         .await
         .map_err(AppError::Internal)?;
+    if let Some(filter) = &filter {
+        tasks.retain(|task| filtering::matches(filter, &|field| task_value(task, field)));
+    }
+    let total = tasks.len() as i64;
     sort_tasks(&mut tasks, &order);
     if let Some(after) = starting_after {
         if let Some(index) = tasks.iter().position(|row| row.id == after) {
@@ -823,7 +906,24 @@ pub async fn list_notes(
     Query(params): Query<ListOpportunitiesParams>,
 ) -> AppResult<Json<FindManyResponse<Note>>> {
     let auth = require(&state, &headers).await?;
-    let _ = &params.filter;
+    let filter = params
+        .filter
+        .as_deref()
+        .map(|raw| {
+            parse_generic_filter(
+                raw,
+                &[
+                    "id",
+                    "createdAt",
+                    "updatedAt",
+                    "deletedAt",
+                    "position",
+                    "title",
+                    "searchVector",
+                ],
+            )
+        })
+        .transpose()?;
     let order = parse_generic_order_by(
         params.order_by.as_deref(),
         &[
@@ -853,11 +953,15 @@ pub async fn list_notes(
         .map(decode_cursor)
         .transpose()?;
 
-    let (mut notes, total) = state
+    let (mut notes, _) = state
         .db
         .list_notes(auth.workspace_id, 10_000, 0)
         .await
         .map_err(AppError::Internal)?;
+    if let Some(filter) = &filter {
+        notes.retain(|note| filtering::matches(filter, &|field| note_value(note, field)));
+    }
+    let total = notes.len() as i64;
     sort_notes(&mut notes, &order);
     if let Some(after) = starting_after {
         if let Some(index) = notes.iter().position(|row| row.id == after) {
@@ -1025,7 +1129,27 @@ pub async fn list_task_targets(
     Query(params): Query<ListOpportunitiesParams>,
 ) -> AppResult<Json<FindManyResponse<TaskTarget>>> {
     let auth = require(&state, &headers).await?;
-    let _ = &params.filter;
+    let filter = params
+        .filter
+        .as_deref()
+        .map(|raw| {
+            parse_generic_filter(
+                raw,
+                &[
+                    "id",
+                    "createdAt",
+                    "updatedAt",
+                    "deletedAt",
+                    "position",
+                    "searchVector",
+                    "taskId",
+                    "targetCompanyId",
+                    "targetOpportunityId",
+                    "targetPersonId",
+                ],
+            )
+        })
+        .transpose()?;
     let order = parse_generic_order_by(
         params.order_by.as_deref(),
         &[
@@ -1060,6 +1184,10 @@ pub async fn list_task_targets(
         .list_task_targets(auth.workspace_id, None, None, None, None)
         .await
         .map_err(AppError::Internal)?;
+    if let Some(filter) = &filter {
+        targets
+            .retain(|target| filtering::matches(filter, &|field| task_target_value(target, field)));
+    }
     sort_task_targets(&mut targets, &order);
     let total = targets.len() as i64;
     let (page, page_info) = list_target_page(
@@ -1176,7 +1304,27 @@ pub async fn list_note_targets(
     Query(params): Query<ListOpportunitiesParams>,
 ) -> AppResult<Json<FindManyResponse<NoteTarget>>> {
     let auth = require(&state, &headers).await?;
-    let _ = &params.filter;
+    let filter = params
+        .filter
+        .as_deref()
+        .map(|raw| {
+            parse_generic_filter(
+                raw,
+                &[
+                    "id",
+                    "createdAt",
+                    "updatedAt",
+                    "deletedAt",
+                    "position",
+                    "searchVector",
+                    "noteId",
+                    "targetCompanyId",
+                    "targetOpportunityId",
+                    "targetPersonId",
+                ],
+            )
+        })
+        .transpose()?;
     let order = parse_generic_order_by(
         params.order_by.as_deref(),
         &[
@@ -1211,6 +1359,10 @@ pub async fn list_note_targets(
         .list_note_targets(auth.workspace_id, None, None, None, None)
         .await
         .map_err(AppError::Internal)?;
+    if let Some(filter) = &filter {
+        targets
+            .retain(|target| filtering::matches(filter, &|field| note_target_value(target, field)));
+    }
     sort_note_targets(&mut targets, &order);
     let total = targets.len() as i64;
     let (page, page_info) = list_target_page(

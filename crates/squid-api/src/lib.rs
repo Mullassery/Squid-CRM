@@ -3,6 +3,7 @@
 
 pub mod auth;
 pub mod current_user;
+pub mod filtering;
 pub mod graphql;
 pub mod rest;
 pub mod sorting;

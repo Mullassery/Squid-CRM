@@ -31,7 +31,7 @@ use uuid::Uuid;
 
 use crate::auth::{normalize_email, unique_subdomain};
 use crate::current_user::{self, User, Workspace};
-use crate::sorting::{sort_records, SortTerm, SortValue};
+use crate::sorting::{sort_records, SortTerm};
 use crate::{clear_session_cookie, resolve_auth, session_cookie, AppState, AuthTokenPair};
 
 pub type SquidSchema = Schema<QueryRoot, MutationRoot, EmptySubscription>;
@@ -496,109 +496,28 @@ fn json_order_terms(raw: &[serde_json::Value]) -> Vec<SortTerm> {
     terms
 }
 
-fn text(value: impl ToString) -> SortValue {
-    SortValue::Text(value.to_string())
-}
-
 pub(crate) fn sort_companies(items: &mut [Company], terms: &[SortTerm]) {
-    sort_records(items, terms, |company, field| match field {
-        "id" => Some(text(company.id)),
-        "createdAt" => Some(SortValue::Time(company.created_at)),
-        "updatedAt" => Some(SortValue::Time(company.updated_at)),
-        "deletedAt" => company.deleted_at.map(SortValue::Time),
-        "name" => company.name.clone().map(SortValue::Text),
-        "position" => Some(SortValue::Number(company.position)),
-        "accountOwnerId" => company.account_owner_id.map(text),
-        "searchVector" => company.search_vector.clone().map(SortValue::Text),
-        "annualRevenue" => company
-            .annual_revenue
-            .amount_micros
-            .map(|value| SortValue::Number(value as f64)),
-        _ => None,
-    });
+    sort_records(items, terms, crate::sorting::company_value);
 }
 
 pub(crate) fn sort_opportunities(items: &mut [Opportunity], terms: &[SortTerm]) {
-    sort_records(items, terms, |opportunity, field| match field {
-        "id" => Some(text(opportunity.id)),
-        "createdAt" => Some(SortValue::Time(opportunity.created_at)),
-        "updatedAt" => Some(SortValue::Time(opportunity.updated_at)),
-        "deletedAt" => opportunity.deleted_at.map(SortValue::Time),
-        "name" => opportunity.name.clone().map(SortValue::Text),
-        "amount" => opportunity
-            .amount
-            .amount_micros
-            .map(|value| SortValue::Number(value as f64)),
-        "closeDate" => opportunity.close_date.map(SortValue::Time),
-        "stage" => Some(text(opportunity.stage.as_str())),
-        "position" => Some(SortValue::Number(opportunity.position)),
-        "companyId" => opportunity.company_id.map(text),
-        "pointOfContactId" => opportunity.point_of_contact_id.map(text),
-        "ownerId" => opportunity.owner_id.map(text),
-        "searchVector" => opportunity.search_vector.clone().map(SortValue::Text),
-        _ => None,
-    });
+    sort_records(items, terms, crate::sorting::opportunity_value);
 }
 
 pub(crate) fn sort_tasks(items: &mut [Task], terms: &[SortTerm]) {
-    sort_records(items, terms, |task, field| match field {
-        "id" => Some(text(task.id)),
-        "createdAt" => Some(SortValue::Time(task.created_at)),
-        "updatedAt" => Some(SortValue::Time(task.updated_at)),
-        "deletedAt" => task.deleted_at.map(SortValue::Time),
-        "position" => Some(SortValue::Number(task.position)),
-        "title" => task.title.clone().map(SortValue::Text),
-        "dueAt" => task.due_at.map(SortValue::Time),
-        "status" => task.status.map(|status| text(status.as_str())),
-        "assigneeId" => task.assignee_id.map(text),
-        "searchVector" => task.search_vector.clone().map(SortValue::Text),
-        _ => None,
-    });
+    sort_records(items, terms, crate::sorting::task_value);
 }
 
 pub(crate) fn sort_notes(items: &mut [Note], terms: &[SortTerm]) {
-    sort_records(items, terms, |note, field| match field {
-        "id" => Some(text(note.id)),
-        "createdAt" => Some(SortValue::Time(note.created_at)),
-        "updatedAt" => Some(SortValue::Time(note.updated_at)),
-        "deletedAt" => note.deleted_at.map(SortValue::Time),
-        "position" => Some(SortValue::Number(note.position)),
-        "title" => note.title.clone().map(SortValue::Text),
-        "searchVector" => note.search_vector.clone().map(SortValue::Text),
-        _ => None,
-    });
+    sort_records(items, terms, crate::sorting::note_value);
 }
 
 pub(crate) fn sort_task_targets(items: &mut [TaskTarget], terms: &[SortTerm]) {
-    sort_records(items, terms, |target, field| match field {
-        "id" => Some(text(target.id)),
-        "createdAt" => Some(SortValue::Time(target.created_at)),
-        "updatedAt" => Some(SortValue::Time(target.updated_at)),
-        "deletedAt" => target.deleted_at.map(SortValue::Time),
-        "position" => Some(SortValue::Number(target.position)),
-        "taskId" => Some(text(target.task_id)),
-        "targetCompanyId" => target.target_company_id.map(text),
-        "targetOpportunityId" => target.target_opportunity_id.map(text),
-        "targetPersonId" => target.target_person_id.map(text),
-        "searchVector" => target.search_vector.clone().map(SortValue::Text),
-        _ => None,
-    });
+    sort_records(items, terms, crate::sorting::task_target_value);
 }
 
 pub(crate) fn sort_note_targets(items: &mut [NoteTarget], terms: &[SortTerm]) {
-    sort_records(items, terms, |target, field| match field {
-        "id" => Some(text(target.id)),
-        "createdAt" => Some(SortValue::Time(target.created_at)),
-        "updatedAt" => Some(SortValue::Time(target.updated_at)),
-        "deletedAt" => target.deleted_at.map(SortValue::Time),
-        "position" => Some(SortValue::Number(target.position)),
-        "noteId" => Some(text(target.note_id)),
-        "targetCompanyId" => target.target_company_id.map(text),
-        "targetOpportunityId" => target.target_opportunity_id.map(text),
-        "targetPersonId" => target.target_person_id.map(text),
-        "searchVector" => target.search_vector.clone().map(SortValue::Text),
-        _ => None,
-    });
+    sort_records(items, terms, crate::sorting::note_target_value);
 }
 
 #[derive(Debug, InputObject)]

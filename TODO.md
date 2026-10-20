@@ -76,6 +76,9 @@
 - [x] REST target routes, target updates/batches, and nested target record resolution (`TaskTarget.targetCompany` etc.).
 - [x] Scalar ordering parity (`orderBy` + REST `order_by`) for company,
       opportunity, task, note and task/note targets; relation ordering pending.
+- [x] REST filter grammar (`eq`/`neq`/`in`/`contains`/`startsWith`/`endsWith`/
+      `like`/`ilike`/ranges/`is`, `and`/`or`/`not`) for company, opportunity,
+      task, note and task/note targets.
 - [ ] Views/filters/sorts/groups parity (relation filters and view semantics).
 - [ ] Search, files, export/import.
 - [ ] Jobs/cron, webhooks, workflows, integrations.
@@ -91,15 +94,13 @@
 - Static person schema; not metadata-driven.
 - Cursor pagination, `order_by`, and scalar/composite filters implemented for
   whitelisted person columns; relation filters and view-based paging are not.
-- Company filters are limited to `id`/`name`; REST company `filter` is ignored.
-  Scalar `orderBy`/`order_by` is applied (nested relation ordering is not).
-- Opportunity filters cover scalar fields (id, name, stage, closeDate,
-  companyId, pointOfContactId, ownerId); relation filters are not yet applied;
-  REST opportunity `filter` is ignored. Scalar ordering is applied.
-- Task/Note target REST list `filter` is ignored; scalar `orderBy`/`order_by`
-  is applied. GraphQL target filters cover id/taskId/noteId/target*Id.
-- Task/Note REST `filter` is not applied; scalar `orderBy`/`order_by` is applied;
-  filters cover id/title/status/dueAt/assigneeId.
+- Company GraphQL filters are limited to `id`/`name`; REST filters cover scalar
+  fields. Relation filters and nested relation ordering are not implemented.
+- Opportunity relation filters are not implemented; scalar REST filters and
+  ordering are applied. GraphQL scalar filter coverage matches the object slice.
+- Task/Note target REST filters and ordering cover scalar fields.
+- Task/Note GraphQL and REST filters cover scalar fields
+  (id/title/status/dueAt/assigneeId); relation filters and nested ordering are not.
 - No OpenAPI document emitted yet.
 - Workspace activation lifecycle (`PENDING_CREATION` / `activateWorkspace`) and
   `signUpInNewWorkspace` are not implemented; `/auth/signup` activates directly.

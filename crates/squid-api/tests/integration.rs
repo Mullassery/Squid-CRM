@@ -2962,3 +2962,164 @@ async fn scalar_ordering_rest_and_graphql() {
         invalid_direction.body
     );
 }
+
+#[tokio::test]
+async fn rest_filter_grammar_for_companies_and_tasks() {
+    let app = test_app().await;
+    let email = unique_email("rest-filters");
+    let (token, _workspace) = signup(&app, &email).await;
+
+    for name in ["Alpha Corp", "Zebra Corp", "Mango Ltd"] {
+        let response = send(
+            &app,
+            authorized(
+                "POST",
+                "/rest/companies",
+                &token,
+                Some(json!({ "name": name })),
+            ),
+        )
+        .await;
+        assert_eq!(
+            response.status,
+            StatusCode::CREATED,
+            "body: {}",
+            response.body
+        );
+    }
+
+    let exact = send(
+        &app,
+        authorized(
+            "GET",
+            "/rest/companies?filter=name%5Beq%5D:Alpha%20Corp",
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(exact.status, StatusCode::OK, "body: {}", exact.body);
+    assert_eq!(exact.body["totalCount"], 1);
+
+    let contains = send(
+        &app,
+        authorized(
+            "GET",
+            "/rest/companies?filter=name%5Bcontains%5D:Corp",
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(contains.status, StatusCode::OK, "body: {}", contains.body);
+    assert_eq!(contains.body["totalCount"], 2);
+
+    let ilike = send(
+        &app,
+        authorized(
+            "GET",
+            "/rest/companies?filter=name%5Bilike%5D:%25corp",
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(ilike.status, StatusCode::OK, "body: {}", ilike.body);
+    assert_eq!(ilike.body["totalCount"], 2);
+
+    let any_of = send(
+        &app,
+        authorized(
+            "GET",
+            "/rest/companies?filter=name%5Bin%5D:(Alpha%20Corp,Mango%20Ltd)",
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(any_of.status, StatusCode::OK, "body: {}", any_of.body);
+    assert_eq!(any_of.body["totalCount"], 2);
+
+    let grouped = send(
+        &app,
+        authorized(
+            "GET",
+            "/rest/companies?filter=or(name%5Beq%5D:%22Alpha%20Corp%22,not(name%5Bcontains%5D:Corp))",
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(grouped.status, StatusCode::OK, "body: {}", grouped.body);
+    let names: Vec<&str> = grouped.body["data"]["companies"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|company| company["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, vec!["Alpha Corp", "Mango Ltd"]);
+
+    let recent = send(
+        &app,
+        authorized(
+            "GET",
+            "/rest/companies?filter=createdAt%5Bgte%5D:%222020-01-01%22&order_by=name%5BAscNullsLast%5D",
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(recent.status, StatusCode::OK, "body: {}", recent.body);
+    assert_eq!(recent.body["totalCount"], 3);
+    assert_eq!(recent.body["data"]["companies"][0]["name"], "Alpha Corp");
+
+    for (title, status) in [("First task", "TODO"), ("Done task", "DONE")] {
+        let response = send(
+            &app,
+            authorized(
+                "POST",
+                "/rest/tasks",
+                &token,
+                Some(json!({ "title": title, "status": status })),
+            ),
+        )
+        .await;
+        assert_eq!(
+            response.status,
+            StatusCode::CREATED,
+            "body: {}",
+            response.body
+        );
+    }
+
+    let todo = send(
+        &app,
+        authorized(
+            "GET",
+            "/rest/tasks?filter=status%5Beq%5D:TODO",
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(todo.status, StatusCode::OK, "body: {}", todo.body);
+    assert_eq!(todo.body["totalCount"], 1);
+    assert_eq!(todo.body["data"]["tasks"][0]["title"], "First task");
+
+    let invalid = send(
+        &app,
+        authorized(
+            "GET",
+            "/rest/companies?filter=unknown%5Beq%5D:value",
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(
+        invalid.status,
+        StatusCode::BAD_REQUEST,
+        "body: {}",
+        invalid.body
+    );
+}

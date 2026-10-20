@@ -8,6 +8,7 @@
 use std::cmp::Ordering;
 
 use chrono::{DateTime, Utc};
+use squid_core::{Company, Note, NoteTarget, Opportunity, Task, TaskTarget};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SortValue {
@@ -100,4 +101,109 @@ pub fn sort_records<T>(
         }
         Ordering::Equal
     });
+}
+
+fn text(value: impl ToString) -> SortValue {
+    SortValue::Text(value.to_string())
+}
+
+pub fn company_value(company: &Company, field: &str) -> Option<SortValue> {
+    match field {
+        "id" => Some(text(company.id)),
+        "createdAt" => Some(SortValue::Time(company.created_at)),
+        "updatedAt" => Some(SortValue::Time(company.updated_at)),
+        "deletedAt" => company.deleted_at.map(SortValue::Time),
+        "name" => company.name.clone().map(SortValue::Text),
+        "position" => Some(SortValue::Number(company.position)),
+        "accountOwnerId" => company.account_owner_id.map(text),
+        "searchVector" => company.search_vector.clone().map(SortValue::Text),
+        "annualRevenue" | "annualRevenue.amountMicros" => company
+            .annual_revenue
+            .amount_micros
+            .map(|value| SortValue::Number(value as f64)),
+        _ => None,
+    }
+}
+
+pub fn opportunity_value(opportunity: &Opportunity, field: &str) -> Option<SortValue> {
+    match field {
+        "id" => Some(text(opportunity.id)),
+        "createdAt" => Some(SortValue::Time(opportunity.created_at)),
+        "updatedAt" => Some(SortValue::Time(opportunity.updated_at)),
+        "deletedAt" => opportunity.deleted_at.map(SortValue::Time),
+        "name" => opportunity.name.clone().map(SortValue::Text),
+        "amount" | "amount.amountMicros" => opportunity
+            .amount
+            .amount_micros
+            .map(|value| SortValue::Number(value as f64)),
+        "closeDate" => opportunity.close_date.map(SortValue::Time),
+        "stage" => Some(text(opportunity.stage.as_str())),
+        "position" => Some(SortValue::Number(opportunity.position)),
+        "companyId" => opportunity.company_id.map(text),
+        "pointOfContactId" => opportunity.point_of_contact_id.map(text),
+        "ownerId" => opportunity.owner_id.map(text),
+        "searchVector" => opportunity.search_vector.clone().map(SortValue::Text),
+        _ => None,
+    }
+}
+
+pub fn task_value(task: &Task, field: &str) -> Option<SortValue> {
+    match field {
+        "id" => Some(text(task.id)),
+        "createdAt" => Some(SortValue::Time(task.created_at)),
+        "updatedAt" => Some(SortValue::Time(task.updated_at)),
+        "deletedAt" => task.deleted_at.map(SortValue::Time),
+        "position" => Some(SortValue::Number(task.position)),
+        "title" => task.title.clone().map(SortValue::Text),
+        "dueAt" => task.due_at.map(SortValue::Time),
+        "status" => task.status.map(|status| text(status.as_str())),
+        "assigneeId" => task.assignee_id.map(text),
+        "searchVector" => task.search_vector.clone().map(SortValue::Text),
+        _ => None,
+    }
+}
+
+pub fn note_value(note: &Note, field: &str) -> Option<SortValue> {
+    match field {
+        "id" => Some(text(note.id)),
+        "createdAt" => Some(SortValue::Time(note.created_at)),
+        "updatedAt" => Some(SortValue::Time(note.updated_at)),
+        "deletedAt" => note.deleted_at.map(SortValue::Time),
+        "position" => Some(SortValue::Number(note.position)),
+        "title" => note.title.clone().map(SortValue::Text),
+        "searchVector" => note.search_vector.clone().map(SortValue::Text),
+        _ => None,
+    }
+}
+
+pub fn task_target_value(target: &TaskTarget, field: &str) -> Option<SortValue> {
+    match field {
+        "id" => Some(text(target.id)),
+        "createdAt" => Some(SortValue::Time(target.created_at)),
+        "updatedAt" => Some(SortValue::Time(target.updated_at)),
+        "deletedAt" => target.deleted_at.map(SortValue::Time),
+        "position" => Some(SortValue::Number(target.position)),
+        "taskId" => Some(text(target.task_id)),
+        "targetCompanyId" => target.target_company_id.map(text),
+        "targetOpportunityId" => target.target_opportunity_id.map(text),
+        "targetPersonId" => target.target_person_id.map(text),
+        "searchVector" => target.search_vector.clone().map(SortValue::Text),
+        _ => None,
+    }
+}
+
+pub fn note_target_value(target: &NoteTarget, field: &str) -> Option<SortValue> {
+    match field {
+        "id" => Some(text(target.id)),
+        "createdAt" => Some(SortValue::Time(target.created_at)),
+        "updatedAt" => Some(SortValue::Time(target.updated_at)),
+        "deletedAt" => target.deleted_at.map(SortValue::Time),
+        "position" => Some(SortValue::Number(target.position)),
+        "noteId" => Some(text(target.note_id)),
+        "targetCompanyId" => target.target_company_id.map(text),
+        "targetOpportunityId" => target.target_opportunity_id.map(text),
+        "targetPersonId" => target.target_person_id.map(text),
+        "searchVector" => target.search_vector.clone().map(SortValue::Text),
+        _ => None,
+    }
 }
