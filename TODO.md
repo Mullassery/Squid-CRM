@@ -73,10 +73,11 @@
 - [x] View writes: `createView`/`updateView`/`deleteView`/`destroyView` plus
       view field/filter/sort/group create/update/delete/destroy and
       `getViewFields`/`getViewFilters`/`getViewSorts`/`getViewGroups` queries.
-- [ ] `createManyViewFields`/`createManyViewFilters`/`createManyViewSorts`/
-      `createManyViewGroups`, view field groups/filter groups writes, roles,
-      indexes/relations, remaining
-      standard objects, and metadata-driven dynamic schema generation.
+- [x] View batch/group writes: `createManyViewFields`, `createManyViewGroups`,
+      `updateManyViewGroups`, `createManyViewFieldGroups`, view field group CRUD,
+      view filter group CRUD and `getViewFieldGroups`/`getViewFilterGroups`.
+- [ ] Roles, indexes/relations, remaining standard objects, and metadata-driven
+      dynamic schema generation.
 - [ ] Custom-object physical tables and dynamic GraphQL/REST schema/relation
       field creation (metadata writes currently persist metadata only).
 - [x] `currentUser`/`currentWorkspace` full frontend boot fragment (ADR 0005;
@@ -89,8 +90,7 @@
 - [x] REST filter grammar (`eq`/`neq`/`in`/`contains`/`startsWith`/`endsWith`/
       `like`/`ilike`/ranges/`is`, `and`/`or`/`not`) for company, opportunity,
       task, note and task/note targets.
-- [ ] Views parity: batch create mutations, view field/filter group writes,
-      relation filters and view-based paging semantics.
+- [ ] Views parity: relation filters and view-based paging semantics.
 - [ ] Search, files, export/import.
 - [ ] Jobs/cron, webhooks, workflows, integrations.
 

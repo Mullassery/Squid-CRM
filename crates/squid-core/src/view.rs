@@ -458,3 +458,60 @@ pub struct UpdateViewGroupInput {
     #[serde(default)]
     pub position: Option<f64>,
 }
+
+#[derive(Debug, Clone, Deserialize, InputObject)]
+#[serde(rename_all = "camelCase")]
+#[graphql(name = "CreateViewFieldGroupInput")]
+pub struct CreateViewFieldGroupInput {
+    #[serde(default)]
+    pub id: Option<Uuid>,
+    pub name: String,
+    pub view_id: Uuid,
+    #[serde(default)]
+    pub position: Option<f64>,
+    #[serde(default)]
+    pub is_visible: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, InputObject)]
+#[serde(rename_all = "camelCase")]
+#[graphql(name = "UpdateViewFieldGroupInputUpdates")]
+pub struct UpdateViewFieldGroupInput {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub position: Option<f64>,
+    #[serde(default)]
+    pub is_visible: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize, InputObject)]
+#[serde(rename_all = "camelCase")]
+#[graphql(name = "CreateViewFilterGroupInput")]
+pub struct CreateViewFilterGroupInput {
+    #[serde(default)]
+    pub id: Option<Uuid>,
+    #[serde(default)]
+    pub parent_view_filter_group_id: Option<Uuid>,
+    #[serde(default)]
+    pub logical_operator: Option<ViewFilterGroupLogicalOperator>,
+    #[serde(default)]
+    pub position_in_view_filter_group: Option<f64>,
+    pub view_id: Uuid,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, InputObject)]
+#[serde(rename_all = "camelCase")]
+#[graphql(name = "UpdateViewFilterGroupInput")]
+pub struct UpdateViewFilterGroupInput {
+    #[serde(default)]
+    pub id: Option<Uuid>,
+    #[serde(default)]
+    pub parent_view_filter_group_id: Option<Uuid>,
+    #[serde(default)]
+    pub logical_operator: Option<ViewFilterGroupLogicalOperator>,
+    #[serde(default)]
+    pub position_in_view_filter_group: Option<f64>,
+    #[serde(default)]
+    pub view_id: Option<Uuid>,
+}

@@ -19,16 +19,17 @@ use squid_auth::{hash_password, hash_token, verify_password, AuthContext};
 use squid_core::{
     Address, ApiKey, AppError, AppResult, Company, CreateCompanyInput, CreateFieldMetadataInput,
     CreateNoteInput, CreateNoteTargetInput, CreateObjectMetadataInput, CreateOpportunityInput,
-    CreatePersonInput, CreateTaskInput, CreateTaskTargetInput, CreateViewFieldInput,
-    CreateViewFilterInput, CreateViewGroupInput, CreateViewInput, CreateViewSortInput, Currency,
-    CursorPagingInput, DateOp, FieldConnection, FieldFilterInput, FieldMetadata, FilterExpr,
-    GqlJson, Links, Note, NoteTarget, ObjectConnection, ObjectEdge, ObjectFilterInput,
-    ObjectMetadata, Opportunity, OpportunityStage, PageInfo, Person, RichText, Role, StringOp,
-    Task, TaskStatus, TaskTarget, UpdateCompanyInput, UpdateFieldMetadataInput, UpdateNoteInput,
-    UpdateObjectMetadataInput, UpdateOpportunityInput, UpdatePersonInput, UpdateTaskInput,
-    UpdateViewFieldInput, UpdateViewFilterInput, UpdateViewGroupInput, UpdateViewInput,
-    UpdateViewSortInput, User as CoreUser, UuidOp, View, ViewField, ViewFilter, ViewGroup,
-    ViewSort, ViewType,
+    CreatePersonInput, CreateTaskInput, CreateTaskTargetInput, CreateViewFieldGroupInput,
+    CreateViewFieldInput, CreateViewFilterGroupInput, CreateViewFilterInput, CreateViewGroupInput,
+    CreateViewInput, CreateViewSortInput, Currency, CursorPagingInput, DateOp, FieldConnection,
+    FieldFilterInput, FieldMetadata, FilterExpr, GqlJson, Links, Note, NoteTarget,
+    ObjectConnection, ObjectEdge, ObjectFilterInput, ObjectMetadata, Opportunity, OpportunityStage,
+    PageInfo, Person, RichText, Role, StringOp, Task, TaskStatus, TaskTarget, UpdateCompanyInput,
+    UpdateFieldMetadataInput, UpdateNoteInput, UpdateObjectMetadataInput, UpdateOpportunityInput,
+    UpdatePersonInput, UpdateTaskInput, UpdateViewFieldGroupInput, UpdateViewFieldInput,
+    UpdateViewFilterGroupInput, UpdateViewFilterInput, UpdateViewGroupInput, UpdateViewInput,
+    UpdateViewSortInput, User as CoreUser, UuidOp, View, ViewField, ViewFieldGroup, ViewFilter,
+    ViewFilterGroup, ViewGroup, ViewSort, ViewType,
 };
 use squid_db::{OrderTerm, PersonColumn};
 use uuid::Uuid;
@@ -2168,6 +2169,42 @@ impl QueryRoot {
         }
     }
 
+    async fn get_view_field_groups(
+        &self,
+        ctx: &Context<'_>,
+        view_id: String,
+    ) -> async_graphql::Result<Vec<ViewFieldGroup>> {
+        let auth = require_auth(ctx)?;
+        let view_id = Uuid::parse_str(&view_id)
+            .map_err(|_| gql_err(AppError::BadRequest("Invalid view id".to_string())))?;
+        state(ctx)
+            .db
+            .list_view_field_groups(auth.workspace_id, view_id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))
+    }
+
+    async fn get_view_filter_groups(
+        &self,
+        ctx: &Context<'_>,
+        view_id: Option<String>,
+    ) -> async_graphql::Result<Vec<ViewFilterGroup>> {
+        let auth = require_auth(ctx)?;
+        let view_id = view_id
+            .as_deref()
+            .map(Uuid::parse_str)
+            .transpose()
+            .map_err(|_| gql_err(AppError::BadRequest("Invalid view id".to_string())))?;
+        match view_id {
+            Some(view_id) => state(ctx)
+                .db
+                .list_view_filter_groups(auth.workspace_id, view_id)
+                .await
+                .map_err(|e| gql_err(AppError::Internal(e))),
+            None => Ok(Vec::new()),
+        }
+    }
+
     async fn get_view_groups(
         &self,
         ctx: &Context<'_>,
@@ -2985,6 +3022,23 @@ pub struct DestroyViewGroupInput {
     pub id: Uuid,
 }
 
+#[derive(Debug, InputObject)]
+#[graphql(name = "UpdateViewFieldGroupInput")]
+pub struct UpdateViewFieldGroupMutationInput {
+    pub id: Uuid,
+    pub update: UpdateViewFieldGroupInput,
+}
+
+#[derive(Debug, InputObject)]
+pub struct DeleteViewFieldGroupInput {
+    pub id: Uuid,
+}
+
+#[derive(Debug, InputObject)]
+pub struct DestroyViewFieldGroupInput {
+    pub id: Uuid,
+}
+
 #[Object]
 impl MutationRoot {
     async fn create_view(
@@ -3262,6 +3316,190 @@ impl MutationRoot {
             .await
             .map_err(|e| gql_err(AppError::Internal(e)))?
             .ok_or_else(|| gql_err(AppError::NotFound("View group not found".to_string())))
+    }
+
+    async fn create_many_view_groups(
+        &self,
+        ctx: &Context<'_>,
+        inputs: Vec<CreateViewGroupInput>,
+    ) -> async_graphql::Result<Vec<ViewGroup>> {
+        let auth = require_auth(ctx)?;
+        state(ctx)
+            .db
+            .create_many_view_groups(auth.workspace_id, &inputs)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))
+    }
+
+    async fn update_many_view_groups(
+        &self,
+        ctx: &Context<'_>,
+        inputs: Vec<UpdateViewGroupMutationInput>,
+    ) -> async_graphql::Result<Vec<ViewGroup>> {
+        let auth = require_auth(ctx)?;
+        let updates: Vec<(Uuid, UpdateViewGroupInput)> = inputs
+            .into_iter()
+            .map(|input| (input.id, input.update))
+            .collect();
+        state(ctx)
+            .db
+            .update_many_view_groups(auth.workspace_id, &updates)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))
+    }
+
+    async fn create_many_view_fields(
+        &self,
+        ctx: &Context<'_>,
+        inputs: Vec<CreateViewFieldInput>,
+    ) -> async_graphql::Result<Vec<ViewField>> {
+        let auth = require_auth(ctx)?;
+        state(ctx)
+            .db
+            .create_many_view_fields(auth.workspace_id, &inputs)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))
+    }
+
+    async fn create_view_field_group(
+        &self,
+        ctx: &Context<'_>,
+        input: CreateViewFieldGroupInput,
+    ) -> async_graphql::Result<ViewFieldGroup> {
+        let auth = require_auth(ctx)?;
+        state(ctx)
+            .db
+            .create_view_field_group(auth.workspace_id, &input)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))
+    }
+
+    async fn create_many_view_field_groups(
+        &self,
+        ctx: &Context<'_>,
+        inputs: Vec<CreateViewFieldGroupInput>,
+    ) -> async_graphql::Result<Vec<ViewFieldGroup>> {
+        let auth = require_auth(ctx)?;
+        state(ctx)
+            .db
+            .create_many_view_field_groups(auth.workspace_id, &inputs)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))
+    }
+
+    async fn update_view_field_group(
+        &self,
+        ctx: &Context<'_>,
+        input: UpdateViewFieldGroupMutationInput,
+    ) -> async_graphql::Result<ViewFieldGroup> {
+        let auth = require_auth(ctx)?;
+        state(ctx)
+            .db
+            .update_view_field_group(auth.workspace_id, input.id, &input.update)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("View field group not found".to_string())))
+    }
+
+    async fn delete_view_field_group(
+        &self,
+        ctx: &Context<'_>,
+        input: DeleteViewFieldGroupInput,
+    ) -> async_graphql::Result<ViewFieldGroup> {
+        let auth = require_auth(ctx)?;
+        state(ctx)
+            .db
+            .delete_view_field_group(auth.workspace_id, input.id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("View field group not found".to_string())))
+    }
+
+    async fn destroy_view_field_group(
+        &self,
+        ctx: &Context<'_>,
+        input: DestroyViewFieldGroupInput,
+    ) -> async_graphql::Result<ViewFieldGroup> {
+        let auth = require_auth(ctx)?;
+        state(ctx)
+            .db
+            .destroy_view_field_group(auth.workspace_id, input.id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("View field group not found".to_string())))
+    }
+
+    async fn create_view_filter_group(
+        &self,
+        ctx: &Context<'_>,
+        input: CreateViewFilterGroupInput,
+    ) -> async_graphql::Result<ViewFilterGroup> {
+        let auth = require_auth(ctx)?;
+        state(ctx)
+            .db
+            .create_view_filter_group(auth.workspace_id, &input)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))
+    }
+
+    async fn update_view_filter_group(
+        &self,
+        ctx: &Context<'_>,
+        id: String,
+        input: UpdateViewFilterGroupInput,
+    ) -> async_graphql::Result<ViewFilterGroup> {
+        let auth = require_auth(ctx)?;
+        let id = Uuid::parse_str(&id).map_err(|_| {
+            gql_err(AppError::BadRequest(
+                "Invalid view filter group id".to_string(),
+            ))
+        })?;
+        state(ctx)
+            .db
+            .update_view_filter_group(auth.workspace_id, id, &input)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| {
+                gql_err(AppError::NotFound(
+                    "View filter group not found".to_string(),
+                ))
+            })
+    }
+
+    async fn delete_view_filter_group(
+        &self,
+        ctx: &Context<'_>,
+        id: String,
+    ) -> async_graphql::Result<bool> {
+        let auth = require_auth(ctx)?;
+        let id = Uuid::parse_str(&id).map_err(|_| {
+            gql_err(AppError::BadRequest(
+                "Invalid view filter group id".to_string(),
+            ))
+        })?;
+        state(ctx)
+            .db
+            .delete_view_filter_group(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))
+    }
+
+    async fn destroy_view_filter_group(
+        &self,
+        ctx: &Context<'_>,
+        id: String,
+    ) -> async_graphql::Result<bool> {
+        let auth = require_auth(ctx)?;
+        let id = Uuid::parse_str(&id).map_err(|_| {
+            gql_err(AppError::BadRequest(
+                "Invalid view filter group id".to_string(),
+            ))
+        })?;
+        state(ctx)
+            .db
+            .destroy_view_filter_group(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))
     }
 
     async fn create_one_object(

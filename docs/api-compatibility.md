@@ -166,9 +166,10 @@ getViewGroups(viewId: String!): [ViewGroup!]!
 It is a `TABLE`/`INDEX` view named "All people" with five visible view fields
 (name, emails, jobTitle, phones, createdAt). Filters, sorts, groups and field
 groups are empty by default. `createView`/`updateView`/`deleteView`/`destroyView`
-and view field/filter/sort/group create/update/delete/destroy are implemented;
-batch create mutations, view field/filter group writes, relation filters, roles
-and `minimalMetadata` remain unimplemented (see `TODO.md`).
+and view field/filter/sort/group create/update/delete/destroy plus the batch
+create/update mutations and view field/filter group writes are implemented;
+relation filters, roles and `minimalMetadata` remain unimplemented (see
+`TODO.md`).
 
 The frontend boot document (`GetCurrentUser` / `UserQueryFragment`) is served:
 identity, workspace member, current workspace and workspace URLs are live.
@@ -294,7 +295,7 @@ Alignment completed and covered by tests:
 | GraphQL filters | `and`/`or`/`not`, composite name/emails, dates | aligned for scalar person fields; relation filters absent |
 | GraphQL batch mutations | `createPeople`, `updatePeople`, `deletePeople`, `destroyPeople`, `restorePeople` | aligned; `mergePeople` not implemented |
 | Metadata API | `objects`/`object`/`fields`/`field` + object/field CRUD | reads for five standard objects; object/field writes; no dynamic schema, roles, indexes or relations |
-| Views API | `getViews`/`getView`/`getViewFields`/`getViewFilters`/`getViewSorts`/`getViewGroups`, `createView`/`updateView`/`deleteView`/`destroyView`, view field/filter/sort/group CRUD | aligned for standard views; batch create mutations and view field/filter group writes are not implemented |
+| Views API | `getViews`/`getView`/`getViewFields`/`getViewFilters`/`getViewSorts`/`getViewGroups`/`getViewFieldGroups`/`getViewFilterGroups`, `createView`/`updateView`/`deleteView`/`destroyView`, view field/filter/sort/group/field-group/filter-group CRUD + batch mutations | aligned for standard views; relation filters and view-based paging semantics are not implemented |
 | Frontend boot | `currentUser`/`currentWorkspace` full fragment | shape aligned; roles/permissions/billing/SSO are static or empty defaults |
 | API key role | upstream `Role` object | internal enum serialised as `WorkspaceRole`; no role engine yet |
 | GraphQL `person(filter:)` | `PersonFilterInput!` | aligned for scalar person fields |
