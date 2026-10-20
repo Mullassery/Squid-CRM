@@ -554,6 +554,37 @@ impl Db {
         Ok(role.and_then(|r| Role::parse(&r)))
     }
 
+    pub async fn find_workspace_member(
+        &self,
+        workspace_id: Uuid,
+        user_id: Uuid,
+    ) -> sqlx::Result<Option<squid_core::WorkspaceMember>> {
+        let row = sqlx::query(
+            "SELECT id, workspace_id, user_id, role FROM core.workspace_members
+             WHERE workspace_id = $1 AND user_id = $2",
+        )
+        .bind(workspace_id)
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.and_then(|row| {
+            let role: String = row.get("role");
+            Role::parse(&role).map(|role| squid_core::WorkspaceMember {
+                id: row.get("id"),
+                workspace_id: row.get("workspace_id"),
+                user_id: row.get("user_id"),
+                role,
+            })
+        }))
+    }
+
+    pub async fn count_workspace_members(&self, workspace_id: Uuid) -> sqlx::Result<i64> {
+        sqlx::query_scalar("SELECT count(*) FROM core.workspace_members WHERE workspace_id = $1")
+            .bind(workspace_id)
+            .fetch_one(&self.pool)
+            .await
+    }
+
     // ----- sessions ------------------------------------------------------
 
     pub async fn create_session(

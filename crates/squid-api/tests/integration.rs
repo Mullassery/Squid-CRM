@@ -1579,3 +1579,266 @@ async fn metadata_default_view_matches_frontend_fragment() {
     assert_eq!(single.status, StatusCode::OK);
     assert_eq!(single.body["data"]["getView"]["name"], "All people");
 }
+
+#[tokio::test]
+async fn current_user_matches_frontend_boot_fragment() {
+    let app = test_app().await;
+    let email = unique_email("current-user");
+    let (token, _workspace) = signup(&app, &email).await;
+
+    let query = r#"
+        query GetCurrentUser {
+          currentUser {
+            id
+            firstName
+            lastName
+            email
+            hasPassword
+            canAccessFullAdminPanel
+            canImpersonate
+            supportUserHash
+            onboardingStatus
+            previousOnboardingStatus
+            isWorkspaceCreator
+            workspaceMember {
+              id
+              name { firstName lastName }
+              colorScheme
+              uiScale
+              openRecordIn
+              avatarUrl
+              locale
+              userEmail
+              userId
+              userWorkspaceId
+              timeZone
+              dateFormat
+              timeFormat
+              calendarStartDay
+              numberFormat
+            }
+            workspaceMembers {
+              id
+              name { firstName lastName }
+              avatarUrl
+              userEmail
+              userId
+              userWorkspaceId
+            }
+            deletedWorkspaceMembers {
+              id
+              name { firstName lastName }
+              avatarUrl
+              userEmail
+            }
+            currentUserWorkspace {
+              id
+              permissionFlags
+              isImpersonating
+              objectsPermissions {
+                objectMetadataId
+                canReadObjectRecords
+                canUpdateObjectRecords
+                canSoftDeleteObjectRecords
+                canDestroyObjectRecords
+                restrictedFields
+                rowLevelPermissionPredicates {
+                  id
+                  fieldMetadataId
+                  objectMetadataId
+                  operand
+                  subFieldName
+                  workspaceMemberFieldMetadataId
+                  workspaceMemberSubFieldName
+                  rowLevelPermissionPredicateGroupId
+                  positionInRowLevelPermissionPredicateGroup
+                  roleId
+                  value
+                }
+                rowLevelPermissionPredicateGroups {
+                  id
+                  parentRowLevelPermissionPredicateGroupId
+                  logicalOperator
+                  positionInRowLevelPermissionPredicateGroup
+                  roleId
+                  objectMetadataId
+                }
+              }
+              twoFactorAuthenticationMethodSummary {
+                twoFactorAuthenticationMethodId
+                status
+                strategy
+              }
+            }
+            currentWorkspace {
+              id
+              displayName
+              logo
+              inviteHash
+              allowImpersonation
+              activationStatus
+              isPublicInviteLinkEnabled
+              isCampaignClickTrackingEnabled
+              isCampaignOpenTrackingEnabled
+              workspaceDiscoverability
+              isGoogleAuthEnabled
+              isMicrosoftAuthEnabled
+              isPasswordAuthEnabled
+              isGoogleAuthBypassEnabled
+              isMicrosoftAuthBypassEnabled
+              isPasswordAuthBypassEnabled
+              subdomain
+              customDomain
+              hasValidSignedEnterpriseKey
+              hasValidEnterpriseValidityToken
+              workspaceCustomApplication { id }
+              installedApplications {
+                id
+                name
+                universalIdentifier
+                logoUrl
+                createdAt
+              }
+              isCustomDomainEnabled
+              workspaceUrls { subdomainUrl customUrl }
+              featureFlags { key value }
+              currentBillingSubscription {
+                id
+                status
+                interval
+                metadata
+                currentPeriodEnd
+                cancelAt
+                collectionMethod
+                phases {
+                  start_date
+                  end_date
+                  items { price quantity }
+                }
+                billingSubscriptionItems {
+                  id
+                  hasReachedCurrentPeriodCap
+                  quantity
+                  stripePriceId
+                  unitAmount
+                  creditAmount
+                  billingProduct {
+                    name
+                    description
+                    images
+                    metadata {
+                      productKey
+                      planKey
+                      priceUsageBased
+                      isLegacy
+                    }
+                  }
+                }
+              }
+              billingCustomer {
+                id
+                hasPaymentMethod
+                userCreditsFallback
+              }
+              billingSubscriptions {
+                id
+                status
+                metadata
+                cancelAt
+                phases {
+                  start_date
+                  end_date
+                  items { price quantity }
+                }
+              }
+              billingEntitlements { key value }
+              workspaceMembersCount
+              defaultRole {
+                id
+                label
+                description
+                icon
+                canUpdateAllSettings
+                canAccessAllTools
+                isEditable
+                canReadAllObjectRecords
+                canUpdateAllObjectRecords
+                canSoftDeleteAllObjectRecords
+                canDestroyAllObjectRecords
+                canBeAssignedToUsers
+                canBeAssignedToAgents
+                canBeAssignedToApiKeys
+                applicationId
+                universalIdentifier
+              }
+              aiChatModelTier
+              aiAgentModelTier
+              isAutoModelSelectionEnabled
+              aiModelIdByTier
+              aiAdditionalInstructions
+              isTwoFactorAuthenticationEnforced
+              trashRetentionDays
+              eventLogRetentionDays
+              editableProfileFields
+              isInternalMessagesImportEnabled
+            }
+            availableWorkspaces {
+              availableWorkspacesForSignIn {
+                id
+                displayName
+                loginToken
+                inviteHash
+                personalInviteToken
+                workspaceUrls { subdomainUrl customUrl }
+                logo
+                sso { type id issuer name status }
+              }
+              availableWorkspacesForSignUp {
+                id
+                displayName
+                loginToken
+                inviteHash
+                personalInviteToken
+                workspaceUrls { subdomainUrl customUrl }
+                logo
+                sso { type id issuer name status }
+              }
+            }
+            userVars
+          }
+        }
+    "#;
+
+    let response = send(
+        &app,
+        authorized("POST", "/metadata", &token, Some(json!({ "query": query }))),
+    )
+    .await;
+    assert_eq!(response.status, StatusCode::OK);
+    assert!(
+        response.body["errors"].is_null(),
+        "currentUser query errors: {}",
+        response.body
+    );
+    let user = &response.body["data"]["currentUser"];
+    assert_eq!(user["email"], email);
+    assert!(!user["firstName"].as_str().unwrap().is_empty());
+    assert_eq!(user["hasPassword"], true);
+    assert_eq!(user["onboardingStatus"], "COMPLETED");
+    assert_eq!(user["isWorkspaceCreator"], true);
+    assert_eq!(user["workspaceMembers"].as_array().unwrap().len(), 1);
+    assert_eq!(user["deletedWorkspaceMembers"].as_array().unwrap().len(), 0);
+
+    let workspace = &user["currentWorkspace"];
+    assert_eq!(workspace["activationStatus"], "ACTIVE");
+    assert_eq!(
+        workspace["subdomain"],
+        user["currentWorkspace"]["subdomain"]
+    );
+    assert_eq!(workspace["workspaceMembersCount"], 1.0);
+    assert_eq!(workspace["defaultRole"]["label"], "Owner");
+    assert_eq!(
+        workspace["workspaceUrls"]["subdomainUrl"],
+        "http://localhost:3001"
+    );
+}

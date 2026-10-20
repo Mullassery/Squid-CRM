@@ -2,6 +2,7 @@
 //! (`/auth`) and health (`/healthz`), matching the audited upstream prefixes.
 
 pub mod auth;
+pub mod current_user;
 pub mod graphql;
 pub mod rest;
 

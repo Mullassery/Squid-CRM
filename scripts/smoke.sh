@@ -69,7 +69,7 @@ PY
 
 METADATA_STATUS=$(curl -s -o /tmp/squid-smoke-metadata.json -w '%{http_code}' \
   -X POST "${BASE}/metadata" -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' \
-  -d '{"query":"{ objects(paging:{first:100}) { edges { node { nameSingular fieldsList { name type } } } } getViews { id name type viewFields { fieldMetadataId isVisible position } } }"}')
+  -d '{"query":"{ objects(paging:{first:100}) { edges { node { nameSingular fieldsList { name type } } } } getViews { id name type viewFields { fieldMetadataId isVisible position } } currentUser { email currentWorkspace { subdomain activationStatus } } }"}')
 test "$METADATA_STATUS" = "200" || { echo "metadata failed: $METADATA_STATUS"; cat /tmp/squid-smoke-metadata.json; exit 1; }
 python3 - <<'PY'
 import json
@@ -87,7 +87,9 @@ assert len(views) == 1, body
 assert views[0]['name'] == 'All people', body
 assert views[0]['type'] == 'TABLE', body
 assert len(views[0]['viewFields']) == 5, body
-print('metadata OK: person object, fields and default view match the frontend')
+assert body['data']['currentUser']['email'].startswith('smoke-'), body
+assert body['data']['currentUser']['currentWorkspace']['activationStatus'] == 'ACTIVE', body
+print('metadata OK: objects, fields, default view and boot user match the frontend')
 PY
 
 UNAUTH_STATUS=$(curl -s -o /tmp/squid-smoke-unauth.json -w '%{http_code}' "${BASE}/rest/people")

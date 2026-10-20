@@ -24,6 +24,7 @@ pub use view::*;
 /// A workspace member's role. Upstream models this as a role entity with
 /// permission flags; the slice keeps the built-in roles as an enum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, async_graphql::Enum)]
+#[graphql(name = "WorkspaceRole")]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum Role {
     Owner,

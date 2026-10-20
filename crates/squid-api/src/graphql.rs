@@ -17,13 +17,14 @@ use squid_auth::{hash_password, hash_token, verify_password, AuthContext};
 use squid_core::{
     ApiKey, AppError, AppResult, CreatePersonInput, CursorPagingInput, DateOp, FieldConnection,
     FieldFilterInput, FieldMetadata, FilterExpr, GqlJson, ObjectConnection, ObjectEdge,
-    ObjectFilterInput, ObjectMetadata, PageInfo, Person, StringOp, UpdatePersonInput, User, UuidOp,
-    View, ViewType, Workspace,
+    ObjectFilterInput, ObjectMetadata, PageInfo, Person, Role, StringOp, UpdatePersonInput,
+    User as CoreUser, UuidOp, View, ViewType,
 };
 use squid_db::{OrderTerm, PersonColumn};
 use uuid::Uuid;
 
 use crate::auth::{normalize_email, unique_subdomain};
+use crate::current_user::{self, User, Workspace};
 use crate::{clear_session_cookie, resolve_auth, session_cookie, AppState, AuthTokenPair};
 
 pub type SquidSchema = Schema<QueryRoot, MutationRoot, EmptySubscription>;
@@ -765,11 +766,16 @@ impl QueryRoot {
         let Some(user_id) = auth.user_id else {
             return Ok(None);
         };
-        state(ctx)
+        let state = state(ctx);
+        let user = state
             .db
             .find_user_by_id(user_id)
             .await
-            .map_err(|e| gql_err(AppError::Internal(anyhow::anyhow!(e))))
+            .map_err(|e| gql_err(AppError::Internal(anyhow::anyhow!(e))))?
+            .ok_or_else(|| gql_err(AppError::NotFound("User not found".to_string())))?;
+        build_current_user(state, &user, auth.workspace_id, auth.role)
+            .await
+            .map(Some)
     }
 
     async fn current_workspace(
@@ -779,11 +785,24 @@ impl QueryRoot {
         let Some(auth) = ctx_data(ctx).auth.as_ref() else {
             return Ok(None);
         };
-        state(ctx)
+        let state = state(ctx);
+        let workspace = state
             .db
             .find_workspace(auth.workspace_id)
             .await
-            .map_err(|e| gql_err(AppError::Internal(anyhow::anyhow!(e))))
+            .map_err(|e| gql_err(AppError::Internal(anyhow::anyhow!(e))))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Workspace not found".to_string())))?;
+        let count = state
+            .db
+            .count_workspace_members(auth.workspace_id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(anyhow::anyhow!(e))))?;
+        Ok(Some(current_user::workspace(
+            &workspace,
+            auth.role,
+            &state.config.frontend_url,
+            count,
+        )))
     }
 
     async fn objects(
@@ -1020,6 +1039,11 @@ impl MutationRoot {
             .map_err(gql_err)?;
         set_cookie(ctx, raw_token, expires_at);
 
+        let user = build_current_user(state, &user, workspace.id, Role::Owner).await?;
+        let workspace = user
+            .current_workspace
+            .clone()
+            .expect("current workspace is built with the user");
         Ok(AuthPayload {
             tokens,
             user,
@@ -1086,7 +1110,7 @@ impl MutationRoot {
                 ))
             })?;
 
-        let (workspace, _role) = state
+        let (workspace, role) = state
             .db
             .find_workspace_for_user(user.id)
             .await
@@ -1103,6 +1127,11 @@ impl MutationRoot {
             .map_err(gql_err)?;
         set_cookie(ctx, raw_token, expires_at);
 
+        let user = build_current_user(state, &user, workspace.id, role).await?;
+        let workspace = user
+            .current_workspace
+            .clone()
+            .expect("current workspace is built with the user");
         Ok(AuthPayload {
             tokens,
             user,
@@ -1489,7 +1518,7 @@ async fn sign_in_impl(
 
     verify_password(password, &password_hash).map_err(gql_err)?;
 
-    let (workspace, _role) = state
+    let (workspace, role) = state
         .db
         .find_workspace_for_user(user.id)
         .await
@@ -1507,10 +1536,91 @@ async fn sign_in_impl(
 
     set_cookie(ctx, raw_token, expires_at);
 
+    let user = build_current_user(state, &user, workspace.id, role).await?;
+    let workspace = user
+        .current_workspace
+        .clone()
+        .expect("current workspace is built with the user");
     Ok(AuthPayload {
         tokens,
         user,
         workspace,
+    })
+}
+
+async fn build_current_user(
+    state: &AppState,
+    user: &CoreUser,
+    workspace_id: Uuid,
+    role: Role,
+) -> async_graphql::Result<User> {
+    let workspace = state
+        .db
+        .find_workspace(workspace_id)
+        .await
+        .map_err(|e| gql_err(AppError::Internal(anyhow::anyhow!(e))))?
+        .ok_or_else(|| gql_err(AppError::NotFound("Workspace not found".to_string())))?;
+    let member = state
+        .db
+        .find_workspace_member(workspace_id, user.id)
+        .await
+        .map_err(|e| gql_err(AppError::Internal(anyhow::anyhow!(e))))?
+        .ok_or_else(|| gql_err(AppError::NotFound("Workspace member not found".to_string())))?;
+    let member_count = state
+        .db
+        .count_workspace_members(workspace_id)
+        .await
+        .map_err(|e| gql_err(AppError::Internal(anyhow::anyhow!(e))))?;
+
+    let workspace =
+        current_user::workspace(&workspace, role, &state.config.frontend_url, member_count);
+    let member = current_user::workspace_member(&member, user, role);
+    let user_workspace = current_user::UserWorkspace {
+        id: member.id,
+        user: None,
+        user_id: user.id,
+        locale: "en".to_string(),
+        created_at: user.created_at,
+        updated_at: user.created_at,
+        deleted_at: None,
+        permission_flags: Some(Vec::new()),
+        object_permissions: Some(Vec::new()),
+        objects_permissions: Some(Vec::new()),
+        two_factor_authentication_method_summary: Some(Vec::new()),
+        is_impersonating: Some(false),
+    };
+    let privileged = matches!(role, Role::Owner | Role::Admin);
+
+    Ok(User {
+        id: user.id,
+        first_name: member.name.first_name.clone(),
+        last_name: member.name.last_name.clone(),
+        email: user.email.clone(),
+        is_email_verified: true,
+        disabled: Some(false),
+        can_impersonate: false,
+        can_access_full_admin_panel: privileged,
+        created_at: user.created_at,
+        updated_at: user.created_at,
+        deleted_at: None,
+        locale: "en".to_string(),
+        workspace_member: Some(member.clone()),
+        user_workspaces: Vec::new(),
+        onboarding_status: Some("COMPLETED".to_string()),
+        previous_onboarding_status: None,
+        current_workspace: Some(workspace),
+        current_user_workspace: Some(user_workspace),
+        user_vars: Some(GqlJson(serde_json::json!({}))),
+        workspace_members: Some(vec![member]),
+        deleted_workspace_members: Some(Vec::new()),
+        has_password: true,
+        support_user_hash: None,
+        is_workspace_creator: Some(role == Role::Owner),
+        workspaces: Vec::new(),
+        available_workspaces: current_user::AvailableWorkspaces {
+            available_workspaces_for_sign_in: Vec::new(),
+            available_workspaces_for_sign_up: Vec::new(),
+        },
     })
 }
 

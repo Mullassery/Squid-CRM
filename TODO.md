@@ -9,7 +9,7 @@
 - [x] GraphQL login flow + person query/mutations.
 - [x] REST people list/get/create/delete with upstream envelope + error contract.
 - [x] Tenant isolation enforced and tested against real PostgreSQL.
-- [x] 15 unit + 14 integration tests passing; clippy clean; live smoke test.
+- [x] 15 unit + 15 integration tests passing; clippy clean; live smoke test.
 - [x] Dockerfile, docker-compose, CI workflow, Makefile, smoke script.
 
 ## Phase 2 (contracts)
@@ -55,7 +55,10 @@
       frontend `ViewFragment`.
 - [ ] Metadata writes, view writes/filters/sorts/groups, roles, indexes/relations,
       remaining standard objects, and metadata-driven dynamic schema generation.
-- [ ] `currentUser`/`currentWorkspace` full frontend fragment (large surface).
+- [x] `currentUser`/`currentWorkspace` full frontend boot fragment (ADR 0005;
+      enterprise surfaces are explicit empty/static defaults).
+- [ ] Role/permission engine, billing/SSO data, feature flags, and
+      `ApiKey.role` as the upstream `Role` object.
 - [ ] Companies, opportunities, tasks, notes.
 - [ ] Views/filters/sorts/groups parity (relation filters and view semantics).
 - [ ] Search, files, export/import.

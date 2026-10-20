@@ -159,6 +159,12 @@ groups are empty. Metadata writes, view writes/other view types, roles,
 `minimalMetadata`, and non-person standard objects are not implemented (see
 `TODO.md`).
 
+The frontend boot document (`GetCurrentUser` / `UserQueryFragment`) is served:
+identity, workspace member, current workspace and workspace URLs are live.
+Roles are derived from the membership role; feature flags, SSO, billing,
+installed applications, available workspaces, permission flags and object/row
+level permissions are empty or disabled defaults (ADR 0005).
+
 ## 5. GraphQL data contract `[fixture]`
 
 ```graphql
@@ -278,6 +284,8 @@ Alignment completed and covered by tests:
 | GraphQL batch mutations | `createPeople`, `updatePeople`, `deletePeople`, `destroyPeople`, `restorePeople` | aligned; `mergePeople` not implemented |
 | Metadata read API | `objects`/`object`/`fields`/`field`, `Object.fieldsList` | aligned for standard person; no writes, roles, indexes, relations |
 | Views read API | `getViews`/`getView`, default table view, filters/sorts/groups | aligned for default person view; no view writes, filters/sorts/groups are empty |
+| Frontend boot | `currentUser`/`currentWorkspace` full fragment | shape aligned; roles/permissions/billing/SSO are static or empty defaults |
+| API key role | upstream `Role` object | internal enum serialised as `WorkspaceRole`; no role engine yet |
 | GraphQL `person(filter:)` | `PersonFilterInput!` | aligned for scalar person fields |
 | GraphQL `createPerson(data:)` | `PersonCreateInput!`, `upsert`, `shareWith` | aligned; `upsert`/`shareWith` accepted but not applied |
 | GraphQL `deletePerson(id:)` | returns `Person` | aligned |
