@@ -11,12 +11,13 @@ use serde::de::DeserializeOwned;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
 use squid_core::{
-    Actor, AggregateOperations, ApiKey, Company, CreateCompanyInput, CreateOpportunityInput,
-    CreatePersonInput, DateOp, Emails, FieldMetadata, FieldMetadataType, FilterExpr, FullName,
-    MetadataReadability, MetadataWritability, ObjectMetadata, ObjectOpenRecordIn,
-    ObjectSharingReach, Opportunity, OpportunityStage, Person, Role, StringOp, UpdateCompanyInput,
-    UpdateOpportunityInput, UpdatePersonInput, User, UuidOp, View, ViewCalendarLayout, ViewField,
-    ViewKey, ViewOpenRecordIn, ViewType, ViewVisibility, Workspace,
+    Actor, AggregateOperations, ApiKey, Company, CreateCompanyInput, CreateNoteInput,
+    CreateOpportunityInput, CreatePersonInput, CreateTaskInput, DateOp, Emails, FieldMetadata,
+    FieldMetadataType, FilterExpr, FullName, MetadataReadability, MetadataWritability, Note,
+    ObjectMetadata, ObjectOpenRecordIn, ObjectSharingReach, Opportunity, OpportunityStage, Person,
+    Role, StringOp, Task, TaskStatus, UpdateCompanyInput, UpdateNoteInput, UpdateOpportunityInput,
+    UpdatePersonInput, UpdateTaskInput, User, UuidOp, View, ViewCalendarLayout, ViewField, ViewKey,
+    ViewOpenRecordIn, ViewType, ViewVisibility, Workspace,
 };
 use uuid::Uuid;
 
@@ -27,6 +28,8 @@ const WORKSPACE_PERSON_CONTRACT_SQL: &str =
 const WORKSPACE_COMPANY_SQL: &str = include_str!("../migrations/workspace/0003_company.sql");
 const WORKSPACE_OPPORTUNITY_SQL: &str =
     include_str!("../migrations/workspace/0004_opportunity.sql");
+const WORKSPACE_TASK_SQL: &str = include_str!("../migrations/workspace/0005_task.sql");
+const WORKSPACE_NOTE_SQL: &str = include_str!("../migrations/workspace/0006_note.sql");
 const CORE_API_KEYS_SQL: &str = include_str!("../migrations/core/0002_api_keys.sql");
 const CORE_METADATA_SQL: &str = include_str!("../migrations/core/0003_metadata.sql");
 const CORE_VIEWS_SQL: &str = include_str!("../migrations/core/0004_views.sql");
@@ -656,6 +659,8 @@ impl Db {
             WORKSPACE_PERSON_CONTRACT_SQL,
             WORKSPACE_COMPANY_SQL,
             WORKSPACE_OPPORTUNITY_SQL,
+            WORKSPACE_TASK_SQL,
+            WORKSPACE_NOTE_SQL,
         ] {
             let ddl = ddl.replace("{{schema}}", &schema);
             sqlx::raw_sql(&ddl).execute(&self.pool).await?;
@@ -1268,6 +1273,8 @@ impl Db {
         self.ensure_person_metadata(workspace_id).await?;
         self.ensure_company_metadata(workspace_id).await?;
         self.ensure_opportunity_metadata(workspace_id).await?;
+        self.ensure_task_metadata(workspace_id).await?;
+        self.ensure_note_metadata(workspace_id).await?;
         Ok(())
     }
 
@@ -1686,6 +1693,509 @@ impl Db {
         Ok((rows.iter().map(row_to_opportunity).collect(), total))
     }
 
+    async fn seed_standard_object(
+        &self,
+        workspace_id: Uuid,
+        definition: StandardObjectSeed<'_>,
+        table_sql: &str,
+    ) -> anyhow::Result<()> {
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        sqlx::raw_sql(&table_sql.replace("{{schema}}", &schema))
+            .execute(&self.pool)
+            .await?;
+
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            "INSERT INTO core.object_metadata
+                (workspace_id, name_singular, name_plural, label_singular, label_plural,
+                 description, icon, color, shortcut, is_remote, is_active, is_system,
+                 is_ui_editable, is_ui_creatable, is_searchable, open_record_in,
+                 readability, sharing_reach, writability, is_label_synced_with_name)
+             VALUES ($1, $2, $3, $4, $5, NULL, $6, $7, $8, false, true, true, true,
+                     true, true, 'SIDE_PANEL', 'OPEN', 'ROLE_ACCESS', 'OPEN', false)
+             ON CONFLICT (workspace_id, name_singular) DO NOTHING",
+        )
+        .bind(workspace_id)
+        .bind(definition.name_singular)
+        .bind(definition.name_plural)
+        .bind(definition.label_singular)
+        .bind(definition.label_plural)
+        .bind(definition.icon)
+        .bind(definition.color)
+        .bind(definition.shortcut)
+        .execute(&mut *tx)
+        .await?;
+
+        let object_id: Uuid = sqlx::query(
+            "SELECT id FROM core.object_metadata
+             WHERE workspace_id = $1 AND name_singular = $2",
+        )
+        .bind(workspace_id)
+        .bind(definition.name_singular)
+        .fetch_one(&mut *tx)
+        .await?
+        .get("id");
+
+        for field in definition.fields {
+            sqlx::query(
+                "INSERT INTO core.field_metadata
+                    (workspace_id, object_metadata_id, type, name, label, is_system,
+                     is_ui_editable, is_nullable, is_unique, is_searchable, is_audit_logged)
+                 VALUES ($1, $2, $3, $4, $5, true, true, $6, $7, $8, true)
+                 ON CONFLICT (object_metadata_id, name) DO NOTHING",
+            )
+            .bind(workspace_id)
+            .bind(object_id)
+            .bind(field.field_type.as_str())
+            .bind(field.name)
+            .bind(field.label)
+            .bind(field.nullable)
+            .bind(field.unique)
+            .bind(field.searchable)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        sqlx::query(
+            "UPDATE core.object_metadata
+             SET label_identifier_field_metadata_id = (
+                    SELECT id FROM core.field_metadata
+                    WHERE object_metadata_id = $1 AND name = 'name')
+             WHERE id = $1 AND label_identifier_field_metadata_id IS NULL",
+        )
+        .bind(object_id)
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query(
+            "INSERT INTO core.views
+                (workspace_id, name, object_metadata_id, type, key, icon, position,
+                 is_compact, is_custom, open_record_in, should_hide_empty_groups,
+                 visibility, is_active)
+             VALUES ($1, $2, $3, 'TABLE', 'INDEX', 'IconList', 0,
+                     false, false, 'SIDE_PANEL', false, 'WORKSPACE', true)
+             ON CONFLICT (workspace_id, object_metadata_id, key) DO NOTHING",
+        )
+        .bind(workspace_id)
+        .bind(definition.view_name)
+        .bind(object_id)
+        .execute(&mut *tx)
+        .await?;
+
+        let view_id: Uuid = sqlx::query(
+            "SELECT id FROM core.views
+             WHERE workspace_id = $1 AND object_metadata_id = $2 AND key = 'INDEX'",
+        )
+        .bind(workspace_id)
+        .bind(object_id)
+        .fetch_one(&mut *tx)
+        .await?
+        .get("id");
+
+        for (position, (field_name, size)) in definition.view_fields.iter().enumerate() {
+            sqlx::query(
+                "INSERT INTO core.view_fields
+                    (workspace_id, view_id, field_metadata_id, position, size)
+                 SELECT $1, $2, id, $3, $4 FROM core.field_metadata
+                 WHERE object_metadata_id = $5 AND name = $6
+                 ON CONFLICT (view_id, field_metadata_id) DO NOTHING",
+            )
+            .bind(workspace_id)
+            .bind(view_id)
+            .bind(position as f64)
+            .bind(*size)
+            .bind(object_id)
+            .bind(*field_name)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn ensure_task_metadata(&self, workspace_id: Uuid) -> anyhow::Result<()> {
+        self.seed_standard_object(
+            workspace_id,
+            StandardObjectSeed {
+                name_singular: "task",
+                name_plural: "tasks",
+                label_singular: "Task",
+                label_plural: "Tasks",
+                icon: "IconCheckbox",
+                color: "green",
+                shortcut: "t",
+                fields: TASK_METADATA_FIELDS,
+                view_name: "All tasks",
+                view_fields: DEFAULT_TASK_VIEW_FIELDS,
+            },
+            WORKSPACE_TASK_SQL,
+        )
+        .await
+    }
+
+    pub async fn ensure_note_metadata(&self, workspace_id: Uuid) -> anyhow::Result<()> {
+        self.seed_standard_object(
+            workspace_id,
+            StandardObjectSeed {
+                name_singular: "note",
+                name_plural: "notes",
+                label_singular: "Note",
+                label_plural: "Notes",
+                icon: "IconNotes",
+                color: "blue",
+                shortcut: "n",
+                fields: NOTE_METADATA_FIELDS,
+                view_name: "All notes",
+                view_fields: DEFAULT_NOTE_VIEW_FIELDS,
+            },
+            WORKSPACE_NOTE_SQL,
+        )
+        .await
+    }
+
+    // ----- tasks ---------------------------------------------------------
+
+    pub async fn create_task(
+        &self,
+        workspace_id: Uuid,
+        input: &CreateTaskInput,
+    ) -> anyhow::Result<Task> {
+        self.ensure_workspace_task_table(workspace_id).await?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let body = input.body_v2.clone().unwrap_or_default();
+        let status = input.status.unwrap_or_default();
+        let actor = Actor::default();
+        let search_vector = input.title.as_ref().map(|title| title.to_lowercase());
+
+        let row = sqlx::query(&format!(
+            "INSERT INTO {schema}.task
+                (position, title, body_v2, due_at, status, created_by, updated_by,
+                 search_vector, assignee_id)
+             VALUES ($1, $2, $3::jsonb, $4, $5, $6::jsonb, $7::jsonb, $8, $9)
+             RETURNING {TASK_SELECT}"
+        ))
+        .bind(input.position.unwrap_or(0.0))
+        .bind(&input.title)
+        .bind(serde_json::to_string(&body)?)
+        .bind(input.due_at)
+        .bind(status.as_str())
+        .bind(serde_json::to_string(&actor)?)
+        .bind(serde_json::to_string(&actor)?)
+        .bind(search_vector)
+        .bind(input.assignee_id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row_to_task(&row))
+    }
+
+    pub async fn get_task(
+        &self,
+        workspace_id: Uuid,
+        task_id: Uuid,
+    ) -> anyhow::Result<Option<Task>> {
+        self.ensure_workspace_task_table(workspace_id).await?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let row = sqlx::query(&format!(
+            "SELECT {TASK_SELECT} FROM {schema}.task
+             WHERE id = $1 AND deleted_at IS NULL"
+        ))
+        .bind(task_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.as_ref().map(row_to_task))
+    }
+
+    pub async fn update_task(
+        &self,
+        workspace_id: Uuid,
+        task_id: Uuid,
+        input: &UpdateTaskInput,
+    ) -> anyhow::Result<Option<Task>> {
+        let Some(current) = self.get_task(workspace_id, task_id).await? else {
+            return Ok(None);
+        };
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let position = input.position.unwrap_or(current.position);
+        let title = input.title.clone().or(current.title);
+        let body = input.body_v2.clone().unwrap_or(current.body_v2);
+        let due_at = input.due_at.or(current.due_at);
+        let status = input.status.or(current.status).unwrap_or_default();
+        let assignee_id = input.assignee_id.or(current.assignee_id);
+        let search_vector = title.as_ref().map(|title| title.to_lowercase());
+
+        let row = sqlx::query(&format!(
+            "UPDATE {schema}.task
+             SET position = $2, title = $3, body_v2 = $4::jsonb, due_at = $5,
+                 status = $6, assignee_id = $7, search_vector = $8, updated_at = now()
+             WHERE id = $1 AND deleted_at IS NULL
+             RETURNING {TASK_SELECT}"
+        ))
+        .bind(task_id)
+        .bind(position)
+        .bind(&title)
+        .bind(serde_json::to_string(&body)?)
+        .bind(due_at)
+        .bind(status.as_str())
+        .bind(assignee_id)
+        .bind(search_vector)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.as_ref().map(row_to_task))
+    }
+
+    pub async fn soft_delete_task(
+        &self,
+        workspace_id: Uuid,
+        task_id: Uuid,
+    ) -> anyhow::Result<bool> {
+        self.ensure_workspace_task_table(workspace_id).await?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let result = sqlx::query(&format!(
+            "UPDATE {schema}.task SET deleted_at = now(), updated_at = now()
+             WHERE id = $1 AND deleted_at IS NULL"
+        ))
+        .bind(task_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    pub async fn destroy_task(&self, workspace_id: Uuid, task_id: Uuid) -> anyhow::Result<bool> {
+        self.ensure_workspace_task_table(workspace_id).await?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let result = sqlx::query(&format!("DELETE FROM {schema}.task WHERE id = $1"))
+            .bind(task_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    pub async fn restore_task(
+        &self,
+        workspace_id: Uuid,
+        task_id: Uuid,
+    ) -> anyhow::Result<Option<Task>> {
+        self.ensure_workspace_task_table(workspace_id).await?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let row = sqlx::query(&format!(
+            "UPDATE {schema}.task SET deleted_at = NULL, updated_at = now()
+             WHERE id = $1 AND deleted_at IS NOT NULL
+             RETURNING {TASK_SELECT}"
+        ))
+        .bind(task_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.as_ref().map(row_to_task))
+    }
+
+    pub async fn list_tasks(
+        &self,
+        workspace_id: Uuid,
+        limit: i64,
+        offset: i64,
+    ) -> anyhow::Result<(Vec<Task>, i64)> {
+        self.ensure_workspace_task_table(workspace_id).await?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let total: i64 = sqlx::query_scalar(&format!(
+            "SELECT count(*) FROM {schema}.task WHERE deleted_at IS NULL"
+        ))
+        .fetch_one(&self.pool)
+        .await?;
+        let rows = sqlx::query(&format!(
+            "SELECT {TASK_SELECT} FROM {schema}.task
+             WHERE deleted_at IS NULL
+             ORDER BY position ASC, created_at ASC
+             LIMIT $1 OFFSET $2"
+        ))
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok((rows.iter().map(row_to_task).collect(), total))
+    }
+
+    pub async fn ensure_workspace_task_table(&self, workspace_id: Uuid) -> anyhow::Result<()> {
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let ddl = WORKSPACE_TASK_SQL.replace("{{schema}}", &schema);
+        sqlx::raw_sql(&ddl).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    // ----- notes ---------------------------------------------------------
+
+    pub async fn create_note(
+        &self,
+        workspace_id: Uuid,
+        input: &CreateNoteInput,
+    ) -> anyhow::Result<Note> {
+        self.ensure_workspace_note_table(workspace_id).await?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let body = input.body_v2.clone().unwrap_or_default();
+        let actor = Actor::default();
+        let search_vector = input.title.as_ref().map(|title| title.to_lowercase());
+
+        let row = sqlx::query(&format!(
+            "INSERT INTO {schema}.note
+                (position, title, body_v2, created_by, updated_by, search_vector)
+             VALUES ($1, $2, $3::jsonb, $4::jsonb, $5::jsonb, $6)
+             RETURNING {NOTE_SELECT}"
+        ))
+        .bind(input.position.unwrap_or(0.0))
+        .bind(&input.title)
+        .bind(serde_json::to_string(&body)?)
+        .bind(serde_json::to_string(&actor)?)
+        .bind(serde_json::to_string(&actor)?)
+        .bind(search_vector)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row_to_note(&row))
+    }
+
+    pub async fn get_note(
+        &self,
+        workspace_id: Uuid,
+        note_id: Uuid,
+    ) -> anyhow::Result<Option<Note>> {
+        self.ensure_workspace_note_table(workspace_id).await?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let row = sqlx::query(&format!(
+            "SELECT {NOTE_SELECT} FROM {schema}.note
+             WHERE id = $1 AND deleted_at IS NULL"
+        ))
+        .bind(note_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.as_ref().map(row_to_note))
+    }
+
+    pub async fn update_note(
+        &self,
+        workspace_id: Uuid,
+        note_id: Uuid,
+        input: &UpdateNoteInput,
+    ) -> anyhow::Result<Option<Note>> {
+        let Some(current) = self.get_note(workspace_id, note_id).await? else {
+            return Ok(None);
+        };
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let position = input.position.unwrap_or(current.position);
+        let title = input.title.clone().or(current.title);
+        let body = input.body_v2.clone().unwrap_or(current.body_v2);
+        let search_vector = title.as_ref().map(|title| title.to_lowercase());
+
+        let row = sqlx::query(&format!(
+            "UPDATE {schema}.note
+             SET position = $2, title = $3, body_v2 = $4::jsonb,
+                 search_vector = $5, updated_at = now()
+             WHERE id = $1 AND deleted_at IS NULL
+             RETURNING {NOTE_SELECT}"
+        ))
+        .bind(note_id)
+        .bind(position)
+        .bind(&title)
+        .bind(serde_json::to_string(&body)?)
+        .bind(search_vector)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.as_ref().map(row_to_note))
+    }
+
+    pub async fn soft_delete_note(
+        &self,
+        workspace_id: Uuid,
+        note_id: Uuid,
+    ) -> anyhow::Result<bool> {
+        self.ensure_workspace_note_table(workspace_id).await?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let result = sqlx::query(&format!(
+            "UPDATE {schema}.note SET deleted_at = now(), updated_at = now()
+             WHERE id = $1 AND deleted_at IS NULL"
+        ))
+        .bind(note_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    pub async fn destroy_note(&self, workspace_id: Uuid, note_id: Uuid) -> anyhow::Result<bool> {
+        self.ensure_workspace_note_table(workspace_id).await?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let result = sqlx::query(&format!("DELETE FROM {schema}.note WHERE id = $1"))
+            .bind(note_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    pub async fn restore_note(
+        &self,
+        workspace_id: Uuid,
+        note_id: Uuid,
+    ) -> anyhow::Result<Option<Note>> {
+        self.ensure_workspace_note_table(workspace_id).await?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let row = sqlx::query(&format!(
+            "UPDATE {schema}.note SET deleted_at = NULL, updated_at = now()
+             WHERE id = $1 AND deleted_at IS NOT NULL
+             RETURNING {NOTE_SELECT}"
+        ))
+        .bind(note_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.as_ref().map(row_to_note))
+    }
+
+    pub async fn list_notes(
+        &self,
+        workspace_id: Uuid,
+        limit: i64,
+        offset: i64,
+    ) -> anyhow::Result<(Vec<Note>, i64)> {
+        self.ensure_workspace_note_table(workspace_id).await?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let total: i64 = sqlx::query_scalar(&format!(
+            "SELECT count(*) FROM {schema}.note WHERE deleted_at IS NULL"
+        ))
+        .fetch_one(&self.pool)
+        .await?;
+        let rows = sqlx::query(&format!(
+            "SELECT {NOTE_SELECT} FROM {schema}.note
+             WHERE deleted_at IS NULL
+             ORDER BY position ASC, created_at ASC
+             LIMIT $1 OFFSET $2"
+        ))
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok((rows.iter().map(row_to_note).collect(), total))
+    }
+
+    pub async fn ensure_workspace_note_table(&self, workspace_id: Uuid) -> anyhow::Result<()> {
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let ddl = WORKSPACE_NOTE_SQL.replace("{{schema}}", &schema);
+        sqlx::raw_sql(&ddl).execute(&self.pool).await?;
+        Ok(())
+    }
+
     // ----- companies -----------------------------------------------------
 
     pub async fn create_company(
@@ -2017,6 +2527,260 @@ struct PersonFieldSeed {
     nullable: bool,
     unique: bool,
     searchable: bool,
+}
+
+struct StandardObjectSeed<'a> {
+    name_singular: &'a str,
+    name_plural: &'a str,
+    label_singular: &'a str,
+    label_plural: &'a str,
+    icon: &'a str,
+    color: &'a str,
+    shortcut: &'a str,
+    fields: &'a [PersonFieldSeed],
+    view_name: &'a str,
+    view_fields: &'a [(&'a str, f64)],
+}
+
+const TASK_METADATA_FIELDS: &[PersonFieldSeed] = &[
+    PersonFieldSeed {
+        name: "id",
+        label: "ID",
+        field_type: FieldMetadataType::Uuid,
+        nullable: false,
+        unique: true,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "createdAt",
+        label: "Creation date",
+        field_type: FieldMetadataType::DateTime,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "updatedAt",
+        label: "Last update",
+        field_type: FieldMetadataType::DateTime,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "deletedAt",
+        label: "Deletion date",
+        field_type: FieldMetadataType::DateTime,
+        nullable: true,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "position",
+        label: "Position",
+        field_type: FieldMetadataType::Position,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "title",
+        label: "Title",
+        field_type: FieldMetadataType::Text,
+        nullable: true,
+        unique: false,
+        searchable: true,
+    },
+    PersonFieldSeed {
+        name: "bodyV2",
+        label: "Body",
+        field_type: FieldMetadataType::RichText,
+        nullable: true,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "dueAt",
+        label: "Due date",
+        field_type: FieldMetadataType::DateTime,
+        nullable: true,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "status",
+        label: "Status",
+        field_type: FieldMetadataType::Select,
+        nullable: true,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "createdBy",
+        label: "Created by",
+        field_type: FieldMetadataType::Actor,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "updatedBy",
+        label: "Updated by",
+        field_type: FieldMetadataType::Actor,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "searchVector",
+        label: "Search vector",
+        field_type: FieldMetadataType::TsVector,
+        nullable: true,
+        unique: false,
+        searchable: true,
+    },
+    PersonFieldSeed {
+        name: "assigneeId",
+        label: "Assignee",
+        field_type: FieldMetadataType::Uuid,
+        nullable: true,
+        unique: false,
+        searchable: false,
+    },
+];
+
+const DEFAULT_TASK_VIEW_FIELDS: &[(&str, f64)] = &[
+    ("title", 220.0),
+    ("status", 140.0),
+    ("dueAt", 160.0),
+    ("assigneeId", 160.0),
+];
+
+const NOTE_METADATA_FIELDS: &[PersonFieldSeed] = &[
+    PersonFieldSeed {
+        name: "id",
+        label: "ID",
+        field_type: FieldMetadataType::Uuid,
+        nullable: false,
+        unique: true,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "createdAt",
+        label: "Creation date",
+        field_type: FieldMetadataType::DateTime,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "updatedAt",
+        label: "Last update",
+        field_type: FieldMetadataType::DateTime,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "deletedAt",
+        label: "Deletion date",
+        field_type: FieldMetadataType::DateTime,
+        nullable: true,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "position",
+        label: "Position",
+        field_type: FieldMetadataType::Position,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "title",
+        label: "Title",
+        field_type: FieldMetadataType::Text,
+        nullable: true,
+        unique: false,
+        searchable: true,
+    },
+    PersonFieldSeed {
+        name: "bodyV2",
+        label: "Body",
+        field_type: FieldMetadataType::RichText,
+        nullable: true,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "createdBy",
+        label: "Created by",
+        field_type: FieldMetadataType::Actor,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "updatedBy",
+        label: "Updated by",
+        field_type: FieldMetadataType::Actor,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "searchVector",
+        label: "Search vector",
+        field_type: FieldMetadataType::TsVector,
+        nullable: true,
+        unique: false,
+        searchable: true,
+    },
+];
+
+const DEFAULT_NOTE_VIEW_FIELDS: &[(&str, f64)] = &[("title", 220.0), ("createdAt", 160.0)];
+
+const TASK_SELECT: &str = "id, created_at, updated_at, deleted_at, position, title, \
+     body_v2::text AS body_v2, due_at, status, created_by::text AS created_by, \
+     updated_by::text AS updated_by, search_vector, assignee_id";
+
+const NOTE_SELECT: &str = "id, created_at, updated_at, deleted_at, position, title, \
+     body_v2::text AS body_v2, created_by::text AS created_by, \
+     updated_by::text AS updated_by, search_vector";
+
+fn row_to_task(row: &sqlx::postgres::PgRow) -> Task {
+    let status: Option<String> = row.get("status");
+    Task {
+        id: row.get("id"),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+        deleted_at: row.get("deleted_at"),
+        position: row.get("position"),
+        title: row.get("title"),
+        body_v2: parse_json_option(row.get("body_v2")),
+        due_at: row.get("due_at"),
+        status: status.as_deref().and_then(TaskStatus::parse),
+        created_by: parse_json_option(row.get("created_by")),
+        updated_by: parse_json_option(row.get("updated_by")),
+        search_vector: row.get("search_vector"),
+        assignee_id: row.get("assignee_id"),
+    }
+}
+
+fn row_to_note(row: &sqlx::postgres::PgRow) -> Note {
+    Note {
+        id: row.get("id"),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+        deleted_at: row.get("deleted_at"),
+        position: row.get("position"),
+        title: row.get("title"),
+        body_v2: parse_json_option(row.get("body_v2")),
+        created_by: parse_json_option(row.get("created_by")),
+        updated_by: parse_json_option(row.get("updated_by")),
+        search_vector: row.get("search_vector"),
+    }
 }
 
 const OPPORTUNITY_METADATA_FIELDS: &[PersonFieldSeed] = &[

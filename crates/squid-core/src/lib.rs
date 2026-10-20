@@ -14,7 +14,9 @@ pub mod company;
 pub mod config;
 pub mod error;
 pub mod metadata;
+pub mod note;
 pub mod opportunity;
+pub mod task;
 pub mod view;
 
 pub use async_graphql::Json as GqlJson;
@@ -22,7 +24,9 @@ pub use company::*;
 pub use config::Config;
 pub use error::{AppError, AppResult};
 pub use metadata::*;
+pub use note::*;
 pub use opportunity::*;
+pub use task::*;
 pub use view::*;
 
 /// A workspace member's role. Upstream models this as a role entity with
@@ -120,6 +124,26 @@ pub struct Emails {
     pub primary_email: String,
     #[serde(rename = "additionalEmails", default)]
     pub additional_emails: Vec<String>,
+}
+
+/// Rich text payload shared by tasks and notes (`bodyV2`).
+#[derive(
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    Default,
+    async_graphql::SimpleObject,
+    async_graphql::InputObject,
+)]
+#[graphql(input_name = "RichTextCreateInput")]
+pub struct RichText {
+    #[serde(default)]
+    pub blocknote: Option<String>,
+    #[serde(default)]
+    pub markdown: Option<String>,
 }
 
 /// Composite `LinksMetadata` shape (`linkedinLink`).

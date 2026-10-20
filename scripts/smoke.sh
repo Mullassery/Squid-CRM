@@ -76,7 +76,7 @@ import json
 body = json.load(open('/tmp/squid-smoke-metadata.json'))
 assert 'errors' not in body, body
 objects = body['data']['objects']['edges']
-assert len(objects) == 3, body
+assert len(objects) == 5, body
 node = next(edge['node'] for edge in objects if edge['node']['nameSingular'] == 'person')
 fields = {field['name']: field['type'] for field in node['fieldsList']}
 assert fields['name'] == 'FULL_NAME', fields
@@ -89,8 +89,15 @@ opportunity = next(edge['node'] for edge in objects if edge['node']['nameSingula
 opportunity_fields = {field['name']: field['type'] for field in opportunity['fieldsList']}
 assert opportunity_fields['stage'] == 'SELECT', opportunity_fields
 assert opportunity_fields['amount'] == 'CURRENCY', opportunity_fields
+task = next(edge['node'] for edge in objects if edge['node']['nameSingular'] == 'task')
+task_fields = {field['name']: field['type'] for field in task['fieldsList']}
+assert task_fields['status'] == 'SELECT', task_fields
+assert task_fields['bodyV2'] == 'RICH_TEXT', task_fields
+note = next(edge['node'] for edge in objects if edge['node']['nameSingular'] == 'note')
+note_fields = {field['name']: field['type'] for field in note['fieldsList']}
+assert note_fields['bodyV2'] == 'RICH_TEXT', note_fields
 views = body['data']['getViews']
-assert len(views) == 3, body
+assert len(views) == 5, body
 assert views[0]['name'] == 'All people', body
 assert views[0]['type'] == 'TABLE', body
 assert len(views[0]['viewFields']) == 5, body

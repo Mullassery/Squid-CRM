@@ -15,12 +15,13 @@ use chrono::{DateTime, Utc};
 use squid_auth::AuthToken;
 use squid_auth::{hash_password, hash_token, verify_password, AuthContext};
 use squid_core::{
-    Address, ApiKey, AppError, AppResult, Company, CreateCompanyInput, CreateOpportunityInput,
-    CreatePersonInput, Currency, CursorPagingInput, DateOp, FieldConnection, FieldFilterInput,
-    FieldMetadata, FilterExpr, GqlJson, Links, ObjectConnection, ObjectEdge, ObjectFilterInput,
-    ObjectMetadata, Opportunity, OpportunityStage, PageInfo, Person, Role, StringOp,
-    UpdateCompanyInput, UpdateOpportunityInput, UpdatePersonInput, User as CoreUser, UuidOp, View,
-    ViewType,
+    Address, ApiKey, AppError, AppResult, Company, CreateCompanyInput, CreateNoteInput,
+    CreateOpportunityInput, CreatePersonInput, CreateTaskInput, Currency, CursorPagingInput,
+    DateOp, FieldConnection, FieldFilterInput, FieldMetadata, FilterExpr, GqlJson, Links, Note,
+    ObjectConnection, ObjectEdge, ObjectFilterInput, ObjectMetadata, Opportunity, OpportunityStage,
+    PageInfo, Person, RichText, Role, StringOp, Task, TaskStatus, UpdateCompanyInput,
+    UpdateNoteInput, UpdateOpportunityInput, UpdatePersonInput, UpdateTaskInput, User as CoreUser,
+    UuidOp, View, ViewType,
 };
 use squid_db::{OrderTerm, PersonColumn};
 use uuid::Uuid;
@@ -681,6 +682,141 @@ pub struct CompanyFilterInput {
     pub name: Option<StringFilter>,
 }
 
+#[derive(Debug, InputObject)]
+pub struct CreateTaskInputGql {
+    pub position: Option<f64>,
+    pub title: Option<String>,
+    pub body_v2: Option<RichText>,
+    pub due_at: Option<DateTime<Utc>>,
+    pub status: Option<TaskStatus>,
+    pub assignee_id: Option<Uuid>,
+}
+
+impl From<CreateTaskInputGql> for CreateTaskInput {
+    fn from(input: CreateTaskInputGql) -> Self {
+        CreateTaskInput {
+            position: input.position,
+            title: input.title,
+            body_v2: input.body_v2,
+            due_at: input.due_at,
+            status: input.status,
+            assignee_id: input.assignee_id,
+        }
+    }
+}
+
+#[derive(Debug, InputObject)]
+pub struct UpdateTaskInputGql {
+    pub position: Option<f64>,
+    pub title: Option<String>,
+    pub body_v2: Option<RichText>,
+    pub due_at: Option<DateTime<Utc>>,
+    pub status: Option<TaskStatus>,
+    pub assignee_id: Option<Uuid>,
+}
+
+impl From<UpdateTaskInputGql> for UpdateTaskInput {
+    fn from(input: UpdateTaskInputGql) -> Self {
+        UpdateTaskInput {
+            position: input.position,
+            title: input.title,
+            body_v2: input.body_v2,
+            due_at: input.due_at,
+            status: input.status,
+            assignee_id: input.assignee_id,
+        }
+    }
+}
+
+#[derive(Debug, Default, InputObject)]
+pub struct TaskStatusFilter {
+    pub eq: Option<TaskStatus>,
+    pub neq: Option<TaskStatus>,
+    pub r#in: Option<Vec<TaskStatus>>,
+    pub is: Option<FilterIs>,
+}
+
+#[derive(Debug, Default, InputObject)]
+pub struct TaskFilterInput {
+    pub id: Option<UuidFilter>,
+    pub title: Option<StringFilter>,
+    pub due_at: Option<DateTimeFilter>,
+    pub status: Option<TaskStatusFilter>,
+    pub assignee_id: Option<UuidFilter>,
+    pub and: Option<Vec<TaskFilterInput>>,
+    pub or: Option<Vec<TaskFilterInput>>,
+    pub not: Option<Box<TaskFilterInput>>,
+}
+
+#[derive(Debug, SimpleObject)]
+pub struct TaskEdge {
+    pub node: Task,
+    pub cursor: Cursor,
+}
+
+#[derive(Debug, SimpleObject)]
+pub struct TaskConnection {
+    pub total_count: Option<i64>,
+    pub edges: Vec<TaskEdge>,
+    pub page_info: PageInfo,
+}
+
+#[derive(Debug, InputObject)]
+pub struct CreateNoteInputGql {
+    pub position: Option<f64>,
+    pub title: Option<String>,
+    pub body_v2: Option<RichText>,
+}
+
+impl From<CreateNoteInputGql> for CreateNoteInput {
+    fn from(input: CreateNoteInputGql) -> Self {
+        CreateNoteInput {
+            position: input.position,
+            title: input.title,
+            body_v2: input.body_v2,
+        }
+    }
+}
+
+#[derive(Debug, InputObject)]
+pub struct UpdateNoteInputGql {
+    pub position: Option<f64>,
+    pub title: Option<String>,
+    pub body_v2: Option<RichText>,
+}
+
+impl From<UpdateNoteInputGql> for UpdateNoteInput {
+    fn from(input: UpdateNoteInputGql) -> Self {
+        UpdateNoteInput {
+            position: input.position,
+            title: input.title,
+            body_v2: input.body_v2,
+        }
+    }
+}
+
+#[derive(Debug, Default, InputObject)]
+pub struct NoteFilterInput {
+    pub id: Option<UuidFilter>,
+    pub title: Option<StringFilter>,
+    pub and: Option<Vec<NoteFilterInput>>,
+    pub or: Option<Vec<NoteFilterInput>>,
+    pub not: Option<Box<NoteFilterInput>>,
+}
+
+#[derive(Debug, SimpleObject)]
+pub struct NoteEdge {
+    pub node: Note,
+    pub cursor: Cursor,
+}
+
+#[derive(Debug, SimpleObject)]
+pub struct NoteConnection {
+    pub total_count: Option<i64>,
+    pub edges: Vec<NoteEdge>,
+    pub page_info: PageInfo,
+}
+
 #[derive(Debug, SimpleObject)]
 pub struct CompanyEdge {
     pub node: Company,
@@ -1064,6 +1200,152 @@ fn opportunity_matches(opportunity: &Opportunity, filter: &OpportunityFilterInpu
     if let Some(owner) = filter.owner_id.as_ref() {
         if let Some(eq) = owner.eq {
             if opportunity.owner_id != Some(eq) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn task_matches(task: &Task, filter: &TaskFilterInput) -> bool {
+    if let Some(and) = filter.and.as_ref() {
+        if !and.iter().all(|f| task_matches(task, f)) {
+            return false;
+        }
+    }
+    if let Some(or) = filter.or.as_ref() {
+        if !or.iter().any(|f| task_matches(task, f)) {
+            return false;
+        }
+    }
+    if let Some(not) = filter.not.as_ref() {
+        if task_matches(task, not) {
+            return false;
+        }
+    }
+    if let Some(id) = filter.id.as_ref() {
+        if let Some(eq) = id.eq {
+            if task.id != eq {
+                return false;
+            }
+        }
+        if let Some(neq) = id.neq {
+            if task.id == neq {
+                return false;
+            }
+        }
+    }
+    if let Some(title) = filter.title.as_ref() {
+        let value = task.title.as_deref().unwrap_or_default();
+        if let Some(eq) = title.eq.as_deref() {
+            if value != eq {
+                return false;
+            }
+        }
+        if let Some(neq) = title.neq.as_deref() {
+            if value == neq {
+                return false;
+            }
+        }
+        if let Some(like) = title.ilike.as_deref() {
+            let needle = like.trim_matches('%').to_lowercase();
+            if !value.to_lowercase().contains(&needle) {
+                return false;
+            }
+        }
+    }
+    if let Some(status) = filter.status.as_ref() {
+        if let Some(eq) = status.eq {
+            if task.status != Some(eq) {
+                return false;
+            }
+        }
+        if let Some(neq) = status.neq {
+            if task.status == Some(neq) {
+                return false;
+            }
+        }
+        if let Some(list) = status.r#in.as_ref() {
+            if task.status.is_none_or(|status| !list.contains(&status)) {
+                return false;
+            }
+        }
+    }
+    if let Some(due_at) = filter.due_at.as_ref() {
+        if let Some(eq) = due_at.eq {
+            if task.due_at != Some(eq) {
+                return false;
+            }
+        }
+        if let Some(gte) = due_at.gte {
+            if task.due_at.is_none_or(|date| date < gte) {
+                return false;
+            }
+        }
+        if let Some(lte) = due_at.lte {
+            if task.due_at.is_none_or(|date| date > lte) {
+                return false;
+            }
+        }
+    }
+    if let Some(assignee) = filter.assignee_id.as_ref() {
+        if let Some(eq) = assignee.eq {
+            if task.assignee_id != Some(eq) {
+                return false;
+            }
+        }
+        if let Some(neq) = assignee.neq {
+            if task.assignee_id == Some(neq) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn note_matches(note: &Note, filter: &NoteFilterInput) -> bool {
+    if let Some(and) = filter.and.as_ref() {
+        if !and.iter().all(|f| note_matches(note, f)) {
+            return false;
+        }
+    }
+    if let Some(or) = filter.or.as_ref() {
+        if !or.iter().any(|f| note_matches(note, f)) {
+            return false;
+        }
+    }
+    if let Some(not) = filter.not.as_ref() {
+        if note_matches(note, not) {
+            return false;
+        }
+    }
+    if let Some(id) = filter.id.as_ref() {
+        if let Some(eq) = id.eq {
+            if note.id != eq {
+                return false;
+            }
+        }
+        if let Some(neq) = id.neq {
+            if note.id == neq {
+                return false;
+            }
+        }
+    }
+    if let Some(title) = filter.title.as_ref() {
+        let value = note.title.as_deref().unwrap_or_default();
+        if let Some(eq) = title.eq.as_deref() {
+            if value != eq {
+                return false;
+            }
+        }
+        if let Some(neq) = title.neq.as_deref() {
+            if value == neq {
+                return false;
+            }
+        }
+        if let Some(like) = title.ilike.as_deref() {
+            let needle = like.trim_matches('%').to_lowercase();
+            if !value.to_lowercase().contains(&needle) {
                 return false;
             }
         }
@@ -1551,6 +1833,190 @@ impl QueryRoot {
         Ok(opportunities
             .into_iter()
             .find(|opportunity| opportunity_matches(opportunity, &filter)))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn tasks(
+        &self,
+        ctx: &Context<'_>,
+        first: Option<i64>,
+        last: Option<i64>,
+        offset: Option<i64>,
+        before: Option<String>,
+        after: Option<String>,
+        filter: Option<TaskFilterInput>,
+        order_by: Option<Vec<serde_json::Value>>,
+    ) -> async_graphql::Result<TaskConnection> {
+        let auth = require_auth(ctx)?;
+        let _ = order_by;
+        let (mut all, _) = state(ctx)
+            .db
+            .list_tasks(auth.workspace_id, 10_000, 0)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        let filter = filter.unwrap_or_default();
+        all.retain(|task| task_matches(task, &filter));
+
+        let total = all.len() as i64;
+        let limit = first
+            .or(last)
+            .unwrap_or(20)
+            .clamp(1, state(ctx).config.max_page_size) as usize;
+        let offset = offset.unwrap_or(0).max(0) as usize;
+        let starting_after = after
+            .as_deref()
+            .map(crate::rest::decode_cursor)
+            .transpose()
+            .map_err(gql_err)?;
+        let ending_before = before
+            .as_deref()
+            .map(crate::rest::decode_cursor)
+            .transpose()
+            .map_err(gql_err)?;
+        if let Some(after) = starting_after {
+            if let Some(index) = all.iter().position(|task| task.id == after) {
+                all.drain(..=index);
+            }
+        }
+        if let Some(before) = ending_before {
+            if let Some(index) = all.iter().position(|task| task.id == before) {
+                all.truncate(index);
+            }
+        }
+
+        let start = offset.min(all.len());
+        let end = (start + limit).min(all.len());
+        let has_next_page = end < all.len();
+        let has_previous_page = start > 0 || starting_after.is_some();
+        let edges = all[start..end]
+            .iter()
+            .cloned()
+            .map(|task| TaskEdge {
+                cursor: Cursor(crate::rest::encode_cursor(task.id)),
+                node: task,
+            })
+            .collect();
+
+        Ok(TaskConnection {
+            total_count: Some(total),
+            edges,
+            page_info: PageInfo {
+                has_next_page,
+                has_previous_page,
+                start_cursor: all
+                    .get(start)
+                    .map(|task| crate::rest::encode_cursor(task.id)),
+                end_cursor: all
+                    .get(end.saturating_sub(1))
+                    .map(|task| crate::rest::encode_cursor(task.id)),
+            },
+        })
+    }
+
+    async fn task(
+        &self,
+        ctx: &Context<'_>,
+        filter: TaskFilterInput,
+    ) -> async_graphql::Result<Option<Task>> {
+        let auth = require_auth(ctx)?;
+        let (tasks, _) = state(ctx)
+            .db
+            .list_tasks(auth.workspace_id, 10_000, 0)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        Ok(tasks.into_iter().find(|task| task_matches(task, &filter)))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn notes(
+        &self,
+        ctx: &Context<'_>,
+        first: Option<i64>,
+        last: Option<i64>,
+        offset: Option<i64>,
+        before: Option<String>,
+        after: Option<String>,
+        filter: Option<NoteFilterInput>,
+        order_by: Option<Vec<serde_json::Value>>,
+    ) -> async_graphql::Result<NoteConnection> {
+        let auth = require_auth(ctx)?;
+        let _ = order_by;
+        let (mut all, _) = state(ctx)
+            .db
+            .list_notes(auth.workspace_id, 10_000, 0)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        let filter = filter.unwrap_or_default();
+        all.retain(|note| note_matches(note, &filter));
+
+        let total = all.len() as i64;
+        let limit = first
+            .or(last)
+            .unwrap_or(20)
+            .clamp(1, state(ctx).config.max_page_size) as usize;
+        let offset = offset.unwrap_or(0).max(0) as usize;
+        let starting_after = after
+            .as_deref()
+            .map(crate::rest::decode_cursor)
+            .transpose()
+            .map_err(gql_err)?;
+        let ending_before = before
+            .as_deref()
+            .map(crate::rest::decode_cursor)
+            .transpose()
+            .map_err(gql_err)?;
+        if let Some(after) = starting_after {
+            if let Some(index) = all.iter().position(|note| note.id == after) {
+                all.drain(..=index);
+            }
+        }
+        if let Some(before) = ending_before {
+            if let Some(index) = all.iter().position(|note| note.id == before) {
+                all.truncate(index);
+            }
+        }
+
+        let start = offset.min(all.len());
+        let end = (start + limit).min(all.len());
+        let has_next_page = end < all.len();
+        let has_previous_page = start > 0 || starting_after.is_some();
+        let edges = all[start..end]
+            .iter()
+            .cloned()
+            .map(|note| NoteEdge {
+                cursor: Cursor(crate::rest::encode_cursor(note.id)),
+                node: note,
+            })
+            .collect();
+
+        Ok(NoteConnection {
+            total_count: Some(total),
+            edges,
+            page_info: PageInfo {
+                has_next_page,
+                has_previous_page,
+                start_cursor: all
+                    .get(start)
+                    .map(|note| crate::rest::encode_cursor(note.id)),
+                end_cursor: all
+                    .get(end.saturating_sub(1))
+                    .map(|note| crate::rest::encode_cursor(note.id)),
+            },
+        })
+    }
+
+    async fn note(
+        &self,
+        ctx: &Context<'_>,
+        filter: NoteFilterInput,
+    ) -> async_graphql::Result<Option<Note>> {
+        let auth = require_auth(ctx)?;
+        let (notes, _) = state(ctx)
+            .db
+            .list_notes(auth.workspace_id, 10_000, 0)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        Ok(notes.into_iter().find(|note| note_matches(note, &filter)))
     }
 
     async fn person(
@@ -2213,6 +2679,158 @@ impl MutationRoot {
         state(ctx)
             .db
             .restore_opportunity(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))
+    }
+
+    async fn create_task(
+        &self,
+        ctx: &Context<'_>,
+        data: CreateTaskInputGql,
+        #[graphql(default)] _upsert: bool,
+        _share_with: Option<Vec<ShareWithInput>>,
+    ) -> async_graphql::Result<Task> {
+        let auth = require_auth(ctx)?;
+        let input: CreateTaskInput = data.into();
+        state(ctx)
+            .db
+            .create_task(auth.workspace_id, &input)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))
+    }
+
+    async fn update_task(
+        &self,
+        ctx: &Context<'_>,
+        id: Uuid,
+        data: UpdateTaskInputGql,
+    ) -> async_graphql::Result<Task> {
+        let auth = require_auth(ctx)?;
+        let input: UpdateTaskInput = data.into();
+        state(ctx)
+            .db
+            .update_task(auth.workspace_id, id, &input)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))
+    }
+
+    async fn delete_task(&self, ctx: &Context<'_>, id: Uuid) -> async_graphql::Result<Task> {
+        let auth = require_auth(ctx)?;
+        let state = state(ctx);
+        let task = state
+            .db
+            .get_task(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))?;
+        state
+            .db
+            .soft_delete_task(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        Ok(task)
+    }
+
+    async fn destroy_task(&self, ctx: &Context<'_>, id: Uuid) -> async_graphql::Result<Task> {
+        let auth = require_auth(ctx)?;
+        let state = state(ctx);
+        let task = state
+            .db
+            .get_task(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))?;
+        state
+            .db
+            .destroy_task(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        Ok(task)
+    }
+
+    async fn restore_task(&self, ctx: &Context<'_>, id: Uuid) -> async_graphql::Result<Task> {
+        let auth = require_auth(ctx)?;
+        state(ctx)
+            .db
+            .restore_task(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))
+    }
+
+    async fn create_note(
+        &self,
+        ctx: &Context<'_>,
+        data: CreateNoteInputGql,
+        #[graphql(default)] _upsert: bool,
+        _share_with: Option<Vec<ShareWithInput>>,
+    ) -> async_graphql::Result<Note> {
+        let auth = require_auth(ctx)?;
+        let input: CreateNoteInput = data.into();
+        state(ctx)
+            .db
+            .create_note(auth.workspace_id, &input)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))
+    }
+
+    async fn update_note(
+        &self,
+        ctx: &Context<'_>,
+        id: Uuid,
+        data: UpdateNoteInputGql,
+    ) -> async_graphql::Result<Note> {
+        let auth = require_auth(ctx)?;
+        let input: UpdateNoteInput = data.into();
+        state(ctx)
+            .db
+            .update_note(auth.workspace_id, id, &input)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))
+    }
+
+    async fn delete_note(&self, ctx: &Context<'_>, id: Uuid) -> async_graphql::Result<Note> {
+        let auth = require_auth(ctx)?;
+        let state = state(ctx);
+        let note = state
+            .db
+            .get_note(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))?;
+        state
+            .db
+            .soft_delete_note(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        Ok(note)
+    }
+
+    async fn destroy_note(&self, ctx: &Context<'_>, id: Uuid) -> async_graphql::Result<Note> {
+        let auth = require_auth(ctx)?;
+        let state = state(ctx);
+        let note = state
+            .db
+            .get_note(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))?;
+        state
+            .db
+            .destroy_note(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        Ok(note)
+    }
+
+    async fn restore_note(&self, ctx: &Context<'_>, id: Uuid) -> async_graphql::Result<Note> {
+        let auth = require_auth(ctx)?;
+        state(ctx)
+            .db
+            .restore_note(auth.workspace_id, id)
             .await
             .map_err(|e| gql_err(AppError::Internal(e)))?
             .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))

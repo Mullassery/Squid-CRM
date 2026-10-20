@@ -1329,7 +1329,7 @@ async fn metadata_objects_match_frontend_fragment() {
         let objects = response.body["data"]["objects"]["edges"]
             .as_array()
             .unwrap();
-        assert_eq!(objects.len(), 3, "seed must be idempotent");
+        assert_eq!(objects.len(), 5, "seed must be idempotent");
         let object = objects
             .iter()
             .map(|edge| &edge["node"])
@@ -2115,4 +2115,161 @@ async fn opportunity_crud_rest_and_graphql() {
     )
     .await;
     assert_eq!(gone.status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn task_and_note_crud_rest_and_graphql() {
+    let app = test_app().await;
+    let email = unique_email("tasks-notes");
+    let (token, _workspace) = signup(&app, &email).await;
+
+    let task = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/tasks",
+            &token,
+            Some(json!({
+                "title": "Follow up with Acme",
+                "status": "IN_PROGRESS",
+                "dueAt": "2026-11-15T09:00:00Z",
+                "bodyV2": { "markdown": "Send the proposal" }
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(task.status, StatusCode::CREATED, "body: {}", task.body);
+    let task_id = task.body["data"]["createTask"]["id"]
+        .as_str()
+        .expect("task id")
+        .to_string();
+    assert_eq!(task.body["data"]["createTask"]["status"], "IN_PROGRESS");
+    assert_eq!(
+        task.body["data"]["createTask"]["bodyV2"]["markdown"],
+        "Send the proposal"
+    );
+
+    let updated = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": format!(
+                    "mutation {{ updateTask(id: \"{task_id}\", data: {{ status: DONE, bodyV2: {{ blocknote: \"[\\\"done\\\"]\", markdown: \"Updated markdown\" }} }}) {{ id status bodyV2 {{ blocknote markdown }} }} }}"
+                )
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(updated.status, StatusCode::OK, "body: {}", updated.body);
+    let node = &updated.body["data"]["updateTask"];
+    assert_eq!(node["status"], "DONE");
+    assert_eq!(node["bodyV2"]["blocknote"], "[\"done\"]");
+    assert_eq!(node["bodyV2"]["markdown"], "Updated markdown");
+
+    let filtered = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "{ tasks(filter: { status: { eq: DONE } }) { totalCount edges { node { id title status } } } }"
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(filtered.status, StatusCode::OK, "body: {}", filtered.body);
+    assert_eq!(filtered.body["data"]["tasks"]["totalCount"], 1);
+    assert_eq!(
+        filtered.body["data"]["tasks"]["edges"][0]["node"]["title"],
+        "Follow up with Acme"
+    );
+
+    let note = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/notes",
+            &token,
+            Some(json!({
+                "title": "Discovery notes",
+                "bodyV2": { "markdown": "Budget approved" }
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(note.status, StatusCode::CREATED, "body: {}", note.body);
+    let note_id = note.body["data"]["createNote"]["id"]
+        .as_str()
+        .expect("note id")
+        .to_string();
+    assert_eq!(note.body["data"]["createNote"]["title"], "Discovery notes");
+
+    let notes = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "{ notes(filter: { title: { ilike: \"%discovery%\" } }) { totalCount edges { node { id title bodyV2 { markdown } } } } }"
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(notes.status, StatusCode::OK, "body: {}", notes.body);
+    assert_eq!(notes.body["data"]["notes"]["totalCount"], 1);
+    assert_eq!(
+        notes.body["data"]["notes"]["edges"][0]["node"]["bodyV2"]["markdown"],
+        "Budget approved"
+    );
+
+    let soft_deleted = send(
+        &app,
+        authorized(
+            "DELETE",
+            &format!("/rest/notes/{note_id}?soft_delete=true"),
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(soft_deleted.status, StatusCode::OK);
+    assert_eq!(soft_deleted.body["data"]["deleteNote"]["id"], note_id);
+    let restored = send(
+        &app,
+        authorized(
+            "PATCH",
+            &format!("/rest/notes/{note_id}/restore"),
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(restored.status, StatusCode::OK, "body: {}", restored.body);
+    assert_eq!(
+        restored.body["data"]["restoreNote"]["title"],
+        "Discovery notes"
+    );
+
+    let destroyed = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": format!(
+                    "mutation {{ destroyTask(id: \"{task_id}\") {{ id }} destroyNote(id: \"{note_id}\") {{ id }} }}"
+                )
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(destroyed.status, StatusCode::OK, "body: {}", destroyed.body);
+    assert_eq!(destroyed.body["data"]["destroyTask"]["id"], task_id);
+    assert_eq!(destroyed.body["data"]["destroyNote"]["id"], note_id);
 }

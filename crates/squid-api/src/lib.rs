@@ -138,6 +138,22 @@ pub fn app(state: AppState) -> Router {
             "/rest/opportunities/{id}/restore",
             patch(rest::restore_opportunity),
         )
+        .route("/rest/tasks", get(rest::list_tasks).post(rest::create_task))
+        .route(
+            "/rest/tasks/{id}",
+            get(rest::get_task)
+                .patch(rest::update_task)
+                .delete(rest::delete_task),
+        )
+        .route("/rest/tasks/{id}/restore", patch(rest::restore_task))
+        .route("/rest/notes", get(rest::list_notes).post(rest::create_note))
+        .route(
+            "/rest/notes/{id}",
+            get(rest::get_note)
+                .patch(rest::update_note)
+                .delete(rest::delete_note),
+        )
+        .route("/rest/notes/{id}/restore", patch(rest::restore_note))
         .route("/rest/me", get(rest::me))
         .route("/auth/signup", post(auth::signup))
         .route("/auth/signin", post(auth::signin))
