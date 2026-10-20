@@ -3435,3 +3435,449 @@ async fn metadata_object_and_field_writes() {
         after.body
     );
 }
+
+#[tokio::test]
+async fn view_and_view_child_writes() {
+    let app = test_app().await;
+    let email = unique_email("view-writes");
+    let (token, _workspace) = signup(&app, &email).await;
+
+    let objects = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({ "query": "{ objects { edges { node { id nameSingular fieldsList { id name } } } } }" }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    let person = objects.body["data"]["objects"]["edges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|edge| edge["node"]["nameSingular"] == "person")
+        .expect("person object");
+    let object_id = person["node"]["id"].as_str().unwrap().to_string();
+    let name_field_id = person["node"]["fieldsList"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|field| field["name"] == "name")
+        .and_then(|field| field["id"].as_str())
+        .unwrap()
+        .to_string();
+
+    let created = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "mutation($input: CreateViewInput!) { createView(input: $input) { id name type icon isCustom viewFields { id } viewFilters { id } viewSorts { id } viewGroups { id } } }",
+                "variables": {
+                    "input": {
+                        "name": "My people",
+                        "objectMetadataId": object_id,
+                        "icon": "IconList"
+                    }
+                }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(created.status, StatusCode::OK, "body: {}", created.body);
+    let view = &created.body["data"]["createView"];
+    assert_eq!(view["name"], "My people");
+    assert_eq!(view["type"], "TABLE");
+    assert_eq!(view["isCustom"], true);
+    let view_id = view["id"].as_str().unwrap().to_string();
+    assert_eq!(view["viewFields"].as_array().unwrap().len(), 0);
+
+    let updated = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "mutation($id: String!, $input: UpdateViewInput!) { updateView(id: $id, input: $input) { id name position visibility } }",
+                "variables": {
+                    "id": view_id,
+                    "input": { "name": "Renamed people", "position": 4.5, "visibility": "UNLISTED" }
+                }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(updated.status, StatusCode::OK, "body: {}", updated.body);
+    assert_eq!(updated.body["data"]["updateView"]["name"], "Renamed people");
+    assert_eq!(updated.body["data"]["updateView"]["visibility"], "UNLISTED");
+
+    let view_field = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "mutation($input: CreateViewFieldInput!) { createViewField(input: $input) { id fieldMetadataId viewId isVisible size position } }",
+                "variables": {
+                    "input": {
+                        "fieldMetadataId": name_field_id,
+                        "viewId": view_id,
+                        "isVisible": true,
+                        "size": 210,
+                        "position": 1
+                    }
+                }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(
+        view_field.status,
+        StatusCode::OK,
+        "body: {}",
+        view_field.body
+    );
+    let view_field_id = view_field.body["data"]["createViewField"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(view_field.body["data"]["createViewField"]["size"], 210.0);
+
+    let updated_field = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "mutation($input: UpdateViewFieldInput!) { updateViewField(input: $input) { id size position isVisible } }",
+                "variables": {
+                    "input": {
+                        "id": view_field_id,
+                        "update": { "size": 150, "position": 3, "isVisible": false }
+                    }
+                }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(
+        updated_field.status,
+        StatusCode::OK,
+        "body: {}",
+        updated_field.body
+    );
+    assert_eq!(updated_field.body["data"]["updateViewField"]["size"], 150.0);
+    assert_eq!(
+        updated_field.body["data"]["updateViewField"]["isVisible"],
+        false
+    );
+
+    let filter = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "mutation($input: CreateViewFilterInput!) { createViewFilter(input: $input) { id operand value viewId } }",
+                "variables": {
+                    "input": {
+                        "fieldMetadataId": name_field_id,
+                        "viewId": view_id,
+                        "operand": "CONTAINS",
+                        "value": "Ada"
+                    }
+                }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(filter.status, StatusCode::OK, "body: {}", filter.body);
+    let filter_id = filter.body["data"]["createViewFilter"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(filter.body["data"]["createViewFilter"]["value"], "Ada");
+
+    let updated_filter = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "mutation($input: UpdateViewFilterInput!) { updateViewFilter(input: $input) { id operand } }",
+                "variables": {
+                    "input": { "id": filter_id, "update": { "operand": "IS_NOT" } }
+                }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(
+        updated_filter.status,
+        StatusCode::OK,
+        "body: {}",
+        updated_filter.body
+    );
+    assert_eq!(
+        updated_filter.body["data"]["updateViewFilter"]["operand"],
+        "IS_NOT"
+    );
+
+    let sort = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "mutation($input: CreateViewSortInput!) { createViewSort(input: $input) { id direction viewId } }",
+                "variables": {
+                    "input": {
+                        "fieldMetadataId": name_field_id,
+                        "viewId": view_id,
+                        "direction": "DESC"
+                    }
+                }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(sort.status, StatusCode::OK, "body: {}", sort.body);
+    let sort_id = sort.body["data"]["createViewSort"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let updated_sort = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "mutation($input: UpdateViewSortInput!) { updateViewSort(input: $input) { id direction } }",
+                "variables": {
+                    "input": { "id": sort_id, "update": { "direction": "ASC" } }
+                }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(
+        updated_sort.status,
+        StatusCode::OK,
+        "body: {}",
+        updated_sort.body
+    );
+    assert_eq!(
+        updated_sort.body["data"]["updateViewSort"]["direction"],
+        "ASC"
+    );
+
+    let group = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "mutation($input: CreateViewGroupInput!) { createViewGroup(input: $input) { id fieldValue isVisible position viewId } }",
+                "variables": {
+                    "input": { "viewId": view_id, "fieldValue": "VIP", "position": 2 }
+                }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(group.status, StatusCode::OK, "body: {}", group.body);
+    let group_id = group.body["data"]["createViewGroup"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let updated_group = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "mutation($input: UpdateViewGroupInput!) { updateViewGroup(input: $input) { id fieldValue isVisible position } }",
+                "variables": {
+                    "input": { "id": group_id, "update": { "fieldValue": "Regular", "isVisible": false } }
+                }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(
+        updated_group.status,
+        StatusCode::OK,
+        "body: {}",
+        updated_group.body
+    );
+    assert_eq!(
+        updated_group.body["data"]["updateViewGroup"]["fieldValue"],
+        "Regular"
+    );
+
+    let embedded = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": format!(
+                    "{{ getView(id: \"{view_id}\") {{ id name viewFields {{ id size }} viewFilters {{ id operand }} viewSorts {{ id direction }} viewGroups {{ id fieldValue }} }} getViewFields(viewId: \"{view_id}\") {{ id }} getViewFilters(viewId: \"{view_id}\") {{ id }} getViewSorts(viewId: \"{view_id}\") {{ id }} getViewGroups(viewId: \"{view_id}\") {{ id }} }}"
+                )
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(embedded.status, StatusCode::OK, "body: {}", embedded.body);
+    let embedded_view = &embedded.body["data"]["getView"];
+    assert_eq!(embedded_view["viewFields"].as_array().unwrap().len(), 1);
+    assert_eq!(embedded_view["viewFilters"].as_array().unwrap().len(), 1);
+    assert_eq!(embedded_view["viewSorts"].as_array().unwrap().len(), 1);
+    assert_eq!(embedded_view["viewGroups"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        embedded.body["data"]["getViewFields"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    let deleted_filter = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "mutation($input: DeleteViewFilterInput!) { deleteViewFilter(input: $input) { id operand } }",
+                "variables": { "input": { "id": filter_id } }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(
+        deleted_filter.status,
+        StatusCode::OK,
+        "body: {}",
+        deleted_filter.body
+    );
+    assert_eq!(
+        deleted_filter.body["data"]["deleteViewFilter"]["operand"],
+        "IS_NOT"
+    );
+
+    let deleted_sort = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "mutation($input: DeleteViewSortInput!) { deleteViewSort(input: $input) }",
+                "variables": { "input": { "id": sort_id } }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(
+        deleted_sort.status,
+        StatusCode::OK,
+        "body: {}",
+        deleted_sort.body
+    );
+    assert_eq!(deleted_sort.body["data"]["deleteViewSort"], true);
+
+    let destroyed_field = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "mutation($input: DestroyViewFieldInput!) { destroyViewField(input: $input) { id } }",
+                "variables": { "input": { "id": view_field_id } }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(
+        destroyed_field.status,
+        StatusCode::OK,
+        "body: {}",
+        destroyed_field.body
+    );
+
+    let deleted_group = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "mutation($input: DeleteViewGroupInput!) { deleteViewGroup(input: $input) { id fieldValue } }",
+                "variables": { "input": { "id": group_id } }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(
+        deleted_group.status,
+        StatusCode::OK,
+        "body: {}",
+        deleted_group.body
+    );
+
+    let deleted_view = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "mutation($id: String!) { deleteView(id: $id) }",
+                "variables": { "id": view_id }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(
+        deleted_view.status,
+        StatusCode::OK,
+        "body: {}",
+        deleted_view.body
+    );
+    assert_eq!(deleted_view.body["data"]["deleteView"], true);
+
+    let gone = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": format!("{{ getView(id: \"{view_id}\") {{ id }} }}")
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert!(
+        gone.body["data"]["getView"].is_null(),
+        "body: {}",
+        gone.body
+    );
+}

@@ -13,14 +13,18 @@ use sqlx::{PgPool, Row};
 use squid_core::{
     Actor, AggregateOperations, ApiKey, Company, CreateCompanyInput, CreateFieldMetadataInput,
     CreateNoteInput, CreateNoteTargetInput, CreateObjectMetadataInput, CreateOpportunityInput,
-    CreatePersonInput, CreateTaskInput, CreateTaskTargetInput, DateOp, Emails, FieldMetadata,
-    FieldMetadataType, FilterExpr, FullName, MetadataReadability, MetadataWritability, Note,
-    NoteTarget, ObjectMetadata, ObjectOpenRecordIn, ObjectSharingReach, Opportunity,
-    OpportunityStage, Person, Role, StringOp, Task, TaskStatus, TaskTarget, UpdateCompanyInput,
-    UpdateFieldMetadataInput, UpdateNoteInput, UpdateNoteTargetInput, UpdateObjectMetadataInput,
-    UpdateOpportunityInput, UpdatePersonInput, UpdateTaskInput, UpdateTaskTargetInput, User,
-    UuidOp, View, ViewCalendarLayout, ViewField, ViewKey, ViewOpenRecordIn, ViewType,
-    ViewVisibility, Workspace,
+    CreatePersonInput, CreateTaskInput, CreateTaskTargetInput, CreateViewFieldInput,
+    CreateViewFilterInput, CreateViewGroupInput, CreateViewInput, CreateViewSortInput, DateOp,
+    Emails, FieldMetadata, FieldMetadataType, FilterExpr, FullName, MetadataReadability,
+    MetadataWritability, Note, NoteTarget, ObjectMetadata, ObjectOpenRecordIn, ObjectSharingReach,
+    Opportunity, OpportunityStage, Person, Role, StringOp, Task, TaskStatus, TaskTarget,
+    UpdateCompanyInput, UpdateFieldMetadataInput, UpdateNoteInput, UpdateNoteTargetInput,
+    UpdateObjectMetadataInput, UpdateOpportunityInput, UpdatePersonInput, UpdateTaskInput,
+    UpdateTaskTargetInput, UpdateViewFieldInput, UpdateViewFilterInput, UpdateViewGroupInput,
+    UpdateViewInput, UpdateViewSortInput, User, UuidOp, View, ViewCalendarLayout, ViewField,
+    ViewFieldGroup, ViewFilter, ViewFilterGroup, ViewFilterGroupLogicalOperator, ViewFilterOperand,
+    ViewGroup, ViewKey, ViewOpenRecordIn, ViewSort, ViewSortDirection, ViewType, ViewVisibility,
+    Workspace,
 };
 use uuid::Uuid;
 
@@ -2777,7 +2781,7 @@ impl Db {
                     continue;
                 }
             }
-            view.view_fields = self.list_view_fields(workspace_id, view.id).await?;
+            self.load_view_relations(workspace_id, &mut view).await?;
             views.push(view);
         }
         Ok(views)
@@ -2797,8 +2801,16 @@ impl Db {
             return Ok(None);
         };
         let mut view = row_to_view(&row)?;
-        view.view_fields = self.list_view_fields(workspace_id, view.id).await?;
+        self.load_view_relations(workspace_id, &mut view).await?;
         Ok(Some(view))
+    }
+
+    pub async fn list_view_fields_public(
+        &self,
+        workspace_id: Uuid,
+        view_id: Uuid,
+    ) -> anyhow::Result<Vec<ViewField>> {
+        self.list_view_fields(workspace_id, view_id).await
     }
 
     async fn list_view_fields(
@@ -3173,6 +3185,676 @@ impl Db {
                 .await?;
         tx.commit().await?;
         Ok(result.rows_affected() > 0)
+    }
+
+    async fn load_view_relations(&self, workspace_id: Uuid, view: &mut View) -> anyhow::Result<()> {
+        view.view_fields = self.list_view_fields(workspace_id, view.id).await?;
+        view.view_filters = self.list_view_filters(workspace_id, view.id).await?;
+        view.view_sorts = self.list_view_sorts(workspace_id, view.id).await?;
+        view.view_groups = self.list_view_groups(workspace_id, view.id).await?;
+        view.view_filter_groups = self.list_view_filter_groups(workspace_id, view.id).await?;
+        view.view_field_groups = self.list_view_field_groups(workspace_id, view.id).await?;
+        Ok(())
+    }
+
+    pub async fn list_view_filters(
+        &self,
+        workspace_id: Uuid,
+        view_id: Uuid,
+    ) -> anyhow::Result<Vec<ViewFilter>> {
+        let rows = sqlx::query(&format!(
+            "SELECT {VIEW_FILTER_SELECT} FROM core.view_filters
+             WHERE workspace_id = $1 AND view_id = $2 AND deleted_at IS NULL
+             ORDER BY created_at ASC"
+        ))
+        .bind(workspace_id)
+        .bind(view_id)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(row_to_view_filter).collect()
+    }
+
+    pub async fn list_view_sorts(
+        &self,
+        workspace_id: Uuid,
+        view_id: Uuid,
+    ) -> anyhow::Result<Vec<ViewSort>> {
+        let rows = sqlx::query(&format!(
+            "SELECT {VIEW_SORT_SELECT} FROM core.view_sorts
+             WHERE workspace_id = $1 AND view_id = $2 AND deleted_at IS NULL
+             ORDER BY created_at ASC"
+        ))
+        .bind(workspace_id)
+        .bind(view_id)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(row_to_view_sort).collect()
+    }
+
+    pub async fn list_view_groups(
+        &self,
+        workspace_id: Uuid,
+        view_id: Uuid,
+    ) -> anyhow::Result<Vec<ViewGroup>> {
+        let rows = sqlx::query(&format!(
+            "SELECT {VIEW_GROUP_SELECT} FROM core.view_groups
+             WHERE workspace_id = $1 AND view_id = $2 AND deleted_at IS NULL
+             ORDER BY position ASC, created_at ASC"
+        ))
+        .bind(workspace_id)
+        .bind(view_id)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(row_to_view_group).collect()
+    }
+
+    pub async fn list_view_filter_groups(
+        &self,
+        workspace_id: Uuid,
+        view_id: Uuid,
+    ) -> anyhow::Result<Vec<ViewFilterGroup>> {
+        let rows = sqlx::query(&format!(
+            "SELECT {VIEW_FILTER_GROUP_SELECT} FROM core.view_filter_groups
+             WHERE workspace_id = $1 AND view_id = $2 AND deleted_at IS NULL
+             ORDER BY created_at ASC"
+        ))
+        .bind(workspace_id)
+        .bind(view_id)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(row_to_view_filter_group).collect()
+    }
+
+    pub async fn list_view_field_groups(
+        &self,
+        workspace_id: Uuid,
+        view_id: Uuid,
+    ) -> anyhow::Result<Vec<ViewFieldGroup>> {
+        let rows = sqlx::query(
+            "SELECT id, name, position, is_visible, view_id, workspace_id, created_at,
+                    updated_at, is_active, deleted_at
+             FROM core.view_field_groups
+             WHERE workspace_id = $1 AND view_id = $2 AND deleted_at IS NULL
+             ORDER BY position ASC, created_at ASC",
+        )
+        .bind(workspace_id)
+        .bind(view_id)
+        .fetch_all(&self.pool)
+        .await?;
+        let fields = self.list_view_fields(workspace_id, view_id).await?;
+        let mut groups = Vec::with_capacity(rows.len());
+        for row in &rows {
+            let id: Uuid = row.get("id");
+            groups.push(ViewFieldGroup {
+                id,
+                name: row.get("name"),
+                position: row.get("position"),
+                is_visible: row.get("is_visible"),
+                view_id: row.get("view_id"),
+                workspace_id: row.get("workspace_id"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+                is_active: row.get("is_active"),
+                deleted_at: row.get("deleted_at"),
+                view_fields: fields
+                    .iter()
+                    .filter(|field| field.view_field_group_id == Some(id))
+                    .cloned()
+                    .collect(),
+                is_overridden: false,
+            });
+        }
+        Ok(groups)
+    }
+
+    pub async fn create_view(
+        &self,
+        workspace_id: Uuid,
+        input: &CreateViewInput,
+    ) -> anyhow::Result<View> {
+        let row = sqlx::query(
+            "INSERT INTO core.views
+                (id, workspace_id, name, object_metadata_id, type, key, icon, position,
+                 is_compact, is_custom, open_record_in, kanban_aggregate_operation,
+                 kanban_aggregate_operation_field_metadata_id, main_group_by_field_metadata_id,
+                 should_hide_empty_groups, kanban_column_width, group_load_limit,
+                 calendar_field_metadata_id, calendar_end_field_metadata_id, calendar_layout,
+                 visibility, any_field_filter_value, is_active)
+             VALUES
+                (COALESCE($1, gen_random_uuid()), $2, $3, $4, $5, $6, $7, $8, $9, true, $10,
+                 $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, true)
+             RETURNING id",
+        )
+        .bind(input.id)
+        .bind(workspace_id)
+        .bind(&input.name)
+        .bind(input.object_metadata_id)
+        .bind(input.view_type.unwrap_or(ViewType::Table).as_str())
+        .bind(input.key.map(|value| value.as_str()))
+        .bind(&input.icon)
+        .bind(input.position.unwrap_or(0.0))
+        .bind(input.is_compact.unwrap_or(false))
+        .bind(
+            input
+                .open_record_in
+                .unwrap_or(ViewOpenRecordIn::SidePanel)
+                .as_str(),
+        )
+        .bind(input.kanban_aggregate_operation.map(|value| value.as_str()))
+        .bind(input.kanban_aggregate_operation_field_metadata_id)
+        .bind(input.main_group_by_field_metadata_id)
+        .bind(input.should_hide_empty_groups.unwrap_or(false))
+        .bind(input.kanban_column_width)
+        .bind(input.group_load_limit)
+        .bind(input.calendar_field_metadata_id)
+        .bind(input.calendar_end_field_metadata_id)
+        .bind(input.calendar_layout.map(|value| value.as_str()))
+        .bind(
+            input
+                .visibility
+                .unwrap_or(ViewVisibility::Workspace)
+                .as_str(),
+        )
+        .bind(&input.any_field_filter_value)
+        .fetch_one(&self.pool)
+        .await?;
+        let id: Uuid = row.get("id");
+        self.get_view(workspace_id, id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("created view not found"))
+    }
+
+    pub async fn update_view(
+        &self,
+        workspace_id: Uuid,
+        id: Uuid,
+        input: &UpdateViewInput,
+    ) -> anyhow::Result<Option<View>> {
+        let result = sqlx::query(
+            "UPDATE core.views SET
+                name = COALESCE($3, name),
+                type = COALESCE($4, type),
+                icon = COALESCE($5, icon),
+                position = COALESCE($6, position),
+                is_compact = COALESCE($7, is_compact),
+                open_record_in = COALESCE($8, open_record_in),
+                kanban_aggregate_operation = COALESCE($9, kanban_aggregate_operation),
+                kanban_aggregate_operation_field_metadata_id =
+                    COALESCE($10, kanban_aggregate_operation_field_metadata_id),
+                any_field_filter_value = COALESCE($11, any_field_filter_value),
+                calendar_layout = COALESCE($12, calendar_layout),
+                calendar_field_metadata_id = COALESCE($13, calendar_field_metadata_id),
+                calendar_end_field_metadata_id = COALESCE($14, calendar_end_field_metadata_id),
+                visibility = COALESCE($15, visibility),
+                main_group_by_field_metadata_id =
+                    COALESCE($16, main_group_by_field_metadata_id),
+                should_hide_empty_groups = COALESCE($17, should_hide_empty_groups),
+                kanban_column_width = COALESCE($18, kanban_column_width),
+                group_load_limit = COALESCE($19, group_load_limit),
+                updated_at = now()
+             WHERE workspace_id = $1 AND id = $2 AND deleted_at IS NULL",
+        )
+        .bind(workspace_id)
+        .bind(id)
+        .bind(&input.name)
+        .bind(input.view_type.map(|value| value.as_str()))
+        .bind(&input.icon)
+        .bind(input.position)
+        .bind(input.is_compact)
+        .bind(input.open_record_in.map(|value| value.as_str()))
+        .bind(input.kanban_aggregate_operation.map(|value| value.as_str()))
+        .bind(input.kanban_aggregate_operation_field_metadata_id)
+        .bind(&input.any_field_filter_value)
+        .bind(input.calendar_layout.map(|value| value.as_str()))
+        .bind(input.calendar_field_metadata_id)
+        .bind(input.calendar_end_field_metadata_id)
+        .bind(input.visibility.map(|value| value.as_str()))
+        .bind(input.main_group_by_field_metadata_id)
+        .bind(input.should_hide_empty_groups)
+        .bind(input.kanban_column_width)
+        .bind(input.group_load_limit)
+        .execute(&self.pool)
+        .await?;
+        if result.rows_affected() == 0 {
+            return Ok(None);
+        }
+        self.get_view(workspace_id, id).await
+    }
+
+    pub async fn delete_view(&self, workspace_id: Uuid, id: Uuid) -> anyhow::Result<bool> {
+        let result = sqlx::query(
+            "UPDATE core.views SET deleted_at = now(), updated_at = now()
+             WHERE workspace_id = $1 AND id = $2 AND deleted_at IS NULL",
+        )
+        .bind(workspace_id)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    pub async fn destroy_view(&self, workspace_id: Uuid, id: Uuid) -> anyhow::Result<bool> {
+        let result = sqlx::query("DELETE FROM core.views WHERE workspace_id = $1 AND id = $2")
+            .bind(workspace_id)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    async fn get_view_field(
+        &self,
+        workspace_id: Uuid,
+        id: Uuid,
+    ) -> anyhow::Result<Option<ViewField>> {
+        let row = sqlx::query(&format!(
+            "SELECT {VIEW_FIELD_SELECT} FROM core.view_fields
+             WHERE workspace_id = $1 AND id = $2 AND deleted_at IS NULL"
+        ))
+        .bind(workspace_id)
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.as_ref().map(row_to_view_field).transpose()
+    }
+
+    pub async fn create_view_field(
+        &self,
+        workspace_id: Uuid,
+        input: &CreateViewFieldInput,
+    ) -> anyhow::Result<ViewField> {
+        let row = sqlx::query(
+            "INSERT INTO core.view_fields
+                (id, workspace_id, view_id, field_metadata_id, is_visible, size, position,
+                 aggregate_operation, view_field_group_id, is_active)
+             VALUES (COALESCE($1, gen_random_uuid()), $2, $3, $4, $5, $6, $7, $8, $9, true)
+             RETURNING id",
+        )
+        .bind(input.id)
+        .bind(workspace_id)
+        .bind(input.view_id)
+        .bind(input.field_metadata_id)
+        .bind(input.is_visible.unwrap_or(true))
+        .bind(input.size.unwrap_or(0.0))
+        .bind(input.position.unwrap_or(0.0))
+        .bind(input.aggregate_operation.map(|value| value.as_str()))
+        .bind(input.view_field_group_id)
+        .fetch_one(&self.pool)
+        .await?;
+        let id: Uuid = row.get("id");
+        self.get_view_field(workspace_id, id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("created view field not found"))
+    }
+
+    pub async fn update_view_field(
+        &self,
+        workspace_id: Uuid,
+        id: Uuid,
+        input: &UpdateViewFieldInput,
+    ) -> anyhow::Result<Option<ViewField>> {
+        let result = sqlx::query(
+            "UPDATE core.view_fields SET
+                is_visible = COALESCE($3, is_visible),
+                size = COALESCE($4, size),
+                position = COALESCE($5, position),
+                aggregate_operation = COALESCE($6, aggregate_operation),
+                view_field_group_id = COALESCE($7, view_field_group_id),
+                updated_at = now()
+             WHERE workspace_id = $1 AND id = $2 AND deleted_at IS NULL",
+        )
+        .bind(workspace_id)
+        .bind(id)
+        .bind(input.is_visible)
+        .bind(input.size)
+        .bind(input.position)
+        .bind(input.aggregate_operation.map(|value| value.as_str()))
+        .bind(input.view_field_group_id)
+        .execute(&self.pool)
+        .await?;
+        if result.rows_affected() == 0 {
+            return Ok(None);
+        }
+        self.get_view_field(workspace_id, id).await
+    }
+
+    pub async fn delete_view_field(
+        &self,
+        workspace_id: Uuid,
+        id: Uuid,
+    ) -> anyhow::Result<Option<ViewField>> {
+        let field = self.get_view_field(workspace_id, id).await?;
+        if field.is_some() {
+            sqlx::query(
+                "UPDATE core.view_fields SET deleted_at = now(), is_active = false,
+                    updated_at = now()
+                 WHERE workspace_id = $1 AND id = $2",
+            )
+            .bind(workspace_id)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        }
+        Ok(field)
+    }
+
+    pub async fn destroy_view_field(
+        &self,
+        workspace_id: Uuid,
+        id: Uuid,
+    ) -> anyhow::Result<Option<ViewField>> {
+        let field = self.get_view_field(workspace_id, id).await?;
+        sqlx::query("DELETE FROM core.view_fields WHERE workspace_id = $1 AND id = $2")
+            .bind(workspace_id)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(field)
+    }
+
+    async fn get_view_filter(
+        &self,
+        workspace_id: Uuid,
+        id: Uuid,
+    ) -> anyhow::Result<Option<ViewFilter>> {
+        let row = sqlx::query(&format!(
+            "SELECT {VIEW_FILTER_SELECT} FROM core.view_filters
+             WHERE workspace_id = $1 AND id = $2 AND deleted_at IS NULL"
+        ))
+        .bind(workspace_id)
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.as_ref().map(row_to_view_filter).transpose()
+    }
+
+    pub async fn create_view_filter(
+        &self,
+        workspace_id: Uuid,
+        input: &CreateViewFilterInput,
+    ) -> anyhow::Result<ViewFilter> {
+        let row = sqlx::query(
+            "INSERT INTO core.view_filters
+                (id, workspace_id, view_id, field_metadata_id, operand, value,
+                 view_filter_group_id, position_in_view_filter_group, sub_field_name,
+                 relation_target_field_metadata_id)
+             VALUES (COALESCE($1, gen_random_uuid()), $2, $3, $4, $5, $6, $7, $8, $9, $10)
+             RETURNING id",
+        )
+        .bind(input.id)
+        .bind(workspace_id)
+        .bind(input.view_id)
+        .bind(input.field_metadata_id)
+        .bind(input.operand.unwrap_or(ViewFilterOperand::Is).as_str())
+        .bind(input.value.0.clone())
+        .bind(input.view_filter_group_id)
+        .bind(input.position_in_view_filter_group)
+        .bind(&input.sub_field_name)
+        .bind(input.relation_target_field_metadata_id)
+        .fetch_one(&self.pool)
+        .await?;
+        let id: Uuid = row.get("id");
+        self.get_view_filter(workspace_id, id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("created view filter not found"))
+    }
+
+    pub async fn update_view_filter(
+        &self,
+        workspace_id: Uuid,
+        id: Uuid,
+        input: &UpdateViewFilterInput,
+    ) -> anyhow::Result<Option<ViewFilter>> {
+        let result = sqlx::query(
+            "UPDATE core.view_filters SET
+                field_metadata_id = COALESCE($3, field_metadata_id),
+                operand = COALESCE($4, operand),
+                value = COALESCE($5, value),
+                view_filter_group_id = COALESCE($6, view_filter_group_id),
+                position_in_view_filter_group =
+                    COALESCE($7, position_in_view_filter_group),
+                sub_field_name = COALESCE($8, sub_field_name),
+                relation_target_field_metadata_id =
+                    COALESCE($9, relation_target_field_metadata_id),
+                updated_at = now()
+             WHERE workspace_id = $1 AND id = $2 AND deleted_at IS NULL",
+        )
+        .bind(workspace_id)
+        .bind(id)
+        .bind(input.field_metadata_id)
+        .bind(input.operand.map(|value| value.as_str()))
+        .bind(input.value.as_ref().map(|value| value.0.clone()))
+        .bind(input.view_filter_group_id)
+        .bind(input.position_in_view_filter_group)
+        .bind(&input.sub_field_name)
+        .bind(input.relation_target_field_metadata_id)
+        .execute(&self.pool)
+        .await?;
+        if result.rows_affected() == 0 {
+            return Ok(None);
+        }
+        self.get_view_filter(workspace_id, id).await
+    }
+
+    pub async fn delete_view_filter(
+        &self,
+        workspace_id: Uuid,
+        id: Uuid,
+    ) -> anyhow::Result<Option<ViewFilter>> {
+        let filter = self.get_view_filter(workspace_id, id).await?;
+        if filter.is_some() {
+            sqlx::query(
+                "UPDATE core.view_filters SET deleted_at = now(), updated_at = now()
+                 WHERE workspace_id = $1 AND id = $2",
+            )
+            .bind(workspace_id)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        }
+        Ok(filter)
+    }
+
+    pub async fn destroy_view_filter(
+        &self,
+        workspace_id: Uuid,
+        id: Uuid,
+    ) -> anyhow::Result<Option<ViewFilter>> {
+        let filter = self.get_view_filter(workspace_id, id).await?;
+        sqlx::query("DELETE FROM core.view_filters WHERE workspace_id = $1 AND id = $2")
+            .bind(workspace_id)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(filter)
+    }
+
+    async fn get_view_sort(
+        &self,
+        workspace_id: Uuid,
+        id: Uuid,
+    ) -> anyhow::Result<Option<ViewSort>> {
+        let row = sqlx::query(&format!(
+            "SELECT {VIEW_SORT_SELECT} FROM core.view_sorts
+             WHERE workspace_id = $1 AND id = $2 AND deleted_at IS NULL"
+        ))
+        .bind(workspace_id)
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.as_ref().map(row_to_view_sort).transpose()
+    }
+
+    pub async fn create_view_sort(
+        &self,
+        workspace_id: Uuid,
+        input: &CreateViewSortInput,
+    ) -> anyhow::Result<ViewSort> {
+        let row = sqlx::query(
+            "INSERT INTO core.view_sorts
+                (id, workspace_id, view_id, field_metadata_id, direction, sub_field_name)
+             VALUES (COALESCE($1, gen_random_uuid()), $2, $3, $4, $5, $6)
+             RETURNING id",
+        )
+        .bind(input.id)
+        .bind(workspace_id)
+        .bind(input.view_id)
+        .bind(input.field_metadata_id)
+        .bind(input.direction.unwrap_or(ViewSortDirection::Asc).as_str())
+        .bind(&input.sub_field_name)
+        .fetch_one(&self.pool)
+        .await?;
+        let id: Uuid = row.get("id");
+        self.get_view_sort(workspace_id, id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("created view sort not found"))
+    }
+
+    pub async fn update_view_sort(
+        &self,
+        workspace_id: Uuid,
+        id: Uuid,
+        input: &UpdateViewSortInput,
+    ) -> anyhow::Result<Option<ViewSort>> {
+        let result = sqlx::query(
+            "UPDATE core.view_sorts SET
+                direction = COALESCE($3, direction),
+                sub_field_name = COALESCE($4, sub_field_name),
+                updated_at = now()
+             WHERE workspace_id = $1 AND id = $2 AND deleted_at IS NULL",
+        )
+        .bind(workspace_id)
+        .bind(id)
+        .bind(input.direction.map(|value| value.as_str()))
+        .bind(&input.sub_field_name)
+        .execute(&self.pool)
+        .await?;
+        if result.rows_affected() == 0 {
+            return Ok(None);
+        }
+        self.get_view_sort(workspace_id, id).await
+    }
+
+    pub async fn delete_view_sort(&self, workspace_id: Uuid, id: Uuid) -> anyhow::Result<bool> {
+        let result = sqlx::query(
+            "UPDATE core.view_sorts SET deleted_at = now(), updated_at = now()
+             WHERE workspace_id = $1 AND id = $2 AND deleted_at IS NULL",
+        )
+        .bind(workspace_id)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    pub async fn destroy_view_sort(&self, workspace_id: Uuid, id: Uuid) -> anyhow::Result<bool> {
+        let result = sqlx::query("DELETE FROM core.view_sorts WHERE workspace_id = $1 AND id = $2")
+            .bind(workspace_id)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    async fn get_view_group(
+        &self,
+        workspace_id: Uuid,
+        id: Uuid,
+    ) -> anyhow::Result<Option<ViewGroup>> {
+        let row = sqlx::query(&format!(
+            "SELECT {VIEW_GROUP_SELECT} FROM core.view_groups
+             WHERE workspace_id = $1 AND id = $2 AND deleted_at IS NULL"
+        ))
+        .bind(workspace_id)
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.as_ref().map(row_to_view_group).transpose()
+    }
+
+    pub async fn create_view_group(
+        &self,
+        workspace_id: Uuid,
+        input: &CreateViewGroupInput,
+    ) -> anyhow::Result<ViewGroup> {
+        let row = sqlx::query(
+            "INSERT INTO core.view_groups
+                (id, workspace_id, view_id, is_visible, field_value, position)
+             VALUES (COALESCE($1, gen_random_uuid()), $2, $3, $4, $5, $6)
+             RETURNING id",
+        )
+        .bind(input.id)
+        .bind(workspace_id)
+        .bind(input.view_id)
+        .bind(input.is_visible.unwrap_or(true))
+        .bind(&input.field_value)
+        .bind(input.position.unwrap_or(0.0))
+        .fetch_one(&self.pool)
+        .await?;
+        let id: Uuid = row.get("id");
+        self.get_view_group(workspace_id, id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("created view group not found"))
+    }
+
+    pub async fn update_view_group(
+        &self,
+        workspace_id: Uuid,
+        id: Uuid,
+        input: &UpdateViewGroupInput,
+    ) -> anyhow::Result<Option<ViewGroup>> {
+        let result = sqlx::query(
+            "UPDATE core.view_groups SET
+                is_visible = COALESCE($3, is_visible),
+                field_value = COALESCE($4, field_value),
+                position = COALESCE($5, position),
+                updated_at = now()
+             WHERE workspace_id = $1 AND id = $2 AND deleted_at IS NULL",
+        )
+        .bind(workspace_id)
+        .bind(id)
+        .bind(input.is_visible)
+        .bind(&input.field_value)
+        .bind(input.position)
+        .execute(&self.pool)
+        .await?;
+        if result.rows_affected() == 0 {
+            return Ok(None);
+        }
+        self.get_view_group(workspace_id, id).await
+    }
+
+    pub async fn delete_view_group(
+        &self,
+        workspace_id: Uuid,
+        id: Uuid,
+    ) -> anyhow::Result<Option<ViewGroup>> {
+        let group = self.get_view_group(workspace_id, id).await?;
+        if group.is_some() {
+            sqlx::query(
+                "UPDATE core.view_groups SET deleted_at = now(), updated_at = now()
+                 WHERE workspace_id = $1 AND id = $2",
+            )
+            .bind(workspace_id)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        }
+        Ok(group)
+    }
+
+    pub async fn destroy_view_group(
+        &self,
+        workspace_id: Uuid,
+        id: Uuid,
+    ) -> anyhow::Result<Option<ViewGroup>> {
+        let group = self.get_view_group(workspace_id, id).await?;
+        sqlx::query("DELETE FROM core.view_groups WHERE workspace_id = $1 AND id = $2")
+            .bind(workspace_id)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(group)
     }
 }
 
@@ -4031,6 +4713,83 @@ const VIEW_FIELD_SELECT: &str = "id, universal_identifier::text AS universal_ide
      application_id, is_system_side_effect, field_metadata_id, is_visible, size, position, \
      aggregate_operation, view_id, view_field_group_id, workspace_id, created_at, updated_at, \
      is_active, deleted_at";
+
+const VIEW_FILTER_SELECT: &str = "id, field_metadata_id, operand, value::text AS value, \
+     view_filter_group_id, position_in_view_filter_group, sub_field_name, \
+     relation_target_field_metadata_id, view_id, workspace_id, created_at, updated_at, deleted_at";
+
+const VIEW_SORT_SELECT: &str = "id, field_metadata_id, direction, sub_field_name, view_id, \
+     workspace_id, created_at, updated_at, deleted_at";
+
+const VIEW_GROUP_SELECT: &str = "id, is_visible, field_value, position, view_id, workspace_id, \
+     created_at, updated_at, deleted_at";
+
+const VIEW_FILTER_GROUP_SELECT: &str = "id, parent_view_filter_group_id, logical_operator, \
+     position_in_view_filter_group, view_id, workspace_id, created_at, updated_at, deleted_at";
+
+fn row_to_view_filter(row: &sqlx::postgres::PgRow) -> anyhow::Result<ViewFilter> {
+    Ok(ViewFilter {
+        id: row.get("id"),
+        field_metadata_id: row.get("field_metadata_id"),
+        operand: ViewFilterOperand::parse(row.get("operand"))
+            .ok_or_else(|| anyhow::anyhow!("invalid view filter operand"))?,
+        value: parse_json_opt(row.get("value"))
+            .unwrap_or(squid_core::GqlJson(serde_json::Value::Null)),
+        view_filter_group_id: row.get("view_filter_group_id"),
+        position_in_view_filter_group: row.get("position_in_view_filter_group"),
+        sub_field_name: row.get("sub_field_name"),
+        relation_target_field_metadata_id: row.get("relation_target_field_metadata_id"),
+        view_id: row.get("view_id"),
+        workspace_id: row.get("workspace_id"),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+        deleted_at: row.get("deleted_at"),
+    })
+}
+
+fn row_to_view_sort(row: &sqlx::postgres::PgRow) -> anyhow::Result<ViewSort> {
+    Ok(ViewSort {
+        id: row.get("id"),
+        field_metadata_id: row.get("field_metadata_id"),
+        direction: ViewSortDirection::parse(row.get("direction"))
+            .ok_or_else(|| anyhow::anyhow!("invalid view sort direction"))?,
+        sub_field_name: row.get("sub_field_name"),
+        view_id: row.get("view_id"),
+        workspace_id: row.get("workspace_id"),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+        deleted_at: row.get("deleted_at"),
+    })
+}
+
+fn row_to_view_group(row: &sqlx::postgres::PgRow) -> anyhow::Result<ViewGroup> {
+    Ok(ViewGroup {
+        id: row.get("id"),
+        is_visible: row.get("is_visible"),
+        field_value: row.get("field_value"),
+        position: row.get("position"),
+        view_id: row.get("view_id"),
+        workspace_id: row.get("workspace_id"),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+        deleted_at: row.get("deleted_at"),
+    })
+}
+
+fn row_to_view_filter_group(row: &sqlx::postgres::PgRow) -> anyhow::Result<ViewFilterGroup> {
+    Ok(ViewFilterGroup {
+        id: row.get("id"),
+        parent_view_filter_group_id: row.get("parent_view_filter_group_id"),
+        logical_operator: ViewFilterGroupLogicalOperator::parse(row.get("logical_operator"))
+            .ok_or_else(|| anyhow::anyhow!("invalid view filter group operator"))?,
+        position_in_view_filter_group: row.get("position_in_view_filter_group"),
+        view_id: row.get("view_id"),
+        workspace_id: row.get("workspace_id"),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+        deleted_at: row.get("deleted_at"),
+    })
+}
 
 fn row_to_view(row: &sqlx::postgres::PgRow) -> anyhow::Result<View> {
     let key: Option<String> = row.get("key");

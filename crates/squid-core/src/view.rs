@@ -3,13 +3,15 @@
 //! Only `viewFields` is seeded for the default person table. Filters, sorts,
 //! groups and field groups are modelled so the query validates; they are empty.
 
-use async_graphql::{Enum, Json, SimpleObject};
+use async_graphql::{Enum, InputObject, Json, SimpleObject};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
 macro_rules! string_enum {
     ($name:ident, $gql:literal, { $($variant:ident => $text:literal),+ $(,)? }) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Enum)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Enum, Serialize, Deserialize)]
+        #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
         #[graphql(name = $gql)]
         pub enum $name {
             $($variant),+
@@ -243,4 +245,216 @@ pub struct View {
     pub visibility: ViewVisibility,
     pub created_by_user_workspace_id: Option<Uuid>,
     pub is_active: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, InputObject)]
+#[serde(rename_all = "camelCase")]
+#[graphql(name = "CreateViewInput")]
+pub struct CreateViewInput {
+    #[serde(default)]
+    pub id: Option<Uuid>,
+    pub name: String,
+    pub object_metadata_id: Uuid,
+    #[serde(default)]
+    pub view_type: Option<ViewType>,
+    #[serde(default)]
+    pub key: Option<ViewKey>,
+    pub icon: String,
+    #[serde(default)]
+    pub position: Option<f64>,
+    #[serde(default)]
+    pub is_compact: Option<bool>,
+    #[serde(default)]
+    pub should_hide_empty_groups: Option<bool>,
+    #[serde(default)]
+    pub kanban_column_width: Option<i32>,
+    #[serde(default)]
+    pub group_load_limit: Option<i32>,
+    #[serde(default)]
+    pub open_record_in: Option<ViewOpenRecordIn>,
+    #[serde(default)]
+    pub kanban_aggregate_operation: Option<AggregateOperations>,
+    #[serde(default)]
+    pub kanban_aggregate_operation_field_metadata_id: Option<Uuid>,
+    #[serde(default)]
+    pub any_field_filter_value: Option<String>,
+    #[serde(default)]
+    pub calendar_layout: Option<ViewCalendarLayout>,
+    #[serde(default)]
+    pub calendar_field_metadata_id: Option<Uuid>,
+    #[serde(default)]
+    pub calendar_end_field_metadata_id: Option<Uuid>,
+    #[serde(default)]
+    pub visibility: Option<ViewVisibility>,
+    #[serde(default)]
+    pub main_group_by_field_metadata_id: Option<Uuid>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, InputObject)]
+#[serde(rename_all = "camelCase")]
+#[graphql(name = "UpdateViewInput")]
+pub struct UpdateViewInput {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub view_type: Option<ViewType>,
+    #[serde(default)]
+    pub icon: Option<String>,
+    #[serde(default)]
+    pub position: Option<f64>,
+    #[serde(default)]
+    pub is_compact: Option<bool>,
+    #[serde(default)]
+    pub open_record_in: Option<ViewOpenRecordIn>,
+    #[serde(default)]
+    pub kanban_aggregate_operation: Option<AggregateOperations>,
+    #[serde(default)]
+    pub kanban_aggregate_operation_field_metadata_id: Option<Uuid>,
+    #[serde(default)]
+    pub any_field_filter_value: Option<String>,
+    #[serde(default)]
+    pub calendar_layout: Option<ViewCalendarLayout>,
+    #[serde(default)]
+    pub calendar_field_metadata_id: Option<Uuid>,
+    #[serde(default)]
+    pub calendar_end_field_metadata_id: Option<Uuid>,
+    #[serde(default)]
+    pub visibility: Option<ViewVisibility>,
+    #[serde(default)]
+    pub main_group_by_field_metadata_id: Option<Uuid>,
+    #[serde(default)]
+    pub should_hide_empty_groups: Option<bool>,
+    #[serde(default)]
+    pub kanban_column_width: Option<i32>,
+    #[serde(default)]
+    pub group_load_limit: Option<i32>,
+}
+
+#[derive(Debug, Clone, Deserialize, InputObject)]
+#[serde(rename_all = "camelCase")]
+#[graphql(name = "CreateViewFieldInput")]
+pub struct CreateViewFieldInput {
+    #[serde(default)]
+    pub id: Option<Uuid>,
+    pub field_metadata_id: Uuid,
+    pub view_id: Uuid,
+    #[serde(default)]
+    pub is_visible: Option<bool>,
+    #[serde(default)]
+    pub size: Option<f64>,
+    #[serde(default)]
+    pub position: Option<f64>,
+    #[serde(default)]
+    pub aggregate_operation: Option<AggregateOperations>,
+    #[serde(default)]
+    pub view_field_group_id: Option<Uuid>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, InputObject)]
+#[serde(rename_all = "camelCase")]
+#[graphql(name = "UpdateViewFieldInputUpdates")]
+pub struct UpdateViewFieldInput {
+    #[serde(default)]
+    pub is_visible: Option<bool>,
+    #[serde(default)]
+    pub size: Option<f64>,
+    #[serde(default)]
+    pub position: Option<f64>,
+    #[serde(default)]
+    pub aggregate_operation: Option<AggregateOperations>,
+    #[serde(default)]
+    pub view_field_group_id: Option<Uuid>,
+}
+
+#[derive(Debug, Clone, Deserialize, InputObject)]
+#[serde(rename_all = "camelCase")]
+#[graphql(name = "CreateViewFilterInput")]
+pub struct CreateViewFilterInput {
+    #[serde(default)]
+    pub id: Option<Uuid>,
+    pub field_metadata_id: Uuid,
+    #[serde(default)]
+    pub operand: Option<ViewFilterOperand>,
+    pub value: Json<Value>,
+    #[serde(default)]
+    pub view_filter_group_id: Option<Uuid>,
+    #[serde(default)]
+    pub position_in_view_filter_group: Option<f64>,
+    #[serde(default)]
+    pub sub_field_name: Option<String>,
+    #[serde(default)]
+    pub relation_target_field_metadata_id: Option<Uuid>,
+    pub view_id: Uuid,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, InputObject)]
+#[serde(rename_all = "camelCase")]
+#[graphql(name = "UpdateViewFilterInputUpdates")]
+pub struct UpdateViewFilterInput {
+    #[serde(default)]
+    pub field_metadata_id: Option<Uuid>,
+    #[serde(default)]
+    pub operand: Option<ViewFilterOperand>,
+    #[serde(default)]
+    pub value: Option<Json<Value>>,
+    #[serde(default)]
+    pub view_filter_group_id: Option<Uuid>,
+    #[serde(default)]
+    pub position_in_view_filter_group: Option<f64>,
+    #[serde(default)]
+    pub sub_field_name: Option<String>,
+    #[serde(default)]
+    pub relation_target_field_metadata_id: Option<Uuid>,
+}
+
+#[derive(Debug, Clone, Deserialize, InputObject)]
+#[serde(rename_all = "camelCase")]
+#[graphql(name = "CreateViewSortInput")]
+pub struct CreateViewSortInput {
+    #[serde(default)]
+    pub id: Option<Uuid>,
+    pub field_metadata_id: Uuid,
+    #[serde(default)]
+    pub direction: Option<ViewSortDirection>,
+    #[serde(default)]
+    pub sub_field_name: Option<String>,
+    pub view_id: Uuid,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, InputObject)]
+#[serde(rename_all = "camelCase")]
+#[graphql(name = "UpdateViewSortInputUpdates")]
+pub struct UpdateViewSortInput {
+    #[serde(default)]
+    pub direction: Option<ViewSortDirection>,
+    #[serde(default)]
+    pub sub_field_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, InputObject)]
+#[serde(rename_all = "camelCase")]
+#[graphql(name = "CreateViewGroupInput")]
+pub struct CreateViewGroupInput {
+    #[serde(default)]
+    pub id: Option<Uuid>,
+    #[serde(default)]
+    pub is_visible: Option<bool>,
+    pub field_value: String,
+    #[serde(default)]
+    pub position: Option<f64>,
+    pub view_id: Uuid,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, InputObject)]
+#[serde(rename_all = "camelCase")]
+#[graphql(name = "UpdateViewGroupInputUpdates")]
+pub struct UpdateViewGroupInput {
+    #[serde(default)]
+    pub field_metadata_id: Option<Uuid>,
+    #[serde(default)]
+    pub is_visible: Option<bool>,
+    #[serde(default)]
+    pub field_value: Option<String>,
+    #[serde(default)]
+    pub position: Option<f64>,
 }

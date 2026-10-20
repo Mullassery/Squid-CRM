@@ -70,7 +70,12 @@
 - [x] Metadata object/field writes (`createOneObject`/`updateOneObject`/
       `deleteOneObject`, `createOneField`/`updateOneField`/`deleteOneField`) with
       system guards; seeded default `name` field for custom objects.
-- [ ] View writes/filters/sorts/groups, roles, indexes/relations, remaining
+- [x] View writes: `createView`/`updateView`/`deleteView`/`destroyView` plus
+      view field/filter/sort/group create/update/delete/destroy and
+      `getViewFields`/`getViewFilters`/`getViewSorts`/`getViewGroups` queries.
+- [ ] `createManyViewFields`/`createManyViewFilters`/`createManyViewSorts`/
+      `createManyViewGroups`, view field groups/filter groups writes, roles,
+      indexes/relations, remaining
       standard objects, and metadata-driven dynamic schema generation.
 - [ ] Custom-object physical tables and dynamic GraphQL/REST schema/relation
       field creation (metadata writes currently persist metadata only).
@@ -84,7 +89,8 @@
 - [x] REST filter grammar (`eq`/`neq`/`in`/`contains`/`startsWith`/`endsWith`/
       `like`/`ilike`/ranges/`is`, `and`/`or`/`not`) for company, opportunity,
       task, note and task/note targets.
-- [ ] Views/filters/sorts/groups parity (relation filters and view semantics).
+- [ ] Views parity: batch create mutations, view field/filter group writes,
+      relation filters and view-based paging semantics.
 - [ ] Search, files, export/import.
 - [ ] Jobs/cron, webhooks, workflows, integrations.
 
