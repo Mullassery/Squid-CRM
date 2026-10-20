@@ -14,6 +14,7 @@ pub mod company;
 pub mod config;
 pub mod error;
 pub mod metadata;
+pub mod opportunity;
 pub mod view;
 
 pub use async_graphql::Json as GqlJson;
@@ -21,6 +22,7 @@ pub use company::*;
 pub use config::Config;
 pub use error::{AppError, AppResult};
 pub use metadata::*;
+pub use opportunity::*;
 pub use view::*;
 
 /// A workspace member's role. Upstream models this as a role entity with

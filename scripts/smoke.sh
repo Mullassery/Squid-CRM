@@ -76,7 +76,7 @@ import json
 body = json.load(open('/tmp/squid-smoke-metadata.json'))
 assert 'errors' not in body, body
 objects = body['data']['objects']['edges']
-assert len(objects) == 2, body
+assert len(objects) == 3, body
 node = next(edge['node'] for edge in objects if edge['node']['nameSingular'] == 'person')
 fields = {field['name']: field['type'] for field in node['fieldsList']}
 assert fields['name'] == 'FULL_NAME', fields
@@ -85,8 +85,12 @@ company = next(edge['node'] for edge in objects if edge['node']['nameSingular'] 
 company_fields = {field['name']: field['type'] for field in company['fieldsList']}
 assert company_fields['domainName'] == 'LINKS', company_fields
 assert company_fields['annualRevenue'] == 'CURRENCY', company_fields
+opportunity = next(edge['node'] for edge in objects if edge['node']['nameSingular'] == 'opportunity')
+opportunity_fields = {field['name']: field['type'] for field in opportunity['fieldsList']}
+assert opportunity_fields['stage'] == 'SELECT', opportunity_fields
+assert opportunity_fields['amount'] == 'CURRENCY', opportunity_fields
 views = body['data']['getViews']
-assert len(views) == 2, body
+assert len(views) == 3, body
 assert views[0]['name'] == 'All people', body
 assert views[0]['type'] == 'TABLE', body
 assert len(views[0]['viewFields']) == 5, body

@@ -15,8 +15,9 @@ use base64::Engine;
 use serde::Deserialize;
 use serde_json::json;
 use squid_core::{
-    AppError, AppResult, Company, CreateCompanyInput, CreatePersonInput, DateOp, FilterExpr,
-    FindManyResponse, PageInfo, Person, StringOp, UpdateCompanyInput, UpdatePersonInput, UuidOp,
+    AppError, AppResult, Company, CreateCompanyInput, CreateOpportunityInput, CreatePersonInput,
+    DateOp, FilterExpr, FindManyResponse, Opportunity, PageInfo, Person, StringOp,
+    UpdateCompanyInput, UpdateOpportunityInput, UpdatePersonInput, UuidOp,
 };
 use squid_db::{OrderTerm, PersonColumn};
 use uuid::Uuid;
@@ -435,6 +436,177 @@ pub async fn restore_company(
         .map_err(AppError::Internal)?
         .ok_or_else(|| AppError::NotFound("Record not found".to_string()))?;
     Ok(Json(json!({ "data": { "restoreCompany": company } })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ListOpportunitiesParams {
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+    pub starting_after: Option<String>,
+    pub ending_before: Option<String>,
+    pub order_by: Option<String>,
+    pub filter: Option<String>,
+}
+
+pub async fn list_opportunities(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<ListOpportunitiesParams>,
+) -> AppResult<Json<FindManyResponse<Opportunity>>> {
+    let auth = require(&state, &headers).await?;
+    let _ = (&params.order_by, &params.filter);
+
+    let limit = params
+        .limit
+        .unwrap_or(20)
+        .clamp(1, state.config.max_page_size);
+    let mut offset = params.offset.unwrap_or(0).max(0);
+    let starting_after = params
+        .starting_after
+        .as_deref()
+        .map(decode_cursor)
+        .transpose()?;
+    let ending_before = params
+        .ending_before
+        .as_deref()
+        .map(decode_cursor)
+        .transpose()?;
+
+    let (mut opportunities, total) = state
+        .db
+        .list_opportunities(auth.workspace_id, 10_000, 0)
+        .await
+        .map_err(AppError::Internal)?;
+
+    if let Some(after) = starting_after {
+        if let Some(index) = opportunities.iter().position(|row| row.id == after) {
+            opportunities.drain(..=index);
+            offset = 0;
+        }
+    }
+    if let Some(before) = ending_before {
+        if let Some(index) = opportunities.iter().position(|row| row.id == before) {
+            opportunities.truncate(index);
+        }
+    }
+
+    let start = (offset as usize).min(opportunities.len());
+    let end = (start + limit as usize).min(opportunities.len());
+    let has_next_page = end < opportunities.len();
+    let has_previous_page = start > 0 || starting_after.is_some();
+    let page: Vec<Opportunity> = opportunities[start..end].to_vec();
+
+    let start_cursor = page.first().map(|row| encode_cursor(row.id));
+    let end_cursor = page.last().map(|row| encode_cursor(row.id));
+
+    let mut data = BTreeMap::new();
+    data.insert("opportunities".to_string(), page);
+
+    Ok(Json(FindManyResponse {
+        data,
+        total_count: total.max(0) as u64,
+        page_info: PageInfo {
+            has_next_page,
+            has_previous_page,
+            start_cursor,
+            end_cursor,
+        },
+    }))
+}
+
+pub async fn get_opportunity(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<serde_json::Value>> {
+    let auth = require(&state, &headers).await?;
+    let opportunity = state
+        .db
+        .get_opportunity(auth.workspace_id, id)
+        .await
+        .map_err(AppError::Internal)?
+        .ok_or_else(|| AppError::NotFound("Record not found".to_string()))?;
+    Ok(Json(json!({ "data": { "opportunity": opportunity } })))
+}
+
+pub async fn create_opportunity(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(input): Json<CreateOpportunityInput>,
+) -> AppResult<(axum::http::StatusCode, Json<serde_json::Value>)> {
+    let auth = require(&state, &headers).await?;
+    let opportunity = state
+        .db
+        .create_opportunity(auth.workspace_id, &input)
+        .await
+        .map_err(AppError::Internal)?;
+    Ok((
+        axum::http::StatusCode::CREATED,
+        Json(json!({ "data": { "createOpportunity": opportunity } })),
+    ))
+}
+
+pub async fn update_opportunity(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Json(input): Json<UpdateOpportunityInput>,
+) -> AppResult<Json<serde_json::Value>> {
+    let auth = require(&state, &headers).await?;
+    let opportunity = state
+        .db
+        .update_opportunity(auth.workspace_id, id, &input)
+        .await
+        .map_err(AppError::Internal)?
+        .ok_or_else(|| AppError::NotFound("Record not found".to_string()))?;
+    Ok(Json(
+        json!({ "data": { "updateOpportunity": opportunity } }),
+    ))
+}
+
+pub async fn delete_opportunity(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Query(params): Query<DeletePersonParams>,
+) -> AppResult<Json<serde_json::Value>> {
+    let auth = require(&state, &headers).await?;
+    let deleted = if params.soft_delete {
+        state
+            .db
+            .soft_delete_opportunity(auth.workspace_id, id)
+            .await
+            .map_err(AppError::Internal)?
+    } else {
+        state
+            .db
+            .destroy_opportunity(auth.workspace_id, id)
+            .await
+            .map_err(AppError::Internal)?
+    };
+    if !deleted {
+        return Err(AppError::NotFound("Record not found".to_string()));
+    }
+    Ok(Json(
+        json!({ "data": { "deleteOpportunity": { "id": id } } }),
+    ))
+}
+
+pub async fn restore_opportunity(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<serde_json::Value>> {
+    let auth = require(&state, &headers).await?;
+    let opportunity = state
+        .db
+        .restore_opportunity(auth.workspace_id, id)
+        .await
+        .map_err(AppError::Internal)?
+        .ok_or_else(|| AppError::NotFound("Record not found".to_string()))?;
+    Ok(Json(
+        json!({ "data": { "restoreOpportunity": opportunity } }),
+    ))
 }
 
 pub async fn me(

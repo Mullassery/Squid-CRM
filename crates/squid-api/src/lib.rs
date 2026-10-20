@@ -124,6 +124,20 @@ pub fn app(state: AppState) -> Router {
                 .delete(rest::delete_company),
         )
         .route("/rest/companies/{id}/restore", patch(rest::restore_company))
+        .route(
+            "/rest/opportunities",
+            get(rest::list_opportunities).post(rest::create_opportunity),
+        )
+        .route(
+            "/rest/opportunities/{id}",
+            get(rest::get_opportunity)
+                .patch(rest::update_opportunity)
+                .delete(rest::delete_opportunity),
+        )
+        .route(
+            "/rest/opportunities/{id}/restore",
+            patch(rest::restore_opportunity),
+        )
         .route("/rest/me", get(rest::me))
         .route("/auth/signup", post(auth::signup))
         .route("/auth/signin", post(auth::signin))

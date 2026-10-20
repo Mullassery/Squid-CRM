@@ -301,6 +301,8 @@ Known remaining divergences (do not claim parity):
 | Workspace bootstrap | `PENDING_CREATION` + `activateWorkspace` | atomic signup + immediate schema | document; add lifecycle |
 | Company filters | full `CompanyFilterInput` with relations | `id`/`name` only | extend as company relations land |
 | Company ordering | GraphQL `orderBy` + REST `order_by` | accepted but stable name order | implement whitelisted company sorts |
+| Opportunity filters | full scalar + relation filters | scalar `id`/`name`/`stage`/`closeDate`/`companyId`/`pointOfContactId`/`ownerId` | add relation filters |
+| Opportunity ordering | GraphQL `orderBy` + REST `order_by` | accepted but stable name order | implement whitelisted opportunity sorts |
 | Workspace prefill | sample people/companies on activation | none (new workspace has 0 people) | implement prefill |
 | Filter coverage | all person fields/relations | scalar person fields (`id`, name, email, jobTitle, timestamps); relation filters absent | expand as metadata lands |
 | REST sort/filter errors | `FIELD_NOT_FOUND` for unknown fields | `400 BadRequestException` text | align error code |

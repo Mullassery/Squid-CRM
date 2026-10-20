@@ -1329,7 +1329,7 @@ async fn metadata_objects_match_frontend_fragment() {
         let objects = response.body["data"]["objects"]["edges"]
             .as_array()
             .unwrap();
-        assert_eq!(objects.len(), 2, "seed must be idempotent");
+        assert_eq!(objects.len(), 3, "seed must be idempotent");
         let object = objects
             .iter()
             .map(|edge| &edge["node"])
@@ -1983,4 +1983,136 @@ async fn company_crud_rest_and_graphql() {
     .await;
     assert_eq!(destroyed.status, StatusCode::OK, "body: {}", destroyed.body);
     assert_eq!(destroyed.body["data"]["destroyCompany"]["id"], id);
+}
+
+#[tokio::test]
+async fn opportunity_crud_rest_and_graphql() {
+    let app = test_app().await;
+    let email = unique_email("opportunity");
+    let (token, _workspace) = signup(&app, &email).await;
+
+    let created = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/opportunities",
+            &token,
+            Some(json!({
+                "name": "Enterprise renewal",
+                "amount": { "amountMicros": 9000000, "currencyCode": "USD" },
+                "closeDate": "2026-12-31T00:00:00Z",
+                "stage": "MEETING"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        created.status,
+        StatusCode::CREATED,
+        "body: {}",
+        created.body
+    );
+    let opportunity = &created.body["data"]["createOpportunity"];
+    assert_eq!(opportunity["name"], "Enterprise renewal");
+    assert_eq!(opportunity["amount"]["amountMicros"], 9000000);
+    assert_eq!(opportunity["stage"], "MEETING");
+    assert!(opportunity["closeDate"]
+        .as_str()
+        .unwrap()
+        .starts_with("2026-12-31T00:00:00"));
+    let id = opportunity["id"]
+        .as_str()
+        .expect("opportunity id")
+        .to_string();
+
+    let listed = send(&app, authorized("GET", "/rest/opportunities", &token, None)).await;
+    assert_eq!(listed.status, StatusCode::OK);
+    assert_eq!(listed.body["totalCount"], 1);
+    assert_eq!(
+        listed.body["data"]["opportunities"][0]["id"], id,
+        "list envelope: {}",
+        listed.body
+    );
+
+    let updated = send(
+        &app,
+        authorized(
+            "PATCH",
+            &format!("/rest/opportunities/{id}"),
+            &token,
+            Some(json!({ "stage": "PROPOSAL", "name": "Enterprise renewal 2027" })),
+        ),
+    )
+    .await;
+    assert_eq!(updated.status, StatusCode::OK, "body: {}", updated.body);
+    assert_eq!(
+        updated.body["data"]["updateOpportunity"]["stage"],
+        "PROPOSAL"
+    );
+    assert_eq!(
+        updated.body["data"]["updateOpportunity"]["amount"]["currencyCode"],
+        "USD"
+    );
+
+    let filtered = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "{ opportunities(filter: { stage: { eq: PROPOSAL } }) { totalCount edges { node { id name stage closeDate amount { amountMicros currencyCode } } } } }"
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(filtered.status, StatusCode::OK, "body: {}", filtered.body);
+    assert_eq!(filtered.body["data"]["opportunities"]["totalCount"], 1);
+    let node = &filtered.body["data"]["opportunities"]["edges"][0]["node"];
+    assert_eq!(node["stage"], "PROPOSAL");
+    assert_eq!(node["amount"]["amountMicros"], 9000000);
+    assert!(node["closeDate"]
+        .as_str()
+        .unwrap()
+        .starts_with("2026-12-31T00:00:00"));
+
+    let filtered_out = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "{ opportunities(filter: { stage: { eq: CUSTOMER } }) { totalCount } }"
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(
+        filtered_out.body["data"]["opportunities"]["totalCount"], 0,
+        "body: {}",
+        filtered_out.body
+    );
+
+    let destroyed = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": format!("mutation {{ destroyOpportunity(id: \"{id}\") {{ id stage }} }}")
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(destroyed.status, StatusCode::OK, "body: {}", destroyed.body);
+    assert_eq!(destroyed.body["data"]["destroyOpportunity"]["id"], id);
+
+    let gone = send(
+        &app,
+        authorized("GET", &format!("/rest/opportunities/{id}"), &token, None),
+    )
+    .await;
+    assert_eq!(gone.status, StatusCode::NOT_FOUND);
 }

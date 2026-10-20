@@ -15,10 +15,11 @@ use chrono::{DateTime, Utc};
 use squid_auth::AuthToken;
 use squid_auth::{hash_password, hash_token, verify_password, AuthContext};
 use squid_core::{
-    Address, ApiKey, AppError, AppResult, Company, CreateCompanyInput, CreatePersonInput, Currency,
-    CursorPagingInput, DateOp, FieldConnection, FieldFilterInput, FieldMetadata, FilterExpr,
-    GqlJson, Links, ObjectConnection, ObjectEdge, ObjectFilterInput, ObjectMetadata, PageInfo,
-    Person, Role, StringOp, UpdateCompanyInput, UpdatePersonInput, User as CoreUser, UuidOp, View,
+    Address, ApiKey, AppError, AppResult, Company, CreateCompanyInput, CreateOpportunityInput,
+    CreatePersonInput, Currency, CursorPagingInput, DateOp, FieldConnection, FieldFilterInput,
+    FieldMetadata, FilterExpr, GqlJson, Links, ObjectConnection, ObjectEdge, ObjectFilterInput,
+    ObjectMetadata, Opportunity, OpportunityStage, PageInfo, Person, Role, StringOp,
+    UpdateCompanyInput, UpdateOpportunityInput, UpdatePersonInput, User as CoreUser, UuidOp, View,
     ViewType,
 };
 use squid_db::{OrderTerm, PersonColumn};
@@ -585,6 +586,95 @@ impl From<UpdateCompanyInputGql> for UpdateCompanyInput {
     }
 }
 
+#[derive(Debug, InputObject)]
+pub struct CreateOpportunityInputGql {
+    pub name: Option<String>,
+    pub amount: Option<CurrencyInput>,
+    pub close_date: Option<DateTime<Utc>>,
+    pub stage: Option<OpportunityStage>,
+    pub position: Option<f64>,
+    pub company_id: Option<Uuid>,
+    pub point_of_contact_id: Option<Uuid>,
+    pub owner_id: Option<Uuid>,
+}
+
+impl From<CreateOpportunityInputGql> for CreateOpportunityInput {
+    fn from(input: CreateOpportunityInputGql) -> Self {
+        CreateOpportunityInput {
+            name: input.name,
+            amount: input.amount.map(Into::into),
+            close_date: input.close_date,
+            stage: input.stage,
+            position: input.position,
+            company_id: input.company_id,
+            point_of_contact_id: input.point_of_contact_id,
+            owner_id: input.owner_id,
+        }
+    }
+}
+
+#[derive(Debug, InputObject)]
+pub struct UpdateOpportunityInputGql {
+    pub name: Option<String>,
+    pub amount: Option<CurrencyInput>,
+    pub close_date: Option<DateTime<Utc>>,
+    pub stage: Option<OpportunityStage>,
+    pub position: Option<f64>,
+    pub company_id: Option<Uuid>,
+    pub point_of_contact_id: Option<Uuid>,
+    pub owner_id: Option<Uuid>,
+}
+
+impl From<UpdateOpportunityInputGql> for UpdateOpportunityInput {
+    fn from(input: UpdateOpportunityInputGql) -> Self {
+        UpdateOpportunityInput {
+            name: input.name,
+            amount: input.amount.map(Into::into),
+            close_date: input.close_date,
+            stage: input.stage,
+            position: input.position,
+            company_id: input.company_id,
+            point_of_contact_id: input.point_of_contact_id,
+            owner_id: input.owner_id,
+        }
+    }
+}
+
+#[derive(Debug, Default, InputObject)]
+pub struct OpportunityStageFilter {
+    pub eq: Option<OpportunityStage>,
+    pub neq: Option<OpportunityStage>,
+    pub r#in: Option<Vec<OpportunityStage>>,
+    pub is: Option<FilterIs>,
+}
+
+#[derive(Debug, Default, InputObject)]
+pub struct OpportunityFilterInput {
+    pub id: Option<UuidFilter>,
+    pub name: Option<StringFilter>,
+    pub close_date: Option<DateTimeFilter>,
+    pub stage: Option<OpportunityStageFilter>,
+    pub company_id: Option<UuidFilter>,
+    pub point_of_contact_id: Option<UuidFilter>,
+    pub owner_id: Option<UuidFilter>,
+    pub and: Option<Vec<OpportunityFilterInput>>,
+    pub or: Option<Vec<OpportunityFilterInput>>,
+    pub not: Option<Box<OpportunityFilterInput>>,
+}
+
+#[derive(Debug, SimpleObject)]
+pub struct OpportunityEdge {
+    pub node: Opportunity,
+    pub cursor: Cursor,
+}
+
+#[derive(Debug, SimpleObject)]
+pub struct OpportunityConnection {
+    pub total_count: Option<i64>,
+    pub edges: Vec<OpportunityEdge>,
+    pub page_info: PageInfo,
+}
+
 #[derive(Debug, Default, InputObject)]
 pub struct CompanyFilterInput {
     pub id: Option<UuidFilter>,
@@ -856,6 +946,129 @@ fn require_auth<'a>(ctx: &'a Context<'_>) -> async_graphql::Result<&'a AuthConte
             "Authentication required".to_string(),
         ))
     })
+}
+
+fn opportunity_matches(opportunity: &Opportunity, filter: &OpportunityFilterInput) -> bool {
+    if let Some(and) = filter.and.as_ref() {
+        if !and.iter().all(|f| opportunity_matches(opportunity, f)) {
+            return false;
+        }
+    }
+    if let Some(or) = filter.or.as_ref() {
+        if !or.iter().any(|f| opportunity_matches(opportunity, f)) {
+            return false;
+        }
+    }
+    if let Some(not) = filter.not.as_ref() {
+        if opportunity_matches(opportunity, not) {
+            return false;
+        }
+    }
+    if let Some(id) = filter.id.as_ref() {
+        if let Some(eq) = id.eq {
+            if opportunity.id != eq {
+                return false;
+            }
+        }
+        if let Some(neq) = id.neq {
+            if opportunity.id == neq {
+                return false;
+            }
+        }
+        if let Some(list) = id.r#in.as_ref() {
+            if !list.contains(&opportunity.id) {
+                return false;
+            }
+        }
+    }
+    if let Some(name) = filter.name.as_ref() {
+        let value = opportunity.name.as_deref().unwrap_or_default();
+        if let Some(eq) = name.eq.as_deref() {
+            if value != eq {
+                return false;
+            }
+        }
+        if let Some(neq) = name.neq.as_deref() {
+            if value == neq {
+                return false;
+            }
+        }
+        if let Some(like) = name.ilike.as_deref() {
+            let needle = like.trim_matches('%').to_lowercase();
+            if !value.to_lowercase().contains(&needle) {
+                return false;
+            }
+        }
+        if let Some(starts_with) = name.starts_with.as_deref() {
+            if !value
+                .to_lowercase()
+                .starts_with(&starts_with.to_lowercase())
+            {
+                return false;
+            }
+        }
+    }
+    if let Some(stage) = filter.stage.as_ref() {
+        if let Some(eq) = stage.eq {
+            if opportunity.stage != eq {
+                return false;
+            }
+        }
+        if let Some(neq) = stage.neq {
+            if opportunity.stage == neq {
+                return false;
+            }
+        }
+        if let Some(list) = stage.r#in.as_ref() {
+            if !list.contains(&opportunity.stage) {
+                return false;
+            }
+        }
+    }
+    if let Some(close_date) = filter.close_date.as_ref() {
+        if let Some(eq) = close_date.eq {
+            if opportunity.close_date != Some(eq) {
+                return false;
+            }
+        }
+        if let Some(gte) = close_date.gte {
+            if opportunity.close_date.is_none_or(|date| date < gte) {
+                return false;
+            }
+        }
+        if let Some(lte) = close_date.lte {
+            if opportunity.close_date.is_none_or(|date| date > lte) {
+                return false;
+            }
+        }
+    }
+    if let Some(company_id) = filter.company_id.as_ref() {
+        if let Some(eq) = company_id.eq {
+            if opportunity.company_id != Some(eq) {
+                return false;
+            }
+        }
+        if let Some(neq) = company_id.neq {
+            if opportunity.company_id == Some(neq) {
+                return false;
+            }
+        }
+    }
+    if let Some(contact) = filter.point_of_contact_id.as_ref() {
+        if let Some(eq) = contact.eq {
+            if opportunity.point_of_contact_id != Some(eq) {
+                return false;
+            }
+        }
+    }
+    if let Some(owner) = filter.owner_id.as_ref() {
+        if let Some(eq) = owner.eq {
+            if opportunity.owner_id != Some(eq) {
+                return false;
+            }
+        }
+    }
+    true
 }
 
 fn company_matches(company: &Company, filter: &CompanyFilterInput) -> bool {
@@ -1242,6 +1455,102 @@ impl QueryRoot {
         Ok(companies
             .into_iter()
             .find(|company| company_matches(company, &filter)))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn opportunities(
+        &self,
+        ctx: &Context<'_>,
+        first: Option<i64>,
+        last: Option<i64>,
+        offset: Option<i64>,
+        before: Option<String>,
+        after: Option<String>,
+        filter: Option<OpportunityFilterInput>,
+        order_by: Option<Vec<serde_json::Value>>,
+    ) -> async_graphql::Result<OpportunityConnection> {
+        let auth = require_auth(ctx)?;
+        let _ = order_by;
+        let (mut all, _) = state(ctx)
+            .db
+            .list_opportunities(auth.workspace_id, 10_000, 0)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        let filter = filter.unwrap_or_default();
+        all.retain(|opportunity| opportunity_matches(opportunity, &filter));
+
+        let total = all.len() as i64;
+        let limit = first
+            .or(last)
+            .unwrap_or(20)
+            .clamp(1, state(ctx).config.max_page_size) as usize;
+        let offset = offset.unwrap_or(0).max(0) as usize;
+
+        let starting_after = after
+            .as_deref()
+            .map(crate::rest::decode_cursor)
+            .transpose()
+            .map_err(gql_err)?;
+        let ending_before = before
+            .as_deref()
+            .map(crate::rest::decode_cursor)
+            .transpose()
+            .map_err(gql_err)?;
+
+        if let Some(after) = starting_after {
+            if let Some(index) = all.iter().position(|opportunity| opportunity.id == after) {
+                all.drain(..=index);
+            }
+        }
+        if let Some(before) = ending_before {
+            if let Some(index) = all.iter().position(|opportunity| opportunity.id == before) {
+                all.truncate(index);
+            }
+        }
+
+        let start = offset.min(all.len());
+        let end = (start + limit).min(all.len());
+        let has_next_page = end < all.len();
+        let has_previous_page = start > 0 || starting_after.is_some();
+        let edges = all[start..end]
+            .iter()
+            .cloned()
+            .map(|opportunity| OpportunityEdge {
+                cursor: Cursor(crate::rest::encode_cursor(opportunity.id)),
+                node: opportunity,
+            })
+            .collect();
+
+        Ok(OpportunityConnection {
+            total_count: Some(total),
+            edges,
+            page_info: PageInfo {
+                has_next_page,
+                has_previous_page,
+                start_cursor: all
+                    .get(start)
+                    .map(|opportunity| crate::rest::encode_cursor(opportunity.id)),
+                end_cursor: all
+                    .get(end.saturating_sub(1))
+                    .map(|opportunity| crate::rest::encode_cursor(opportunity.id)),
+            },
+        })
+    }
+
+    async fn opportunity(
+        &self,
+        ctx: &Context<'_>,
+        filter: OpportunityFilterInput,
+    ) -> async_graphql::Result<Option<Opportunity>> {
+        let auth = require_auth(ctx)?;
+        let (opportunities, _) = state(ctx)
+            .db
+            .list_opportunities(auth.workspace_id, 10_000, 0)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        Ok(opportunities
+            .into_iter()
+            .find(|opportunity| opportunity_matches(opportunity, &filter)))
     }
 
     async fn person(
@@ -1816,6 +2125,94 @@ impl MutationRoot {
         state(ctx)
             .db
             .restore_company(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))
+    }
+
+    async fn create_opportunity(
+        &self,
+        ctx: &Context<'_>,
+        data: CreateOpportunityInputGql,
+        #[graphql(default)] _upsert: bool,
+        _share_with: Option<Vec<ShareWithInput>>,
+    ) -> async_graphql::Result<Opportunity> {
+        let auth = require_auth(ctx)?;
+        let input: CreateOpportunityInput = data.into();
+        state(ctx)
+            .db
+            .create_opportunity(auth.workspace_id, &input)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))
+    }
+
+    async fn update_opportunity(
+        &self,
+        ctx: &Context<'_>,
+        id: Uuid,
+        data: UpdateOpportunityInputGql,
+    ) -> async_graphql::Result<Opportunity> {
+        let auth = require_auth(ctx)?;
+        let input: UpdateOpportunityInput = data.into();
+        state(ctx)
+            .db
+            .update_opportunity(auth.workspace_id, id, &input)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))
+    }
+
+    async fn delete_opportunity(
+        &self,
+        ctx: &Context<'_>,
+        id: Uuid,
+    ) -> async_graphql::Result<Opportunity> {
+        let auth = require_auth(ctx)?;
+        let state = state(ctx);
+        let opportunity = state
+            .db
+            .get_opportunity(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))?;
+        state
+            .db
+            .soft_delete_opportunity(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        Ok(opportunity)
+    }
+
+    async fn destroy_opportunity(
+        &self,
+        ctx: &Context<'_>,
+        id: Uuid,
+    ) -> async_graphql::Result<Opportunity> {
+        let auth = require_auth(ctx)?;
+        let state = state(ctx);
+        let opportunity = state
+            .db
+            .get_opportunity(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))?;
+        state
+            .db
+            .destroy_opportunity(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        Ok(opportunity)
+    }
+
+    async fn restore_opportunity(
+        &self,
+        ctx: &Context<'_>,
+        id: Uuid,
+    ) -> async_graphql::Result<Opportunity> {
+        let auth = require_auth(ctx)?;
+        state(ctx)
+            .db
+            .restore_opportunity(auth.workspace_id, id)
             .await
             .map_err(|e| gql_err(AppError::Internal(e)))?
             .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))

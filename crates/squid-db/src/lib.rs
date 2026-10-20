@@ -11,11 +11,12 @@ use serde::de::DeserializeOwned;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
 use squid_core::{
-    Actor, AggregateOperations, ApiKey, Company, CreateCompanyInput, CreatePersonInput, DateOp,
-    Emails, FieldMetadata, FieldMetadataType, FilterExpr, FullName, MetadataReadability,
-    MetadataWritability, ObjectMetadata, ObjectOpenRecordIn, ObjectSharingReach, Person, Role,
-    StringOp, UpdateCompanyInput, UpdatePersonInput, User, UuidOp, View, ViewCalendarLayout,
-    ViewField, ViewKey, ViewOpenRecordIn, ViewType, ViewVisibility, Workspace,
+    Actor, AggregateOperations, ApiKey, Company, CreateCompanyInput, CreateOpportunityInput,
+    CreatePersonInput, DateOp, Emails, FieldMetadata, FieldMetadataType, FilterExpr, FullName,
+    MetadataReadability, MetadataWritability, ObjectMetadata, ObjectOpenRecordIn,
+    ObjectSharingReach, Opportunity, OpportunityStage, Person, Role, StringOp, UpdateCompanyInput,
+    UpdateOpportunityInput, UpdatePersonInput, User, UuidOp, View, ViewCalendarLayout, ViewField,
+    ViewKey, ViewOpenRecordIn, ViewType, ViewVisibility, Workspace,
 };
 use uuid::Uuid;
 
@@ -24,6 +25,8 @@ const WORKSPACE_PERSON_SQL: &str = include_str!("../migrations/workspace/0001_pe
 const WORKSPACE_PERSON_CONTRACT_SQL: &str =
     include_str!("../migrations/workspace/0002_person_contract.sql");
 const WORKSPACE_COMPANY_SQL: &str = include_str!("../migrations/workspace/0003_company.sql");
+const WORKSPACE_OPPORTUNITY_SQL: &str =
+    include_str!("../migrations/workspace/0004_opportunity.sql");
 const CORE_API_KEYS_SQL: &str = include_str!("../migrations/core/0002_api_keys.sql");
 const CORE_METADATA_SQL: &str = include_str!("../migrations/core/0003_metadata.sql");
 const CORE_VIEWS_SQL: &str = include_str!("../migrations/core/0004_views.sql");
@@ -652,6 +655,7 @@ impl Db {
             WORKSPACE_PERSON_SQL,
             WORKSPACE_PERSON_CONTRACT_SQL,
             WORKSPACE_COMPANY_SQL,
+            WORKSPACE_OPPORTUNITY_SQL,
         ] {
             let ddl = ddl.replace("{{schema}}", &schema);
             sqlx::raw_sql(&ddl).execute(&self.pool).await?;
@@ -1263,6 +1267,7 @@ impl Db {
     pub async fn ensure_standard_metadata(&self, workspace_id: Uuid) -> anyhow::Result<()> {
         self.ensure_person_metadata(workspace_id).await?;
         self.ensure_company_metadata(workspace_id).await?;
+        self.ensure_opportunity_metadata(workspace_id).await?;
         Ok(())
     }
 
@@ -1377,6 +1382,308 @@ impl Db {
         let ddl = WORKSPACE_COMPANY_SQL.replace("{{schema}}", &schema);
         sqlx::raw_sql(&ddl).execute(&self.pool).await?;
         Ok(())
+    }
+
+    pub async fn ensure_opportunity_metadata(&self, workspace_id: Uuid) -> anyhow::Result<()> {
+        self.ensure_workspace_opportunity_table(workspace_id)
+            .await?;
+        let mut tx = self.pool.begin().await?;
+
+        sqlx::query(
+            "INSERT INTO core.object_metadata
+                (workspace_id, name_singular, name_plural, label_singular, label_plural,
+                 description, icon, color, shortcut, is_remote, is_active, is_system,
+                 is_ui_editable, is_ui_creatable, is_searchable, open_record_in,
+                 readability, sharing_reach, writability, is_label_synced_with_name)
+             VALUES ($1, 'opportunity', 'opportunities', 'Opportunity', 'Opportunities', NULL,
+                     'IconTargetArrow', 'yellow', 'o', false, true, true, true,
+                     true, true, 'SIDE_PANEL', 'OPEN', 'ROLE_ACCESS', 'OPEN', false)
+             ON CONFLICT (workspace_id, name_singular) DO NOTHING",
+        )
+        .bind(workspace_id)
+        .execute(&mut *tx)
+        .await?;
+
+        let object_id: Uuid = sqlx::query(
+            "SELECT id FROM core.object_metadata
+             WHERE workspace_id = $1 AND name_singular = 'opportunity'",
+        )
+        .bind(workspace_id)
+        .fetch_one(&mut *tx)
+        .await?
+        .get("id");
+
+        for field in OPPORTUNITY_METADATA_FIELDS {
+            sqlx::query(
+                "INSERT INTO core.field_metadata
+                    (workspace_id, object_metadata_id, type, name, label, is_system,
+                     is_ui_editable, is_nullable, is_unique, is_searchable, is_audit_logged)
+                 VALUES ($1, $2, $3, $4, $5, true, true, $6, $7, $8, true)
+                 ON CONFLICT (object_metadata_id, name) DO NOTHING",
+            )
+            .bind(workspace_id)
+            .bind(object_id)
+            .bind(field.field_type.as_str())
+            .bind(field.name)
+            .bind(field.label)
+            .bind(field.nullable)
+            .bind(field.unique)
+            .bind(field.searchable)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        sqlx::query(
+            "UPDATE core.object_metadata
+             SET label_identifier_field_metadata_id = (
+                    SELECT id FROM core.field_metadata
+                    WHERE object_metadata_id = $1 AND name = 'name')
+             WHERE id = $1 AND label_identifier_field_metadata_id IS NULL",
+        )
+        .bind(object_id)
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query(
+            "INSERT INTO core.views
+                (workspace_id, name, object_metadata_id, type, key, icon, position,
+                 is_compact, is_custom, open_record_in, should_hide_empty_groups,
+                 visibility, is_active)
+             VALUES ($1, 'All opportunities', $2, 'TABLE', 'INDEX', 'IconList', 0,
+                     false, false, 'SIDE_PANEL', false, 'WORKSPACE', true)
+             ON CONFLICT (workspace_id, object_metadata_id, key) DO NOTHING",
+        )
+        .bind(workspace_id)
+        .bind(object_id)
+        .execute(&mut *tx)
+        .await?;
+
+        let view_id: Uuid = sqlx::query(
+            "SELECT id FROM core.views
+             WHERE workspace_id = $1 AND object_metadata_id = $2 AND key = 'INDEX'",
+        )
+        .bind(workspace_id)
+        .bind(object_id)
+        .fetch_one(&mut *tx)
+        .await?
+        .get("id");
+
+        for (position, (field_name, size)) in DEFAULT_OPPORTUNITY_VIEW_FIELDS.iter().enumerate() {
+            sqlx::query(
+                "INSERT INTO core.view_fields
+                    (workspace_id, view_id, field_metadata_id, position, size)
+                 SELECT $1, $2, id, $3, $4 FROM core.field_metadata
+                 WHERE object_metadata_id = $5 AND name = $6
+                 ON CONFLICT (view_id, field_metadata_id) DO NOTHING",
+            )
+            .bind(workspace_id)
+            .bind(view_id)
+            .bind(position as f64)
+            .bind(*size)
+            .bind(object_id)
+            .bind(*field_name)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn ensure_workspace_opportunity_table(
+        &self,
+        workspace_id: Uuid,
+    ) -> anyhow::Result<()> {
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let ddl = WORKSPACE_OPPORTUNITY_SQL.replace("{{schema}}", &schema);
+        sqlx::raw_sql(&ddl).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    // ----- opportunities -------------------------------------------------
+
+    pub async fn create_opportunity(
+        &self,
+        workspace_id: Uuid,
+        input: &CreateOpportunityInput,
+    ) -> anyhow::Result<Opportunity> {
+        self.ensure_workspace_opportunity_table(workspace_id)
+            .await?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let amount = input.amount.clone().unwrap_or_default();
+        let stage = input.stage.unwrap_or_default();
+        let actor = Actor::default();
+        let search_vector = squid_core::opportunity_search_vector(input.name.as_deref());
+
+        let row = sqlx::query(&format!(
+            "INSERT INTO {schema}.opportunity
+                (name, amount, close_date, stage, position, created_by, updated_by,
+                 search_vector, company_id, point_of_contact_id, owner_id)
+             VALUES ($1, $2::jsonb, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9, $10, $11)
+             RETURNING {OPPORTUNITY_SELECT}"
+        ))
+        .bind(&input.name)
+        .bind(serde_json::to_string(&amount)?)
+        .bind(input.close_date)
+        .bind(stage.as_str())
+        .bind(input.position.unwrap_or(0.0))
+        .bind(serde_json::to_string(&actor)?)
+        .bind(serde_json::to_string(&actor)?)
+        .bind(search_vector)
+        .bind(input.company_id)
+        .bind(input.point_of_contact_id)
+        .bind(input.owner_id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row_to_opportunity(&row))
+    }
+
+    pub async fn get_opportunity(
+        &self,
+        workspace_id: Uuid,
+        opportunity_id: Uuid,
+    ) -> anyhow::Result<Option<Opportunity>> {
+        self.ensure_workspace_opportunity_table(workspace_id)
+            .await?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let row = sqlx::query(&format!(
+            "SELECT {OPPORTUNITY_SELECT} FROM {schema}.opportunity
+             WHERE id = $1 AND deleted_at IS NULL"
+        ))
+        .bind(opportunity_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.as_ref().map(row_to_opportunity))
+    }
+
+    pub async fn update_opportunity(
+        &self,
+        workspace_id: Uuid,
+        opportunity_id: Uuid,
+        input: &UpdateOpportunityInput,
+    ) -> anyhow::Result<Option<Opportunity>> {
+        let Some(current) = self.get_opportunity(workspace_id, opportunity_id).await? else {
+            return Ok(None);
+        };
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let name = input.name.clone().or(current.name);
+        let amount = input.amount.clone().unwrap_or(current.amount);
+        let close_date = input.close_date.or(current.close_date);
+        let stage = input.stage.unwrap_or(current.stage);
+        let position = input.position.unwrap_or(current.position);
+        let company_id = input.company_id.or(current.company_id);
+        let point_of_contact_id = input.point_of_contact_id.or(current.point_of_contact_id);
+        let owner_id = input.owner_id.or(current.owner_id);
+        let search_vector = squid_core::opportunity_search_vector(name.as_deref());
+
+        let row = sqlx::query(&format!(
+            "UPDATE {schema}.opportunity
+             SET name = $2, amount = $3::jsonb, close_date = $4, stage = $5,
+                 position = $6, search_vector = $7, company_id = $8,
+                 point_of_contact_id = $9, owner_id = $10, updated_at = now()
+             WHERE id = $1 AND deleted_at IS NULL
+             RETURNING {OPPORTUNITY_SELECT}"
+        ))
+        .bind(opportunity_id)
+        .bind(&name)
+        .bind(serde_json::to_string(&amount)?)
+        .bind(close_date)
+        .bind(stage.as_str())
+        .bind(position)
+        .bind(search_vector)
+        .bind(company_id)
+        .bind(point_of_contact_id)
+        .bind(owner_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.as_ref().map(row_to_opportunity))
+    }
+
+    pub async fn soft_delete_opportunity(
+        &self,
+        workspace_id: Uuid,
+        opportunity_id: Uuid,
+    ) -> anyhow::Result<bool> {
+        self.ensure_workspace_opportunity_table(workspace_id)
+            .await?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let result = sqlx::query(&format!(
+            "UPDATE {schema}.opportunity SET deleted_at = now(), updated_at = now()
+             WHERE id = $1 AND deleted_at IS NULL"
+        ))
+        .bind(opportunity_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    pub async fn destroy_opportunity(
+        &self,
+        workspace_id: Uuid,
+        opportunity_id: Uuid,
+    ) -> anyhow::Result<bool> {
+        self.ensure_workspace_opportunity_table(workspace_id)
+            .await?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let result = sqlx::query(&format!("DELETE FROM {schema}.opportunity WHERE id = $1"))
+            .bind(opportunity_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    pub async fn restore_opportunity(
+        &self,
+        workspace_id: Uuid,
+        opportunity_id: Uuid,
+    ) -> anyhow::Result<Option<Opportunity>> {
+        self.ensure_workspace_opportunity_table(workspace_id)
+            .await?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let row = sqlx::query(&format!(
+            "UPDATE {schema}.opportunity SET deleted_at = NULL, updated_at = now()
+             WHERE id = $1 AND deleted_at IS NOT NULL
+             RETURNING {OPPORTUNITY_SELECT}"
+        ))
+        .bind(opportunity_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.as_ref().map(row_to_opportunity))
+    }
+
+    pub async fn list_opportunities(
+        &self,
+        workspace_id: Uuid,
+        limit: i64,
+        offset: i64,
+    ) -> anyhow::Result<(Vec<Opportunity>, i64)> {
+        self.ensure_workspace_opportunity_table(workspace_id)
+            .await?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let total: i64 = sqlx::query_scalar(&format!(
+            "SELECT count(*) FROM {schema}.opportunity WHERE deleted_at IS NULL"
+        ))
+        .fetch_one(&self.pool)
+        .await?;
+        let rows = sqlx::query(&format!(
+            "SELECT {OPPORTUNITY_SELECT} FROM {schema}.opportunity
+             WHERE deleted_at IS NULL
+             ORDER BY name NULLS LAST, created_at ASC
+             LIMIT $1 OFFSET $2"
+        ))
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok((rows.iter().map(row_to_opportunity).collect(), total))
     }
 
     // ----- companies -----------------------------------------------------
@@ -1710,6 +2017,166 @@ struct PersonFieldSeed {
     nullable: bool,
     unique: bool,
     searchable: bool,
+}
+
+const OPPORTUNITY_METADATA_FIELDS: &[PersonFieldSeed] = &[
+    PersonFieldSeed {
+        name: "id",
+        label: "ID",
+        field_type: FieldMetadataType::Uuid,
+        nullable: false,
+        unique: true,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "createdAt",
+        label: "Creation date",
+        field_type: FieldMetadataType::DateTime,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "updatedAt",
+        label: "Last update",
+        field_type: FieldMetadataType::DateTime,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "deletedAt",
+        label: "Deletion date",
+        field_type: FieldMetadataType::DateTime,
+        nullable: true,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "name",
+        label: "Name",
+        field_type: FieldMetadataType::Text,
+        nullable: true,
+        unique: false,
+        searchable: true,
+    },
+    PersonFieldSeed {
+        name: "amount",
+        label: "Amount",
+        field_type: FieldMetadataType::Currency,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "closeDate",
+        label: "Close date",
+        field_type: FieldMetadataType::DateTime,
+        nullable: true,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "stage",
+        label: "Stage",
+        field_type: FieldMetadataType::Select,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "position",
+        label: "Position",
+        field_type: FieldMetadataType::Position,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "createdBy",
+        label: "Created by",
+        field_type: FieldMetadataType::Actor,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "updatedBy",
+        label: "Updated by",
+        field_type: FieldMetadataType::Actor,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "searchVector",
+        label: "Search vector",
+        field_type: FieldMetadataType::TsVector,
+        nullable: true,
+        unique: false,
+        searchable: true,
+    },
+    PersonFieldSeed {
+        name: "companyId",
+        label: "Company",
+        field_type: FieldMetadataType::Uuid,
+        nullable: true,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "pointOfContactId",
+        label: "Point of contact",
+        field_type: FieldMetadataType::Uuid,
+        nullable: true,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "ownerId",
+        label: "Owner",
+        field_type: FieldMetadataType::Uuid,
+        nullable: true,
+        unique: false,
+        searchable: false,
+    },
+];
+
+const DEFAULT_OPPORTUNITY_VIEW_FIELDS: &[(&str, f64)] = &[
+    ("name", 180.0),
+    ("amount", 140.0),
+    ("closeDate", 160.0),
+    ("stage", 120.0),
+    ("companyId", 160.0),
+];
+
+const OPPORTUNITY_SELECT: &str = "id, created_at, updated_at, deleted_at, name, \
+     amount::text AS amount, close_date, stage, position, \
+     created_by::text AS created_by, updated_by::text AS updated_by, search_vector, \
+     company_id, point_of_contact_id, owner_id";
+
+fn row_to_opportunity(row: &sqlx::postgres::PgRow) -> Opportunity {
+    let stage: Option<String> = row.get("stage");
+    Opportunity {
+        id: row.get("id"),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+        deleted_at: row.get("deleted_at"),
+        name: row.get("name"),
+        amount: parse_json_option(row.get("amount")),
+        close_date: row.get("close_date"),
+        stage: stage
+            .as_deref()
+            .and_then(OpportunityStage::parse)
+            .unwrap_or_default(),
+        position: row.get("position"),
+        created_by: parse_json_option(row.get("created_by")),
+        updated_by: parse_json_option(row.get("updated_by")),
+        search_vector: row.get("search_vector"),
+        company_id: row.get("company_id"),
+        point_of_contact_id: row.get("point_of_contact_id"),
+        owner_id: row.get("owner_id"),
+    }
 }
 
 const COMPANY_METADATA_FIELDS: &[PersonFieldSeed] = &[
