@@ -9,7 +9,7 @@
 - [x] GraphQL login flow + person query/mutations.
 - [x] REST people list/get/create/delete with upstream envelope + error contract.
 - [x] Tenant isolation enforced and tested against real PostgreSQL.
-- [x] 15 unit + 13 integration tests passing; clippy clean; live smoke test.
+- [x] 15 unit + 14 integration tests passing; clippy clean; live smoke test.
 - [x] Dockerfile, docker-compose, CI workflow, Makefile, smoke script.
 
 ## Phase 2 (contracts)
@@ -51,8 +51,11 @@
 ## Phase 5 (module migration)
 - [x] Metadata storage (`core.object_metadata` / `core.field_metadata`) and read
       API for the standard person object/fields (frontend boot fragment passes).
-- [ ] Metadata writes, views, roles, indexes/relations, remaining standard
-      objects, and metadata-driven dynamic schema generation.
+- [x] Default person view and `getViews`/`getView` read API matching the
+      frontend `ViewFragment`.
+- [ ] Metadata writes, view writes/filters/sorts/groups, roles, indexes/relations,
+      remaining standard objects, and metadata-driven dynamic schema generation.
+- [ ] `currentUser`/`currentWorkspace` full frontend fragment (large surface).
 - [ ] Companies, opportunities, tasks, notes.
 - [ ] Views/filters/sorts/groups parity (relation filters and view semantics).
 - [ ] Search, files, export/import.

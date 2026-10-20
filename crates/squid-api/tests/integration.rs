@@ -1373,3 +1373,209 @@ async fn metadata_objects_match_frontend_fragment() {
         assert_eq!(object["imageIdentifierFieldMetadataId"], avatar_field["id"]);
     }
 }
+
+#[tokio::test]
+async fn metadata_default_view_matches_frontend_fragment() {
+    let app = test_app().await;
+    let email = unique_email("views");
+    let (token, _workspace) = signup(&app, &email).await;
+
+    let objects = send(
+        &app,
+        authorized(
+            "POST",
+            "/metadata",
+            &token,
+            Some(json!({
+                "query": "{ objects(paging: { first: 10 }) { edges { node { id nameSingular } } } }"
+            })),
+        ),
+    )
+    .await;
+    let object_id = objects.body["data"]["objects"]["edges"][0]["node"]["id"]
+        .as_str()
+        .expect("person object id")
+        .to_string();
+
+    let query = r#"
+        query FindManyViews($objectMetadataId: String, $viewTypes: [ViewType!]) {
+          getViews(objectMetadataId: $objectMetadataId, viewTypes: $viewTypes) {
+            id
+            name
+            objectMetadataId
+            type
+            key
+            icon
+            position
+            isCompact
+            kanbanAggregateOperation
+            kanbanAggregateOperationFieldMetadataId
+            mainGroupByFieldMetadataId
+            shouldHideEmptyGroups
+            kanbanColumnWidth
+            groupLoadLimit
+            anyFieldFilterValue
+            calendarFieldMetadataId
+            calendarEndFieldMetadataId
+            calendarLayout
+            visibility
+            createdByUserWorkspaceId
+            applicationId
+            isActive
+            viewFields {
+              id
+              fieldMetadataId
+              viewId
+              isVisible
+              position
+              size
+              aggregateOperation
+              viewFieldGroupId
+              isActive
+              createdAt
+              updatedAt
+              deletedAt
+            }
+            viewFieldGroups {
+              id
+              name
+              position
+              isVisible
+              viewId
+              isActive
+              createdAt
+              updatedAt
+              deletedAt
+              viewFields {
+                id
+                fieldMetadataId
+                viewId
+                isVisible
+                position
+                size
+                aggregateOperation
+                viewFieldGroupId
+                isActive
+                createdAt
+                updatedAt
+                deletedAt
+              }
+            }
+            viewFilters {
+              id
+              fieldMetadataId
+              operand
+              value
+              viewFilterGroupId
+              positionInViewFilterGroup
+              subFieldName
+              relationTargetFieldMetadataId
+              viewId
+              createdAt
+              updatedAt
+              deletedAt
+            }
+            viewFilterGroups {
+              id
+              parentViewFilterGroupId
+              logicalOperator
+              positionInViewFilterGroup
+              viewId
+            }
+            viewSorts {
+              id
+              fieldMetadataId
+              direction
+              subFieldName
+              viewId
+              createdAt
+              deletedAt
+              updatedAt
+            }
+            viewGroups {
+              id
+              isVisible
+              fieldValue
+              position
+              viewId
+              createdAt
+              updatedAt
+              deletedAt
+            }
+          }
+        }
+    "#;
+
+    for _ in 0..2 {
+        let response = send(
+            &app,
+            authorized(
+                "POST",
+                "/metadata",
+                &token,
+                Some(json!({
+                    "query": query,
+                    "variables": { "objectMetadataId": object_id, "viewTypes": ["TABLE"] }
+                })),
+            ),
+        )
+        .await;
+        assert_eq!(response.status, StatusCode::OK);
+        assert!(
+            response.body["errors"].is_null(),
+            "view query errors: {}",
+            response.body
+        );
+        let views = response.body["data"]["getViews"].as_array().unwrap();
+        assert_eq!(views.len(), 1, "default view seed must be idempotent");
+        let view = &views[0];
+        assert_eq!(view["name"], "All people");
+        assert_eq!(view["objectMetadataId"], object_id);
+        assert_eq!(view["type"], "TABLE");
+        assert_eq!(view["key"], "INDEX");
+        assert_eq!(view["visibility"], "WORKSPACE");
+        assert_eq!(view["isActive"], true);
+
+        let fields = view["viewFields"].as_array().unwrap();
+        assert_eq!(fields.len(), 5);
+        assert!(view["viewFilters"].as_array().unwrap().is_empty());
+        assert!(view["viewSorts"].as_array().unwrap().is_empty());
+        assert!(view["viewGroups"].as_array().unwrap().is_empty());
+        assert!(view["viewFieldGroups"].as_array().unwrap().is_empty());
+    }
+
+    let views = send(
+        &app,
+        authorized(
+            "POST",
+            "/metadata",
+            &token,
+            Some(json!({
+                "query": format!(
+                    "{{ getViews(objectMetadataId: \"{object_id}\") {{ id }} }}"
+                )
+            })),
+        ),
+    )
+    .await;
+    let view_id = views.body["data"]["getViews"][0]["id"]
+        .as_str()
+        .expect("view id")
+        .to_string();
+
+    let single = send(
+        &app,
+        authorized(
+            "POST",
+            "/metadata",
+            &token,
+            Some(json!({
+                "query": "query($id: String!) { getView(id: $id) { id name } }",
+                "variables": { "id": view_id }
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(single.status, StatusCode::OK);
+    assert_eq!(single.body["data"]["getView"]["name"], "All people");
+}

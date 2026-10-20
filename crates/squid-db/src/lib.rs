@@ -11,9 +11,11 @@ use serde::de::DeserializeOwned;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
 use squid_core::{
-    Actor, ApiKey, CreatePersonInput, DateOp, Emails, FieldMetadata, FieldMetadataType, FilterExpr,
-    FullName, MetadataReadability, MetadataWritability, ObjectMetadata, ObjectOpenRecordIn,
-    ObjectSharingReach, Person, Role, StringOp, UpdatePersonInput, User, UuidOp, Workspace,
+    Actor, AggregateOperations, ApiKey, CreatePersonInput, DateOp, Emails, FieldMetadata,
+    FieldMetadataType, FilterExpr, FullName, MetadataReadability, MetadataWritability,
+    ObjectMetadata, ObjectOpenRecordIn, ObjectSharingReach, Person, Role, StringOp,
+    UpdatePersonInput, User, UuidOp, View, ViewCalendarLayout, ViewField, ViewKey,
+    ViewOpenRecordIn, ViewType, ViewVisibility, Workspace,
 };
 use uuid::Uuid;
 
@@ -23,6 +25,7 @@ const WORKSPACE_PERSON_CONTRACT_SQL: &str =
     include_str!("../migrations/workspace/0002_person_contract.sql");
 const CORE_API_KEYS_SQL: &str = include_str!("../migrations/core/0002_api_keys.sql");
 const CORE_METADATA_SQL: &str = include_str!("../migrations/core/0003_metadata.sql");
+const CORE_VIEWS_SQL: &str = include_str!("../migrations/core/0004_views.sql");
 
 #[derive(Clone)]
 pub struct Db {
@@ -296,7 +299,12 @@ impl Db {
             .await?;
 
         let mut result = Ok(());
-        for ddl in [CORE_SCHEMA_SQL, CORE_API_KEYS_SQL, CORE_METADATA_SQL] {
+        for ddl in [
+            CORE_SCHEMA_SQL,
+            CORE_API_KEYS_SQL,
+            CORE_METADATA_SQL,
+            CORE_VIEWS_SQL,
+        ] {
             result = sqlx::raw_sql(ddl).execute(&mut *conn).await.map(|_| ());
             if result.is_err() {
                 break;
@@ -1170,8 +1178,117 @@ impl Db {
         .execute(&mut *tx)
         .await?;
 
+        sqlx::query(
+            "INSERT INTO core.views
+                (workspace_id, name, object_metadata_id, type, key, icon, position,
+                 is_compact, is_custom, open_record_in, should_hide_empty_groups,
+                 visibility, is_active)
+             VALUES ($1, 'All people', $2, 'TABLE', 'INDEX', 'IconList', 0,
+                     false, false, 'SIDE_PANEL', false, 'WORKSPACE', true)
+             ON CONFLICT (workspace_id, object_metadata_id, key) DO NOTHING",
+        )
+        .bind(workspace_id)
+        .bind(object_id)
+        .execute(&mut *tx)
+        .await?;
+
+        let view_id: Uuid = sqlx::query(
+            "SELECT id FROM core.views
+             WHERE workspace_id = $1 AND object_metadata_id = $2 AND key = 'INDEX'",
+        )
+        .bind(workspace_id)
+        .bind(object_id)
+        .fetch_one(&mut *tx)
+        .await?
+        .get("id");
+
+        for (position, (field_name, size)) in DEFAULT_VIEW_FIELDS.iter().enumerate() {
+            sqlx::query(
+                "INSERT INTO core.view_fields
+                    (workspace_id, view_id, field_metadata_id, position, size)
+                 SELECT $1, $2, id, $3, $4 FROM core.field_metadata
+                 WHERE object_metadata_id = $5 AND name = $6
+                 ON CONFLICT (view_id, field_metadata_id) DO NOTHING",
+            )
+            .bind(workspace_id)
+            .bind(view_id)
+            .bind(position as f64)
+            .bind(*size)
+            .bind(object_id)
+            .bind(*field_name)
+            .execute(&mut *tx)
+            .await?;
+        }
+
         tx.commit().await?;
         Ok(())
+    }
+
+    pub async fn list_views(
+        &self,
+        workspace_id: Uuid,
+        object_id: Option<Uuid>,
+        view_types: Option<&[String]>,
+    ) -> anyhow::Result<Vec<View>> {
+        self.ensure_person_metadata(workspace_id).await?;
+        let rows = sqlx::query(&format!(
+            "SELECT {VIEW_SELECT} FROM core.views
+             WHERE workspace_id = $1 AND deleted_at IS NULL
+               AND ($2::uuid IS NULL OR object_metadata_id = $2)
+             ORDER BY position ASC, created_at ASC"
+        ))
+        .bind(workspace_id)
+        .bind(object_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut views = Vec::with_capacity(rows.len());
+        for row in &rows {
+            let mut view = row_to_view(row)?;
+            if let Some(types) = view_types {
+                if !types.iter().any(|kind| kind == view.view_type.as_str()) {
+                    continue;
+                }
+            }
+            view.view_fields = self.list_view_fields(workspace_id, view.id).await?;
+            views.push(view);
+        }
+        Ok(views)
+    }
+
+    pub async fn get_view(&self, workspace_id: Uuid, id: Uuid) -> anyhow::Result<Option<View>> {
+        self.ensure_person_metadata(workspace_id).await?;
+        let row = sqlx::query(&format!(
+            "SELECT {VIEW_SELECT} FROM core.views
+             WHERE workspace_id = $1 AND id = $2 AND deleted_at IS NULL"
+        ))
+        .bind(workspace_id)
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let mut view = row_to_view(&row)?;
+        view.view_fields = self.list_view_fields(workspace_id, view.id).await?;
+        Ok(Some(view))
+    }
+
+    async fn list_view_fields(
+        &self,
+        workspace_id: Uuid,
+        view_id: Uuid,
+    ) -> anyhow::Result<Vec<ViewField>> {
+        let rows = sqlx::query(&format!(
+            "SELECT {VIEW_FIELD_SELECT} FROM core.view_fields
+             WHERE workspace_id = $1 AND view_id = $2 AND deleted_at IS NULL
+             ORDER BY position ASC, created_at ASC"
+        ))
+        .bind(workspace_id)
+        .bind(view_id)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(row_to_view_field).collect()
     }
 
     pub async fn list_objects(&self, workspace_id: Uuid) -> anyhow::Result<Vec<ObjectMetadata>> {
@@ -1477,6 +1594,101 @@ fn row_to_field(row: &sqlx::postgres::PgRow) -> anyhow::Result<FieldMetadata> {
 fn parse_json_opt(raw: Option<String>) -> Option<squid_core::GqlJson<serde_json::Value>> {
     raw.and_then(|raw| serde_json::from_str(&raw).ok())
         .map(squid_core::GqlJson)
+}
+
+const DEFAULT_VIEW_FIELDS: &[(&str, f64)] = &[
+    ("name", 180.0),
+    ("emails", 200.0),
+    ("jobTitle", 160.0),
+    ("phones", 160.0),
+    ("createdAt", 160.0),
+];
+
+const VIEW_SELECT: &str =
+    "id, universal_identifier::text AS universal_identifier, application_id, \
+     is_system_side_effect, name, object_metadata_id, type, key, icon, position, is_compact, \
+     is_custom, open_record_in, kanban_aggregate_operation, \
+     kanban_aggregate_operation_field_metadata_id, main_group_by_field_metadata_id, \
+     should_hide_empty_groups, kanban_column_width, group_load_limit, calendar_field_metadata_id, \
+     calendar_end_field_metadata_id, workspace_id, any_field_filter_value, calendar_layout, \
+     created_at, updated_at, deleted_at, visibility, created_by_user_workspace_id, is_active";
+
+const VIEW_FIELD_SELECT: &str = "id, universal_identifier::text AS universal_identifier, \
+     application_id, is_system_side_effect, field_metadata_id, is_visible, size, position, \
+     aggregate_operation, view_id, view_field_group_id, workspace_id, created_at, updated_at, \
+     is_active, deleted_at";
+
+fn row_to_view(row: &sqlx::postgres::PgRow) -> anyhow::Result<View> {
+    let key: Option<String> = row.get("key");
+    let aggregate: Option<String> = row.get("kanban_aggregate_operation");
+    let calendar_layout: Option<String> = row.get("calendar_layout");
+    Ok(View {
+        id: row.get("id"),
+        universal_identifier: row.get("universal_identifier"),
+        application_id: row.get("application_id"),
+        is_system_side_effect: row.get("is_system_side_effect"),
+        name: row.get("name"),
+        object_metadata_id: row.get("object_metadata_id"),
+        view_type: ViewType::parse(row.get("type"))
+            .ok_or_else(|| anyhow::anyhow!("invalid view type"))?,
+        key: key.as_deref().and_then(ViewKey::parse),
+        icon: row.get("icon"),
+        position: row.get("position"),
+        is_compact: row.get("is_compact"),
+        is_custom: row.get("is_custom"),
+        open_record_in: ViewOpenRecordIn::parse(row.get("open_record_in"))
+            .ok_or_else(|| anyhow::anyhow!("invalid view open_record_in"))?,
+        kanban_aggregate_operation: aggregate.as_deref().and_then(AggregateOperations::parse),
+        kanban_aggregate_operation_field_metadata_id: row
+            .get("kanban_aggregate_operation_field_metadata_id"),
+        main_group_by_field_metadata_id: row.get("main_group_by_field_metadata_id"),
+        should_hide_empty_groups: row.get("should_hide_empty_groups"),
+        kanban_column_width: row.get("kanban_column_width"),
+        group_load_limit: row.get("group_load_limit"),
+        calendar_field_metadata_id: row.get("calendar_field_metadata_id"),
+        calendar_end_field_metadata_id: row.get("calendar_end_field_metadata_id"),
+        workspace_id: row.get("workspace_id"),
+        any_field_filter_value: row.get("any_field_filter_value"),
+        calendar_layout: calendar_layout
+            .as_deref()
+            .and_then(ViewCalendarLayout::parse),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+        deleted_at: row.get("deleted_at"),
+        view_fields: Vec::new(),
+        view_filters: Vec::new(),
+        view_filter_groups: Vec::new(),
+        view_sorts: Vec::new(),
+        view_groups: Vec::new(),
+        view_field_groups: Vec::new(),
+        visibility: ViewVisibility::parse(row.get("visibility"))
+            .ok_or_else(|| anyhow::anyhow!("invalid view visibility"))?,
+        created_by_user_workspace_id: row.get("created_by_user_workspace_id"),
+        is_active: row.get("is_active"),
+    })
+}
+
+fn row_to_view_field(row: &sqlx::postgres::PgRow) -> anyhow::Result<ViewField> {
+    let aggregate: Option<String> = row.get("aggregate_operation");
+    Ok(ViewField {
+        id: row.get("id"),
+        universal_identifier: row.get("universal_identifier"),
+        application_id: row.get("application_id"),
+        is_system_side_effect: row.get("is_system_side_effect"),
+        field_metadata_id: row.get("field_metadata_id"),
+        is_visible: row.get("is_visible"),
+        size: row.get("size"),
+        position: row.get("position"),
+        aggregate_operation: aggregate.as_deref().and_then(AggregateOperations::parse),
+        view_id: row.get("view_id"),
+        view_field_group_id: row.get("view_field_group_id"),
+        workspace_id: row.get("workspace_id"),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+        is_active: row.get("is_active"),
+        deleted_at: row.get("deleted_at"),
+        is_overridden: None,
+    })
 }
 
 const PERSON_SELECT: &str = "id, created_at, updated_at, deleted_at, name_first, name_last, \

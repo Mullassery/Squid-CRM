@@ -144,9 +144,20 @@ Object.fields(paging: CursorPaging, filter: FieldFilter): ObjectFieldsConnection
 
 Implemented: the standard `person` object, its 16 fields, cursor paging for
 `objects`, and id/object/active/system filters. `indexMetadataList` and
-`searchFieldMetadataList` are empty; `Field.relation` is `null`. Metadata writes,
-views, roles, `minimalMetadata`, and non-person standard objects are not
-implemented (see `TODO.md`).
+`searchFieldMetadataList` are empty; `Field.relation` is `null`.
+
+The default person view is seeded and served through:
+
+```graphql
+getViews(objectMetadataId: String, viewTypes: [ViewType!]): [View!]!
+getView(id: String!): View
+```
+
+It is a `TABLE`/`INDEX` view named "All people" with five visible view fields
+(name, emails, jobTitle, phones, createdAt). Filters, sorts, groups and field
+groups are empty. Metadata writes, view writes/other view types, roles,
+`minimalMetadata`, and non-person standard objects are not implemented (see
+`TODO.md`).
 
 ## 5. GraphQL data contract `[fixture]`
 
@@ -265,7 +276,8 @@ Alignment completed and covered by tests:
 | GraphQL `people` | `PersonConnection` with `edges`/`pageInfo` | aligned |
 | GraphQL filters | `and`/`or`/`not`, composite name/emails, dates | aligned for scalar person fields; relation filters absent |
 | GraphQL batch mutations | `createPeople`, `updatePeople`, `deletePeople`, `destroyPeople`, `restorePeople` | aligned; `mergePeople` not implemented |
-| Metadata read API | `objects`/`object`/`fields`/`field`, `Object.fieldsList` | aligned for standard person; no writes, views, roles, indexes, relations |
+| Metadata read API | `objects`/`object`/`fields`/`field`, `Object.fieldsList` | aligned for standard person; no writes, roles, indexes, relations |
+| Views read API | `getViews`/`getView`, default table view, filters/sorts/groups | aligned for default person view; no view writes, filters/sorts/groups are empty |
 | GraphQL `person(filter:)` | `PersonFilterInput!` | aligned for scalar person fields |
 | GraphQL `createPerson(data:)` | `PersonCreateInput!`, `upsert`, `shareWith` | aligned; `upsert`/`shareWith` accepted but not applied |
 | GraphQL `deletePerson(id:)` | returns `Person` | aligned |

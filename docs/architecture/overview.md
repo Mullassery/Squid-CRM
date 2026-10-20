@@ -87,7 +87,8 @@ erDiagram
 Each workspace additionally owns a schema containing object tables (`person` in
 the current slice), mirroring upstream. Workspace-scoped object/field metadata
 lives in `core.object_metadata` / `core.field_metadata` and is seeded lazily:
-the standard `person` object plus its 16 fields. See ADR 0004.
+the standard `person` object plus its 16 fields, and one default table view with
+five view fields. See ADR 0004.
 
 ## Security boundary summary
 

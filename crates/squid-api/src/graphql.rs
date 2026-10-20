@@ -18,7 +18,7 @@ use squid_core::{
     ApiKey, AppError, AppResult, CreatePersonInput, CursorPagingInput, DateOp, FieldConnection,
     FieldFilterInput, FieldMetadata, FilterExpr, GqlJson, ObjectConnection, ObjectEdge,
     ObjectFilterInput, ObjectMetadata, PageInfo, Person, StringOp, UpdatePersonInput, User, UuidOp,
-    Workspace,
+    View, ViewType, Workspace,
 };
 use squid_db::{OrderTerm, PersonColumn};
 use uuid::Uuid;
@@ -843,6 +843,42 @@ impl QueryRoot {
             page_info: connection.page_info,
             edges: connection.edges,
         })
+    }
+
+    async fn get_views(
+        &self,
+        ctx: &Context<'_>,
+        object_metadata_id: Option<String>,
+        view_types: Option<Vec<ViewType>>,
+    ) -> async_graphql::Result<Vec<View>> {
+        let auth = require_auth(ctx)?;
+        let object_id = object_metadata_id
+            .as_deref()
+            .map(Uuid::parse_str)
+            .transpose()
+            .map_err(|_| gql_err(AppError::BadRequest("Invalid objectMetadataId".to_string())))?;
+        let types: Option<Vec<String>> = view_types.map(|types| {
+            types
+                .into_iter()
+                .map(|view_type| view_type.as_str().to_string())
+                .collect()
+        });
+        state(ctx)
+            .db
+            .list_views(auth.workspace_id, object_id, types.as_deref())
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))
+    }
+
+    async fn get_view(&self, ctx: &Context<'_>, id: String) -> async_graphql::Result<Option<View>> {
+        let auth = require_auth(ctx)?;
+        let id = Uuid::parse_str(&id)
+            .map_err(|_| gql_err(AppError::BadRequest("Invalid view id".to_string())))?;
+        state(ctx)
+            .db
+            .get_view(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))
     }
 
     async fn field(&self, ctx: &Context<'_>, id: Uuid) -> async_graphql::Result<FieldMetadata> {

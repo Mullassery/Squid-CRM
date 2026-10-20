@@ -29,6 +29,10 @@ Upstream keeps metadata in the shared `core` schema (`core."objectMetadata"`,
 5. `indexMetadataList` and `searchFieldMetadataList` are empty and `relation` is
    `null` for standard person fields in this slice. The fields are present so
    the frontend fragment validates; no index/relation metadata is claimed.
+6. Seed one default `TABLE`/`INDEX` view ("All people") per person object with
+   five view fields. View filters, sorts, groups and field groups are modelled
+   with tables and GraphQL types but return empty lists; view writes are out of
+   scope for this slice.
 
 ## Consequences
 
