@@ -35,8 +35,9 @@
       rejected.
 - [x] Serve auth mutations on `/metadata` and add API-key lifecycle for the data API.
 - [x] Person filter grammar (`and`/`or`/`not`, scalar/composite fields) for REST and GraphQL.
-- [ ] Remaining pagination (`first`/`last`/`before`/`after`), `fields`, `depth`,
-      `viewId` with upstream semantics.
+- [x] GraphQL pagination (`first`/`last`/`offset`/`before`/`after`) and
+      `pageInfo` for connections.
+- [ ] REST/GraphQL `fields`, `depth`, `viewId` with upstream semantics.
 - [ ] Tighten the data API to API keys only (access tokens work today).
 - [ ] Refresh-token rotation and access-token revocation.
 - [ ] CSRF protection decision for cookie auth.
@@ -85,6 +86,8 @@
       field creation (metadata writes currently persist metadata only).
 - [x] `currentUser`/`currentWorkspace` full frontend boot fragment (ADR 0005;
       enterprise surfaces are explicit empty/static defaults).
+- [x] `workspaceMembers`/`workspaceMember` GraphQL queries with filters,
+      ordering and pageInfo; boot `workspaceMembers` now lists every member.
 - [ ] Role/permission engine, billing/SSO data, feature flags, and
       `ApiKey.role` as the upstream `Role` object.
 - [x] REST target routes, target updates/batches, and nested target record resolution (`TaskTarget.targetCompany` etc.).
@@ -110,6 +113,8 @@
   objects (relation field creation is rejected).
 - Cursor pagination, `order_by`, and scalar/composite filters implemented for
   whitelisted person columns; relation filters and view-based paging are not.
+- `WorkspaceMember` queries expose the core profile fields; position/calendar
+  and date/time/number-format filters and connection aggregates are absent.
 - Company GraphQL filters are limited to `id`/`name`; REST filters cover scalar
   fields. Relation filters and nested relation ordering are not implemented.
 - Opportunity relation filters are not implemented; scalar REST filters and

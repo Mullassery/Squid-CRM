@@ -4853,3 +4853,66 @@ async fn object_updates_clear_nullable_fields() {
     );
     assert!(target_cleared.body["data"]["updateTaskTarget"]["targetCompanyId"].is_null());
 }
+
+#[tokio::test]
+async fn workspace_members_query_and_boot_list() {
+    let app = test_app().await;
+    let email = unique_email("workspace-members");
+    let (token, _workspace) = signup(&app, &email).await;
+
+    let response = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "query($email: String!) { workspaceMember(filter: { userEmail: { eq: $email } }) { id name { firstName lastName } userEmail colorScheme locale } workspaceMembers { totalCount edges { node { id userEmail } } pageInfo { hasNextPage hasPreviousPage } } currentUser { workspaceMembers { id userEmail } } }",
+                "variables": { "email": email }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(response.status, StatusCode::OK, "body: {}", response.body);
+    assert!(
+        response.body["errors"].is_null(),
+        "errors: {}",
+        response.body
+    );
+
+    let member = &response.body["data"]["workspaceMember"];
+    assert_eq!(member["userEmail"], email);
+    assert_eq!(member["colorScheme"], "Light");
+    assert_eq!(member["locale"], "en");
+
+    let connection = &response.body["data"]["workspaceMembers"];
+    assert_eq!(connection["totalCount"], 1);
+    assert_eq!(connection["edges"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        connection["edges"][0]["node"]["userEmail"].as_str(),
+        Some(email.as_str())
+    );
+    assert_eq!(connection["pageInfo"]["hasNextPage"], false);
+    assert_eq!(connection["pageInfo"]["hasPreviousPage"], false);
+
+    let boot_members = response.body["data"]["currentUser"]["workspaceMembers"]
+        .as_array()
+        .expect("boot workspace members");
+    assert_eq!(boot_members.len(), 1);
+    assert_eq!(boot_members[0]["userEmail"], email);
+
+    let missing = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "{ workspaceMember(filter: { userEmail: { eq: \"nobody@example.com\" } }) { id } }"
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(missing.status, StatusCode::OK);
+    assert!(missing.body["data"]["workspaceMember"].is_null());
+}

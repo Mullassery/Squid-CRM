@@ -579,7 +579,8 @@ impl Db {
         user_id: Uuid,
     ) -> sqlx::Result<Option<squid_core::WorkspaceMember>> {
         let row = sqlx::query(
-            "SELECT id, workspace_id, user_id, role FROM core.workspace_members
+            "SELECT id, workspace_id, user_id, role, created_at
+             FROM core.workspace_members
              WHERE workspace_id = $1 AND user_id = $2",
         )
         .bind(workspace_id)
@@ -593,8 +594,48 @@ impl Db {
                 workspace_id: row.get("workspace_id"),
                 user_id: row.get("user_id"),
                 role,
+                created_at: row.get("created_at"),
             })
         }))
+    }
+
+    pub async fn list_workspace_members_with_users(
+        &self,
+        workspace_id: Uuid,
+    ) -> sqlx::Result<Vec<(squid_core::WorkspaceMember, squid_core::User)>> {
+        let rows = sqlx::query(
+            "SELECT m.id, m.workspace_id, m.user_id, m.role, m.created_at,
+                    u.email AS user_email, u.created_at AS user_created_at
+             FROM core.workspace_members m
+             JOIN core.users u ON u.id = m.user_id
+             WHERE m.workspace_id = $1
+             ORDER BY m.created_at ASC, m.id ASC",
+        )
+        .bind(workspace_id)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut members = Vec::with_capacity(rows.len());
+        for row in &rows {
+            let role: String = row.get("role");
+            let Some(role) = Role::parse(&role) else {
+                continue;
+            };
+            members.push((
+                squid_core::WorkspaceMember {
+                    id: row.get("id"),
+                    workspace_id: row.get("workspace_id"),
+                    user_id: row.get("user_id"),
+                    role,
+                    created_at: row.get("created_at"),
+                },
+                squid_core::User {
+                    id: row.get("user_id"),
+                    email: row.get("user_email"),
+                    created_at: row.get("user_created_at"),
+                },
+            ));
+        }
+        Ok(members)
     }
 
     pub async fn count_workspace_members(&self, workspace_id: Uuid) -> sqlx::Result<i64> {

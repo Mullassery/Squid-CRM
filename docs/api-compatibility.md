@@ -172,7 +172,7 @@ relation filters, roles and `minimalMetadata` remain unimplemented (see
 `TODO.md`).
 
 The frontend boot document (`GetCurrentUser` / `UserQueryFragment`) is served:
-identity, workspace member, current workspace and workspace URLs are live.
+identity, workspace members, current workspace and workspace URLs are live.
 Roles are derived from the membership role; feature flags, SSO, billing,
 installed applications, available workspaces, permission flags and object/row
 level permissions are empty or disabled defaults (ADR 0005).
@@ -296,6 +296,7 @@ Alignment completed and covered by tests:
 | GraphQL batch mutations | `createPeople`, `updatePeople`, `deletePeople`, `destroyPeople`, `restorePeople`, `mergePeople` | aligned; merge re-points opportunities and task/note targets and supports `dryRun` |
 | Metadata API | `objects`/`object`/`fields`/`field` + object/field CRUD | reads for five standard objects; object/field writes; no dynamic schema, roles, indexes or relations |
 | Views API | `getViews`/`getView`/`getViewFields`/`getViewFilters`/`getViewSorts`/`getViewGroups`/`getViewFieldGroups`/`getViewFilterGroups`, `createView`/`updateView`/`deleteView`/`destroyView`, view field/filter/sort/group/field-group/filter-group CRUD + batch mutations | aligned for standard views; relation filters and view-based paging semantics are not implemented |
+| Workspace members | `workspaceMembers`/`workspaceMember` (filters, ordering, pageInfo) | aligned for core profile fields; position/format filters, profile writes and aggregates are absent |
 | Frontend boot | `currentUser`/`currentWorkspace` full fragment | shape aligned; roles/permissions/billing/SSO are static or empty defaults |
 | API key role | upstream `Role` object | internal enum serialised as `WorkspaceRole`; no role engine yet |
 | GraphQL `person(filter:)` | `PersonFilterInput!` | aligned for scalar person fields |

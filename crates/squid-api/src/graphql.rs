@@ -35,7 +35,7 @@ use squid_db::{OrderTerm, PersonColumn};
 use uuid::Uuid;
 
 use crate::auth::{normalize_email, unique_subdomain};
-use crate::current_user::{self, User, Workspace};
+use crate::current_user::{self, User, Workspace, WorkspaceMemberGql};
 use crate::sorting::{sort_records, SortTerm};
 use crate::{clear_session_cookie, resolve_auth, session_cookie, AppState, AuthTokenPair};
 
@@ -295,6 +295,24 @@ pub struct DateTimeFilter {
 pub struct FullNameFilterInput {
     pub first_name: Option<StringFilter>,
     pub last_name: Option<StringFilter>,
+}
+
+#[derive(Debug, Default, InputObject)]
+#[graphql(name = "WorkspaceMemberFilterInput")]
+pub struct WorkspaceMemberFilterInput {
+    pub id: Option<UuidFilter>,
+    pub created_at: Option<DateTimeFilter>,
+    pub updated_at: Option<DateTimeFilter>,
+    pub name: Option<FullNameFilterInput>,
+    pub color_scheme: Option<StringFilter>,
+    pub locale: Option<StringFilter>,
+    pub time_zone: Option<StringFilter>,
+    pub user_email: Option<StringFilter>,
+    pub job_title: Option<StringFilter>,
+    pub user_id: Option<UuidFilter>,
+    pub and: Option<Vec<WorkspaceMemberFilterInput>>,
+    pub or: Option<Vec<WorkspaceMemberFilterInput>>,
+    pub not: Option<Box<WorkspaceMemberFilterInput>>,
 }
 
 #[derive(Debug, Default, InputObject)]
@@ -1143,6 +1161,32 @@ pub struct CompanyConnection {
     pub page_info: PageInfo,
 }
 
+#[derive(Debug, InputObject)]
+#[graphql(name = "WorkspaceMemberOrderByInput")]
+pub struct WorkspaceMemberOrderByInput {
+    pub id: Option<OrderByDirection>,
+    pub created_at: Option<OrderByDirection>,
+    pub updated_at: Option<OrderByDirection>,
+    pub name: Option<FullNameOrderByInput>,
+    pub user_email: Option<OrderByDirection>,
+    pub job_title: Option<OrderByDirection>,
+}
+
+#[derive(Debug, SimpleObject)]
+#[graphql(name = "WorkspaceMemberEdge")]
+pub struct WorkspaceMemberEdge {
+    pub node: WorkspaceMemberGql,
+    pub cursor: Cursor,
+}
+
+#[derive(Debug, SimpleObject)]
+#[graphql(name = "WorkspaceMemberConnection")]
+pub struct WorkspaceMemberConnection {
+    pub total_count: Option<i64>,
+    pub edges: Vec<WorkspaceMemberEdge>,
+    pub page_info: PageInfo,
+}
+
 #[derive(Debug, SimpleObject)]
 pub struct PersonEdge {
     pub node: Person,
@@ -1664,6 +1708,298 @@ fn note_matches(note: &Note, filter: &NoteFilterInput) -> bool {
         }
     }
     true
+}
+
+fn string_filter_matches(value: &str, filter: &StringFilter) -> bool {
+    if let Some(eq) = filter.eq.as_deref() {
+        if value != eq {
+            return false;
+        }
+    }
+    if let Some(neq) = filter.neq.as_deref() {
+        if value == neq {
+            return false;
+        }
+    }
+    if let Some(starts_with) = filter.starts_with.as_deref() {
+        if !value.starts_with(starts_with) {
+            return false;
+        }
+    }
+    if let Some(ends_with) = filter.ends_with.as_deref() {
+        if !value.ends_with(ends_with) {
+            return false;
+        }
+    }
+    if let Some(like) = filter.like.as_deref() {
+        if !value.contains(like.trim_matches('%')) {
+            return false;
+        }
+    }
+    if let Some(ilike) = filter.ilike.as_deref() {
+        if !value
+            .to_lowercase()
+            .contains(&ilike.trim_matches('%').to_lowercase())
+        {
+            return false;
+        }
+    }
+    if let Some(list) = filter.r#in.as_ref() {
+        if !list.iter().any(|candidate| candidate == value) {
+            return false;
+        }
+    }
+    if let Some(is) = filter.is {
+        match is {
+            FilterIs::Null => return false,
+            FilterIs::NotNull => {}
+        }
+    }
+    true
+}
+
+fn uuid_value_matches(value: Uuid, filter: &UuidFilter) -> bool {
+    if let Some(eq) = filter.eq {
+        if value != eq {
+            return false;
+        }
+    }
+    if let Some(neq) = filter.neq {
+        if value == neq {
+            return false;
+        }
+    }
+    if let Some(list) = filter.r#in.as_ref() {
+        if !list.contains(&value) {
+            return false;
+        }
+    }
+    true
+}
+
+fn datetime_filter_matches(value: chrono::DateTime<chrono::Utc>, filter: &DateTimeFilter) -> bool {
+    if let Some(eq) = filter.eq {
+        if value != eq {
+            return false;
+        }
+    }
+    if let Some(neq) = filter.neq {
+        if value == neq {
+            return false;
+        }
+    }
+    if let Some(gt) = filter.gt {
+        if value <= gt {
+            return false;
+        }
+    }
+    if let Some(gte) = filter.gte {
+        if value < gte {
+            return false;
+        }
+    }
+    if let Some(lt) = filter.lt {
+        if value >= lt {
+            return false;
+        }
+    }
+    if let Some(lte) = filter.lte {
+        if value > lte {
+            return false;
+        }
+    }
+    true
+}
+
+fn workspace_member_matches(
+    member: &WorkspaceMemberGql,
+    filter: &WorkspaceMemberFilterInput,
+) -> bool {
+    if let Some(and) = filter.and.as_ref() {
+        if !and
+            .iter()
+            .all(|filter| workspace_member_matches(member, filter))
+        {
+            return false;
+        }
+    }
+    if let Some(or) = filter.or.as_ref() {
+        if !or
+            .iter()
+            .any(|filter| workspace_member_matches(member, filter))
+        {
+            return false;
+        }
+    }
+    if let Some(not) = filter.not.as_ref() {
+        if workspace_member_matches(member, not) {
+            return false;
+        }
+    }
+    if let Some(id) = filter.id.as_ref() {
+        if !uuid_value_matches(member.id, id) {
+            return false;
+        }
+    }
+    if let Some(created_at) = filter.created_at.as_ref() {
+        if !datetime_filter_matches(member.created_at, created_at) {
+            return false;
+        }
+    }
+    if let Some(updated_at) = filter.updated_at.as_ref() {
+        if !datetime_filter_matches(member.updated_at, updated_at) {
+            return false;
+        }
+    }
+    if let Some(name) = filter.name.as_ref() {
+        if let Some(first_name) = name.first_name.as_ref() {
+            if !string_filter_matches(&member.name.first_name, first_name) {
+                return false;
+            }
+        }
+        if let Some(last_name) = name.last_name.as_ref() {
+            if !string_filter_matches(&member.name.last_name, last_name) {
+                return false;
+            }
+        }
+    }
+    if let Some(filter) = filter.user_email.as_ref() {
+        if !string_filter_matches(&member.user_email, filter) {
+            return false;
+        }
+    }
+    if let Some(filter) = filter.job_title.as_ref() {
+        let value = member.job_title.as_deref().unwrap_or_default();
+        if !string_filter_matches(value, filter) {
+            return false;
+        }
+    }
+    if let Some(filter) = filter.color_scheme.as_ref() {
+        if !string_filter_matches(&member.color_scheme, filter) {
+            return false;
+        }
+    }
+    if let Some(filter) = filter.locale.as_ref() {
+        let value = member.locale.as_deref().unwrap_or_default();
+        if !string_filter_matches(value, filter) {
+            return false;
+        }
+    }
+    if let Some(filter) = filter.time_zone.as_ref() {
+        let value = member.time_zone.as_deref().unwrap_or_default();
+        if !string_filter_matches(value, filter) {
+            return false;
+        }
+    }
+    if let Some(user_id) = filter.user_id.as_ref() {
+        if !uuid_value_matches(member.user_id, user_id) {
+            return false;
+        }
+    }
+    true
+}
+
+fn sort_workspace_members(
+    members: &mut [WorkspaceMemberGql],
+    terms: &[WorkspaceMemberOrderByInput],
+) {
+    use std::cmp::Ordering;
+
+    fn compare_option_string(
+        left: Option<&str>,
+        right: Option<&str>,
+        direction: OrderByDirection,
+    ) -> Ordering {
+        let nulls_last = matches!(
+            direction,
+            OrderByDirection::AscNullsLast | OrderByDirection::DescNullsLast
+        );
+        match (left, right) {
+            (None, None) => Ordering::Equal,
+            (None, Some(_)) => {
+                if nulls_last {
+                    Ordering::Greater
+                } else {
+                    Ordering::Less
+                }
+            }
+            (Some(_), None) => {
+                if nulls_last {
+                    Ordering::Less
+                } else {
+                    Ordering::Greater
+                }
+            }
+            (Some(left), Some(right)) => {
+                let ordering = left.cmp(right);
+                if matches!(
+                    direction,
+                    OrderByDirection::DescNullsFirst | OrderByDirection::DescNullsLast
+                ) {
+                    ordering.reverse()
+                } else {
+                    ordering
+                }
+            }
+        }
+    }
+
+    members.sort_by(|left, right| {
+        for term in terms {
+            let ordering = if let Some(direction) = term.id {
+                compare_option_string(
+                    Some(&left.id.to_string()),
+                    Some(&right.id.to_string()),
+                    direction,
+                )
+            } else if let Some(direction) = term.created_at {
+                compare_option_string(
+                    Some(&left.created_at.to_rfc3339()),
+                    Some(&right.created_at.to_rfc3339()),
+                    direction,
+                )
+            } else if let Some(direction) = term.updated_at {
+                compare_option_string(
+                    Some(&left.updated_at.to_rfc3339()),
+                    Some(&right.updated_at.to_rfc3339()),
+                    direction,
+                )
+            } else if let Some(direction) = term.user_email {
+                compare_option_string(Some(&left.user_email), Some(&right.user_email), direction)
+            } else if let Some(direction) = term.job_title {
+                compare_option_string(
+                    left.job_title.as_deref(),
+                    right.job_title.as_deref(),
+                    direction,
+                )
+            } else if let Some(name) = term.name.as_ref() {
+                let mut ordering = Ordering::Equal;
+                if let Some(direction) = name.first_name {
+                    ordering = compare_option_string(
+                        Some(&left.name.first_name),
+                        Some(&right.name.first_name),
+                        direction,
+                    );
+                }
+                if ordering == Ordering::Equal {
+                    if let Some(direction) = name.last_name {
+                        ordering = compare_option_string(
+                            Some(&left.name.last_name),
+                            Some(&right.name.last_name),
+                            direction,
+                        );
+                    }
+                }
+                ordering
+            } else {
+                Ordering::Equal
+            };
+            if ordering != Ordering::Equal {
+                return ordering;
+            }
+        }
+        Ordering::Equal
+    });
 }
 
 fn company_matches(company: &Company, filter: &CompanyFilterInput) -> bool {
@@ -2343,6 +2679,110 @@ impl QueryRoot {
             .get_api_key(auth.workspace_id, input.id)
             .await
             .map_err(|e| gql_err(AppError::Internal(anyhow::anyhow!(e))))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn workspace_members(
+        &self,
+        ctx: &Context<'_>,
+        first: Option<i64>,
+        last: Option<i64>,
+        offset: Option<i64>,
+        before: Option<String>,
+        after: Option<String>,
+        filter: Option<WorkspaceMemberFilterInput>,
+        order_by: Option<Vec<WorkspaceMemberOrderByInput>>,
+    ) -> async_graphql::Result<WorkspaceMemberConnection> {
+        let auth = require_auth(ctx)?;
+        let state = state(ctx);
+        let filter = filter.unwrap_or_default();
+        let mut all = state
+            .db
+            .list_workspace_members_with_users(auth.workspace_id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(anyhow::anyhow!(e))))?
+            .into_iter()
+            .map(|(membership, user)| {
+                let role = membership.role;
+                current_user::workspace_member(&membership, &user, role)
+            })
+            .filter(|member| workspace_member_matches(member, &filter))
+            .collect::<Vec<_>>();
+        if let Some(order_by) = order_by.as_deref() {
+            sort_workspace_members(&mut all, order_by);
+        }
+
+        let total = all.len() as i64;
+        let limit = first
+            .or(last)
+            .unwrap_or(20)
+            .clamp(1, state.config.max_page_size) as usize;
+        let offset = offset.unwrap_or(0).max(0) as usize;
+
+        let starting_after = after
+            .as_deref()
+            .map(crate::rest::decode_cursor)
+            .transpose()
+            .map_err(gql_err)?;
+        let ending_before = before
+            .as_deref()
+            .map(crate::rest::decode_cursor)
+            .transpose()
+            .map_err(gql_err)?;
+
+        if let Some(after) = starting_after {
+            if let Some(index) = all.iter().position(|member| member.id == after) {
+                all.drain(..=index);
+            }
+        }
+        if let Some(before) = ending_before {
+            if let Some(index) = all.iter().position(|member| member.id == before) {
+                all.truncate(index);
+            }
+        }
+
+        let start = offset.min(all.len());
+        let end = (start + limit).min(all.len());
+        let has_next_page = end < all.len();
+        let has_previous_page = start > 0 || starting_after.is_some();
+        let edges = all[start..end]
+            .iter()
+            .cloned()
+            .map(|member| WorkspaceMemberEdge {
+                cursor: Cursor(crate::rest::encode_cursor(member.id)),
+                node: member,
+            })
+            .collect();
+
+        Ok(WorkspaceMemberConnection {
+            total_count: Some(total),
+            edges,
+            page_info: PageInfo {
+                has_next_page,
+                has_previous_page,
+                start_cursor: (end > start).then(|| crate::rest::encode_cursor(all[start].id)),
+                end_cursor: (end > start).then(|| crate::rest::encode_cursor(all[end - 1].id)),
+            },
+        })
+    }
+
+    async fn workspace_member(
+        &self,
+        ctx: &Context<'_>,
+        filter: WorkspaceMemberFilterInput,
+    ) -> async_graphql::Result<Option<WorkspaceMemberGql>> {
+        let auth = require_auth(ctx)?;
+        Ok(state(ctx)
+            .db
+            .list_workspace_members_with_users(auth.workspace_id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(anyhow::anyhow!(e))))?
+            .into_iter()
+            .find_map(|(membership, user)| {
+                let role = membership.role;
+                let member = current_user::workspace_member(&membership, &user, role);
+                workspace_member_matches(&member, &filter).then_some(member)
+            }))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -5084,6 +5524,17 @@ async fn build_current_user(
     let workspace =
         current_user::workspace(&workspace, role, &state.config.frontend_url, member_count);
     let member = current_user::workspace_member(&member, user, role);
+    let all_members = state
+        .db
+        .list_workspace_members_with_users(workspace_id)
+        .await
+        .map_err(|e| gql_err(AppError::Internal(anyhow::anyhow!(e))))?
+        .into_iter()
+        .map(|(membership, member_user)| {
+            let member_role = membership.role;
+            current_user::workspace_member(&membership, &member_user, member_role)
+        })
+        .collect::<Vec<_>>();
     let user_workspace = current_user::UserWorkspace {
         id: member.id,
         user: None,
@@ -5120,7 +5571,7 @@ async fn build_current_user(
         current_workspace: Some(workspace),
         current_user_workspace: Some(user_workspace),
         user_vars: Some(GqlJson(serde_json::json!({}))),
-        workspace_members: Some(vec![member]),
+        workspace_members: Some(all_members),
         deleted_workspace_members: Some(Vec::new()),
         has_password: true,
         support_user_hash: None,

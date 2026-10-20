@@ -6,7 +6,9 @@
 
 use async_graphql::{Json, SimpleObject};
 use serde_json::Value;
-use squid_core::{FullName, Role, User as CoreUser, Workspace as CoreWorkspace, WorkspaceMember};
+use squid_core::{
+    Actor, FullName, Role, User as CoreUser, Workspace as CoreWorkspace, WorkspaceMember,
+};
 use uuid::Uuid;
 
 const NIL_UUID: Uuid = Uuid::nil();
@@ -45,6 +47,9 @@ pub struct User {
 #[graphql(name = "WorkspaceMember")]
 pub struct WorkspaceMemberGql {
     pub id: Uuid,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+    pub position: f64,
     pub name: FullName,
     pub user_email: String,
     pub color_scheme: String,
@@ -60,6 +65,10 @@ pub struct WorkspaceMemberGql {
     pub user_id: Uuid,
     pub user_workspace_id: Option<Uuid>,
     pub number_format: Option<String>,
+    pub job_title: Option<String>,
+    pub search_vector: Option<String>,
+    pub created_by: Actor,
+    pub updated_by: Actor,
 }
 
 #[derive(Debug, Clone, SimpleObject)]
@@ -425,6 +434,9 @@ pub fn workspace_member(
     let (first, last) = split_name(&user.email);
     WorkspaceMemberGql {
         id: member.id,
+        created_at: member.created_at,
+        updated_at: member.created_at,
+        position: 0.0,
         name: FullName {
             first_name: first,
             last_name: last,
@@ -443,5 +455,9 @@ pub fn workspace_member(
         user_id: user.id,
         user_workspace_id: Some(member.id),
         number_format: Some("SYSTEM".to_string()),
+        job_title: None,
+        search_vector: None,
+        created_by: Actor::default(),
+        updated_by: Actor::default(),
     }
 }

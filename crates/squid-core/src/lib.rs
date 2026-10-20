@@ -91,6 +91,7 @@ pub struct WorkspaceMember {
     pub workspace_id: Uuid,
     pub user_id: Uuid,
     pub role: Role,
+    pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
 /// Workspace API key metadata (the secret token is only returned once and is
