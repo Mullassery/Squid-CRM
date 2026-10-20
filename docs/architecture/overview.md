@@ -16,7 +16,7 @@ flowchart LR
   API --> DBLAYER
   DBLAYER -->|SQLx| PG[(PostgreSQL 16)]
   subgraph PG
-    CORE_SCHEMA[(core schema\nusers, workspaces,\nmembers, sessions, api_keys)]
+    CORE_SCHEMA[(core schema\nusers, workspaces, members,\nsessions, api_keys,\nobject/field metadata)]
     WS_A[(workspace_<id>\nperson ...)]
     WS_B[(workspace_<id>\nperson ...)]
   end
@@ -85,7 +85,9 @@ erDiagram
 ```
 
 Each workspace additionally owns a schema containing object tables (`person` in
-the current slice), mirroring upstream.
+the current slice), mirroring upstream. Workspace-scoped object/field metadata
+lives in `core.object_metadata` / `core.field_metadata` and is seeded lazily:
+the standard `person` object plus its 16 fields. See ADR 0004.
 
 ## Security boundary summary
 

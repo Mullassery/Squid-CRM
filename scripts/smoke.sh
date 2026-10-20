@@ -67,6 +67,24 @@ assert body['pageInfo']['hasNextPage'] is False, body
 print('list OK: totalCount=1, envelope and cursors match contract')
 PY
 
+METADATA_STATUS=$(curl -s -o /tmp/squid-smoke-metadata.json -w '%{http_code}' \
+  -X POST "${BASE}/metadata" -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' \
+  -d '{"query":"{ objects(paging:{first:100}) { edges { node { nameSingular fieldsList { name type } } } } }"}')
+test "$METADATA_STATUS" = "200" || { echo "metadata failed: $METADATA_STATUS"; cat /tmp/squid-smoke-metadata.json; exit 1; }
+python3 - <<'PY'
+import json
+body = json.load(open('/tmp/squid-smoke-metadata.json'))
+assert 'errors' not in body, body
+objects = body['data']['objects']['edges']
+assert len(objects) == 1, body
+node = objects[0]['node']
+assert node['nameSingular'] == 'person', body
+fields = {field['name']: field['type'] for field in node['fieldsList']}
+assert fields['name'] == 'FULL_NAME', fields
+assert fields['emails'] == 'EMAILS', fields
+print('metadata OK: person object and fields match the frontend fragment')
+PY
+
 UNAUTH_STATUS=$(curl -s -o /tmp/squid-smoke-unauth.json -w '%{http_code}' "${BASE}/rest/people")
 test "$UNAUTH_STATUS" = "403" || { echo "expected 403, got $UNAUTH_STATUS"; exit 1; }
 python3 - <<'PY'

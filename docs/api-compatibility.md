@@ -128,7 +128,27 @@ Errors `[fixture]`:
 There is no `code` member on these two. The `NO_AUTHENTICATION_CONTEXT` body
 does include `code`.
 
-## 4. GraphQL data contract `[fixture]`
+## 4. Metadata contract (Phase 5 slice)
+
+`/metadata` now serves the read path used by the frontend boot query
+(`ObjectMetadataItems`):
+
+```graphql
+objects(paging: CursorPaging, filter: ObjectFilter): ObjectConnection
+object(id: UUID!): Object
+fields(paging: CursorPaging, filter: FieldFilter): FieldConnection
+field(id: UUID!): Field
+Object.fieldsList: [Field!]!
+Object.fields(paging: CursorPaging, filter: FieldFilter): ObjectFieldsConnection!
+```
+
+Implemented: the standard `person` object, its 16 fields, cursor paging for
+`objects`, and id/object/active/system filters. `indexMetadataList` and
+`searchFieldMetadataList` are empty; `Field.relation` is `null`. Metadata writes,
+views, roles, `minimalMetadata`, and non-person standard objects are not
+implemented (see `TODO.md`).
+
+## 5. GraphQL data contract `[fixture]`
 
 ```graphql
 people(first: Int, last: Int, offset: Int, before: String, after: String,
@@ -162,7 +182,7 @@ type PageInfo {
 
 Example fixture: `contracts/v2.49.0/examples/gql-people-connection.json`.
 
-## 5. Person shape `[fixture]`
+## 6. Person shape `[fixture]`
 
 REST record fields observed on create/list:
 
@@ -192,7 +212,7 @@ REST record fields observed on create/list:
 
 `additionalEmails` and `additionalPhones` are **empty arrays**, not `null`.
 
-## 6. Pagination, sorting, filtering `[fixture]` / `[source]`
+## 7. Pagination, sorting, filtering `[fixture]` / `[source]`
 
 - GraphQL connections use `first`/`last`/`before`/`after`/`offset`.
 - REST paging parameters are `limit`, `offset`, `starting_after`, `ending_before`.
@@ -216,14 +236,14 @@ REST record fields observed on create/list:
   `PersonFilterInput` (`and`/`or`/`not`, `id`, `name`, `emails`, `jobTitle`,
   dates). Filtered `totalCount` matches the filtered set.
 
-## 7. Tenant isolation
+## 8. Tenant isolation
 
 Every workspace-scoped query resolves `workspace_id` from the principal and
 derives a validated schema name (`workspace_<32 hex>`). Integration test
 `tenant_isolation_blocks_cross_workspace_reads` proves workspace B cannot read,
 list or delete workspace A's records.
 
-## 8. Divergences in the current Rust slice
+## 9. Divergences in the current Rust slice
 
 Alignment completed and covered by tests:
 
@@ -245,6 +265,7 @@ Alignment completed and covered by tests:
 | GraphQL `people` | `PersonConnection` with `edges`/`pageInfo` | aligned |
 | GraphQL filters | `and`/`or`/`not`, composite name/emails, dates | aligned for scalar person fields; relation filters absent |
 | GraphQL batch mutations | `createPeople`, `updatePeople`, `deletePeople`, `destroyPeople`, `restorePeople` | aligned; `mergePeople` not implemented |
+| Metadata read API | `objects`/`object`/`fields`/`field`, `Object.fieldsList` | aligned for standard person; no writes, views, roles, indexes, relations |
 | GraphQL `person(filter:)` | `PersonFilterInput!` | aligned for scalar person fields |
 | GraphQL `createPerson(data:)` | `PersonCreateInput!`, `upsert`, `shareWith` | aligned; `upsert`/`shareWith` accepted but not applied |
 | GraphQL `deletePerson(id:)` | returns `Person` | aligned |
@@ -270,7 +291,7 @@ Known remaining divergences (do not claim parity):
 | API-key roles | metadata role entity | caller's built-in role; `roleId` ignored | wire role engine |
 | Error `code` for auth | `NO_AUTHENTICATION_CONTEXT` on data API | none | align once access tokens are rejected |
 
-## 9. Verification method
+## 10. Verification method
 
 - Golden fixtures: `contracts/v2.49.0/` (SDL, OpenAPI, examples).
 - Capture script: `scripts/capture-contracts.py` (reproducible).

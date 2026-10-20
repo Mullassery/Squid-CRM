@@ -1203,3 +1203,173 @@ async fn graphql_batch_person_mutations() {
     .await;
     assert_eq!(empty.body["data"]["people"]["totalCount"], 0);
 }
+
+#[tokio::test]
+async fn metadata_objects_match_frontend_fragment() {
+    let app = test_app().await;
+    let email = unique_email("metadata-objects");
+    let (token, _workspace) = signup(&app, &email).await;
+
+    let query = r#"
+        query ObjectMetadataItems {
+          objects(paging: { first: 1000 }) {
+            edges {
+              node {
+                id
+                universalIdentifier
+                nameSingular
+                namePlural
+                labelSingular
+                labelPlural
+                color
+                description
+                icon
+                isRemote
+                isActive
+                isSystem
+                isUIEditable
+                isUICreatable
+                writability
+                createdAt
+                updatedAt
+                labelIdentifierFieldMetadataId
+                imageIdentifierFieldMetadataId
+                applicationId
+                shortcut
+                isLabelSyncedWithName
+                isSearchable
+                openRecordIn
+                sharingReach
+                readability
+                duplicateCriteria
+                searchFieldMetadataList {
+                  id
+                  fieldMetadataId
+                  tsVectorFieldMetadataId
+                  position
+                  createdAt
+                  updatedAt
+                }
+                indexMetadataList {
+                  id
+                  createdAt
+                  updatedAt
+                  name
+                  indexWhereClause
+                  indexType
+                  isUnique
+                  isCustom
+                  indexFieldMetadataList {
+                    id
+                    fieldMetadataId
+                    subFieldName
+                    createdAt
+                    updatedAt
+                    order
+                  }
+                }
+                fieldsList {
+                  id
+                  universalIdentifier
+                  type
+                  name
+                  label
+                  description
+                  icon
+                  isActive
+                  isSystem
+                  isUIEditable
+                  writability
+                  isNullable
+                  isUnique
+                  isSearchable
+                  createdAt
+                  updatedAt
+                  defaultValue
+                  options
+                  settings
+                  isLabelSyncedWithName
+                  morphId
+                  applicationId
+                  relation {
+                    type
+                    sourceObjectMetadata { id nameSingular namePlural }
+                    targetObjectMetadata { id nameSingular namePlural }
+                    sourceFieldMetadata { id name }
+                    targetFieldMetadata { id name }
+                  }
+                  morphRelations {
+                    type
+                    sourceObjectMetadata { id nameSingular namePlural }
+                    targetObjectMetadata { id nameSingular namePlural }
+                    sourceFieldMetadata { id name }
+                    targetFieldMetadata { id name }
+                  }
+                }
+              }
+            }
+            pageInfo { hasNextPage hasPreviousPage startCursor endCursor }
+          }
+        }
+    "#;
+
+    let mut first_object_id = String::new();
+    for _ in 0..2 {
+        let response = send(
+            &app,
+            authorized("POST", "/metadata", &token, Some(json!({ "query": query }))),
+        )
+        .await;
+        assert_eq!(response.status, StatusCode::OK);
+        assert!(
+            response.body["errors"].is_null(),
+            "metadata query errors: {}",
+            response.body
+        );
+        let objects = response.body["data"]["objects"]["edges"]
+            .as_array()
+            .unwrap();
+        assert_eq!(objects.len(), 1, "seed must be idempotent");
+        let object = &objects[0]["node"];
+        if first_object_id.is_empty() {
+            first_object_id = object["id"].as_str().unwrap().to_string();
+        }
+        assert_eq!(object["nameSingular"], "person");
+        assert_eq!(object["namePlural"], "people");
+        assert_eq!(object["labelSingular"], "Person");
+        assert_eq!(object["isSystem"], true);
+        assert_eq!(object["openRecordIn"], "SIDE_PANEL");
+
+        let fields = object["fieldsList"].as_array().unwrap();
+        let names: Vec<&str> = fields.iter().map(|f| f["name"].as_str().unwrap()).collect();
+        for expected in [
+            "id",
+            "createdAt",
+            "updatedAt",
+            "deletedAt",
+            "name",
+            "emails",
+            "linkedinLink",
+            "jobTitle",
+            "phones",
+            "avatarUrl",
+            "avatarFile",
+            "position",
+            "createdBy",
+            "updatedBy",
+            "searchVector",
+            "companyId",
+        ] {
+            assert!(
+                names.contains(&expected),
+                "missing field {expected}: {names:?}"
+            );
+        }
+        let name_field = fields.iter().find(|f| f["name"] == "name").unwrap();
+        assert_eq!(name_field["type"], "FULL_NAME");
+        assert_eq!(object["labelIdentifierFieldMetadataId"], name_field["id"]);
+        let avatar_field = fields.iter().find(|f| f["name"] == "avatarFile").unwrap();
+        assert_eq!(avatar_field["type"], "FILES");
+        assert_eq!(object["imageIdentifierFieldMetadataId"], avatar_field["id"]);
+    }
+}

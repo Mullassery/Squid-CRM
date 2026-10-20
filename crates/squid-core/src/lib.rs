@@ -12,10 +12,12 @@ use uuid::Uuid;
 
 pub mod config;
 pub mod error;
+pub mod metadata;
 
 pub use async_graphql::Json as GqlJson;
 pub use config::Config;
 pub use error::{AppError, AppResult};
+pub use metadata::*;
 
 /// A workspace member's role. Upstream models this as a role entity with
 /// permission flags; the slice keeps the built-in roles as an enum.

@@ -15,10 +15,13 @@ use chrono::{DateTime, Utc};
 use squid_auth::AuthToken;
 use squid_auth::{hash_password, hash_token, verify_password, AuthContext};
 use squid_core::{
-    ApiKey, AppError, AppResult, CreatePersonInput, DateOp, FilterExpr, GqlJson, PageInfo, Person,
-    StringOp, UpdatePersonInput, User, UuidOp, Workspace,
+    ApiKey, AppError, AppResult, CreatePersonInput, CursorPagingInput, DateOp, FieldConnection,
+    FieldFilterInput, FieldMetadata, FilterExpr, GqlJson, ObjectConnection, ObjectEdge,
+    ObjectFilterInput, ObjectMetadata, PageInfo, Person, StringOp, UpdatePersonInput, User, UuidOp,
+    Workspace,
 };
 use squid_db::{OrderTerm, PersonColumn};
+use uuid::Uuid;
 
 use crate::auth::{normalize_email, unique_subdomain};
 use crate::{clear_session_cookie, resolve_auth, session_cookie, AppState, AuthTokenPair};
@@ -501,6 +504,136 @@ pub struct PersonConnection {
     pub page_info: PageInfo,
 }
 
+fn object_matches_filter(object: &ObjectMetadata, filter: &ObjectFilterInput) -> bool {
+    if let Some(comparison) = &filter.id {
+        if comparison.eq.is_some_and(|value| value != object.id) {
+            return false;
+        }
+        if comparison.neq.is_some_and(|value| value == object.id) {
+            return false;
+        }
+    }
+    if let Some(comparison) = &filter.is_active {
+        if comparison.eq.is_some_and(|value| value != object.is_active) {
+            return false;
+        }
+        if comparison
+            .neq
+            .is_some_and(|value| value == object.is_active)
+        {
+            return false;
+        }
+    }
+    if let Some(comparison) = &filter.is_system {
+        if comparison.eq.is_some_and(|value| value != object.is_system) {
+            return false;
+        }
+        if comparison
+            .neq
+            .is_some_and(|value| value == object.is_system)
+        {
+            return false;
+        }
+    }
+    true
+}
+
+fn field_matches_filter(field: &FieldMetadata, filter: &FieldFilterInput) -> bool {
+    if let Some(comparison) = &filter.id {
+        if comparison.eq.is_some_and(|value| value != field.id) {
+            return false;
+        }
+        if comparison.neq.is_some_and(|value| value == field.id) {
+            return false;
+        }
+    }
+    if let Some(comparison) = &filter.object_metadata_id {
+        if comparison
+            .eq
+            .is_some_and(|value| value != field.object_metadata_id)
+        {
+            return false;
+        }
+        if comparison
+            .neq
+            .is_some_and(|value| value == field.object_metadata_id)
+        {
+            return false;
+        }
+    }
+    if let Some(comparison) = &filter.is_active {
+        if comparison.eq.is_some_and(|value| value != field.is_active) {
+            return false;
+        }
+        if comparison.neq.is_some_and(|value| value == field.is_active) {
+            return false;
+        }
+    }
+    if let Some(comparison) = &filter.is_system {
+        if comparison.eq.is_some_and(|value| value != field.is_system) {
+            return false;
+        }
+        if comparison.neq.is_some_and(|value| value == field.is_system) {
+            return false;
+        }
+    }
+    true
+}
+
+fn objects_connection(
+    mut objects: Vec<ObjectMetadata>,
+    paging: Option<CursorPagingInput>,
+) -> ObjectConnection {
+    let paging = paging.unwrap_or(CursorPagingInput {
+        before: None,
+        after: None,
+        first: None,
+        last: None,
+    });
+    if let Some(after) = paging.after.as_deref() {
+        if let Some(position) = objects
+            .iter()
+            .position(|object| object.id.to_string() == after)
+        {
+            objects.drain(..=position);
+        }
+    }
+    if let Some(before) = paging.before.as_deref() {
+        if let Some(position) = objects
+            .iter()
+            .position(|object| object.id.to_string() == before)
+        {
+            objects.truncate(position);
+        }
+    }
+    let has_next_page = paging
+        .first
+        .and_then(|first| usize::try_from(first).ok())
+        .is_some_and(|first| objects.len() > first);
+    if let Some(first) = paging.first.and_then(|first| usize::try_from(first).ok()) {
+        objects.truncate(first);
+    }
+    if let Some(last) = paging.last.and_then(|last| usize::try_from(last).ok()) {
+        if objects.len() > last {
+            objects.drain(..objects.len() - last);
+        }
+    }
+    let edges: Vec<ObjectEdge> = objects
+        .into_iter()
+        .map(|node| ObjectEdge {
+            cursor: node.id.to_string(),
+            node,
+        })
+        .collect();
+    let page_info = PageInfo {
+        has_next_page,
+        has_previous_page: false,
+        start_cursor: edges.first().map(|edge| edge.cursor.clone()),
+        end_cursor: edges.last().map(|edge| edge.cursor.clone()),
+    };
+    ObjectConnection { page_info, edges }
+}
+
 fn direction_flags(direction: OrderByDirection) -> (bool, bool) {
     match direction {
         OrderByDirection::AscNullsFirst => (false, true),
@@ -651,6 +784,75 @@ impl QueryRoot {
             .find_workspace(auth.workspace_id)
             .await
             .map_err(|e| gql_err(AppError::Internal(anyhow::anyhow!(e))))
+    }
+
+    async fn objects(
+        &self,
+        ctx: &Context<'_>,
+        paging: Option<CursorPagingInput>,
+        filter: Option<ObjectFilterInput>,
+    ) -> async_graphql::Result<ObjectConnection> {
+        let auth = require_auth(ctx)?;
+        let filter = filter.unwrap_or_default();
+        let objects = state(ctx)
+            .db
+            .list_objects(auth.workspace_id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        let objects = objects
+            .into_iter()
+            .filter(|object| object_matches_filter(object, &filter))
+            .collect();
+        Ok(objects_connection(objects, paging))
+    }
+
+    async fn object(&self, ctx: &Context<'_>, id: Uuid) -> async_graphql::Result<ObjectMetadata> {
+        let auth = require_auth(ctx)?;
+        state(ctx)
+            .db
+            .get_object(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Object not found".to_string())))
+    }
+
+    async fn fields(
+        &self,
+        ctx: &Context<'_>,
+        paging: Option<CursorPagingInput>,
+        filter: Option<FieldFilterInput>,
+    ) -> async_graphql::Result<FieldConnection> {
+        let auth = require_auth(ctx)?;
+        let state = state(ctx);
+        state
+            .db
+            .ensure_person_metadata(auth.workspace_id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        let filter = filter.unwrap_or_default();
+        let fields = state
+            .db
+            .list_fields(auth.workspace_id, None)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .into_iter()
+            .filter(|field| field_matches_filter(field, &filter))
+            .collect::<Vec<_>>();
+        let connection = squid_core::object_fields_connection(&fields, paging);
+        Ok(FieldConnection {
+            page_info: connection.page_info,
+            edges: connection.edges,
+        })
+    }
+
+    async fn field(&self, ctx: &Context<'_>, id: Uuid) -> async_graphql::Result<FieldMetadata> {
+        let auth = require_auth(ctx)?;
+        state(ctx)
+            .db
+            .get_field(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Field not found".to_string())))
     }
 
     #[allow(clippy::too_many_arguments)]

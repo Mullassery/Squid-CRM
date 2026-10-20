@@ -11,8 +11,9 @@ use serde::de::DeserializeOwned;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
 use squid_core::{
-    Actor, ApiKey, CreatePersonInput, DateOp, Emails, FilterExpr, FullName, Person, Role, StringOp,
-    UpdatePersonInput, User, UuidOp, Workspace,
+    Actor, ApiKey, CreatePersonInput, DateOp, Emails, FieldMetadata, FieldMetadataType, FilterExpr,
+    FullName, MetadataReadability, MetadataWritability, ObjectMetadata, ObjectOpenRecordIn,
+    ObjectSharingReach, Person, Role, StringOp, UpdatePersonInput, User, UuidOp, Workspace,
 };
 use uuid::Uuid;
 
@@ -21,6 +22,7 @@ const WORKSPACE_PERSON_SQL: &str = include_str!("../migrations/workspace/0001_pe
 const WORKSPACE_PERSON_CONTRACT_SQL: &str =
     include_str!("../migrations/workspace/0002_person_contract.sql");
 const CORE_API_KEYS_SQL: &str = include_str!("../migrations/core/0002_api_keys.sql");
+const CORE_METADATA_SQL: &str = include_str!("../migrations/core/0003_metadata.sql");
 
 #[derive(Clone)]
 pub struct Db {
@@ -294,7 +296,7 @@ impl Db {
             .await?;
 
         let mut result = Ok(());
-        for ddl in [CORE_SCHEMA_SQL, CORE_API_KEYS_SQL] {
+        for ddl in [CORE_SCHEMA_SQL, CORE_API_KEYS_SQL, CORE_METADATA_SQL] {
             result = sqlx::raw_sql(ddl).execute(&mut *conn).await.map(|_| ());
             if result.is_err() {
                 break;
@@ -1103,6 +1105,378 @@ impl Db {
         .await?;
         Ok(result.rows_affected() == 1)
     }
+
+    /// Idempotently seed the standard `person` object and its fields.
+    pub async fn ensure_person_metadata(&self, workspace_id: Uuid) -> anyhow::Result<()> {
+        let mut tx = self.pool.begin().await?;
+
+        sqlx::query(
+            "INSERT INTO core.object_metadata
+                (workspace_id, name_singular, name_plural, label_singular, label_plural,
+                 description, icon, color, shortcut, is_remote, is_active, is_system,
+                 is_ui_editable, is_ui_creatable, is_searchable, open_record_in,
+                 readability, sharing_reach, writability, is_label_synced_with_name)
+             VALUES ($1, 'person', 'people', 'Person', 'People', NULL, 'IconUser',
+                     'blue', 'p', false, true, true, true, true, true, 'SIDE_PANEL',
+                     'OPEN', 'ROLE_ACCESS', 'OPEN', false)
+             ON CONFLICT (workspace_id, name_singular) DO NOTHING",
+        )
+        .bind(workspace_id)
+        .execute(&mut *tx)
+        .await?;
+
+        let object_id: Uuid = sqlx::query(
+            "SELECT id FROM core.object_metadata
+             WHERE workspace_id = $1 AND name_singular = 'person'",
+        )
+        .bind(workspace_id)
+        .fetch_one(&mut *tx)
+        .await?
+        .get("id");
+
+        for field in PERSON_METADATA_FIELDS {
+            sqlx::query(
+                "INSERT INTO core.field_metadata
+                    (workspace_id, object_metadata_id, type, name, label, is_system,
+                     is_ui_editable, is_nullable, is_unique, is_searchable, is_audit_logged)
+                 VALUES ($1, $2, $3, $4, $5, true, true, $6, $7, $8, true)
+                 ON CONFLICT (object_metadata_id, name) DO NOTHING",
+            )
+            .bind(workspace_id)
+            .bind(object_id)
+            .bind(field.field_type.as_str())
+            .bind(field.name)
+            .bind(field.label)
+            .bind(field.nullable)
+            .bind(field.unique)
+            .bind(field.searchable)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        sqlx::query(
+            "UPDATE core.object_metadata
+             SET label_identifier_field_metadata_id = (
+                    SELECT id FROM core.field_metadata
+                    WHERE object_metadata_id = $1 AND name = 'name'),
+                 image_identifier_field_metadata_id = (
+                    SELECT id FROM core.field_metadata
+                    WHERE object_metadata_id = $1 AND name = 'avatarFile')
+             WHERE id = $1
+               AND (label_identifier_field_metadata_id IS NULL
+                    OR image_identifier_field_metadata_id IS NULL)",
+        )
+        .bind(object_id)
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn list_objects(&self, workspace_id: Uuid) -> anyhow::Result<Vec<ObjectMetadata>> {
+        self.ensure_person_metadata(workspace_id).await?;
+        let rows = sqlx::query(&format!(
+            "SELECT {OBJECT_SELECT} FROM core.object_metadata
+             WHERE workspace_id = $1 ORDER BY created_at ASC, name_singular ASC"
+        ))
+        .bind(workspace_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut objects = Vec::with_capacity(rows.len());
+        for row in &rows {
+            let mut object = row_to_object(row)?;
+            object.fields = self.list_fields(workspace_id, Some(object.id)).await?;
+            objects.push(object);
+        }
+        Ok(objects)
+    }
+
+    pub async fn get_object(
+        &self,
+        workspace_id: Uuid,
+        object_id: Uuid,
+    ) -> anyhow::Result<Option<ObjectMetadata>> {
+        self.ensure_person_metadata(workspace_id).await?;
+        let row = sqlx::query(&format!(
+            "SELECT {OBJECT_SELECT} FROM core.object_metadata
+             WHERE workspace_id = $1 AND id = $2"
+        ))
+        .bind(workspace_id)
+        .bind(object_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let mut object = row_to_object(&row)?;
+        object.fields = self.list_fields(workspace_id, Some(object_id)).await?;
+        Ok(Some(object))
+    }
+
+    pub async fn list_fields(
+        &self,
+        workspace_id: Uuid,
+        object_id: Option<Uuid>,
+    ) -> anyhow::Result<Vec<FieldMetadata>> {
+        let rows = sqlx::query(&format!(
+            "SELECT {FIELD_SELECT} FROM core.field_metadata
+             WHERE workspace_id = $1 AND ($2::uuid IS NULL OR object_metadata_id = $2)
+             ORDER BY created_at ASC, name ASC"
+        ))
+        .bind(workspace_id)
+        .bind(object_id)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(row_to_field).collect()
+    }
+
+    pub async fn get_field(
+        &self,
+        workspace_id: Uuid,
+        field_id: Uuid,
+    ) -> anyhow::Result<Option<FieldMetadata>> {
+        let row = sqlx::query(&format!(
+            "SELECT {FIELD_SELECT} FROM core.field_metadata
+             WHERE workspace_id = $1 AND id = $2"
+        ))
+        .bind(workspace_id)
+        .bind(field_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.as_ref().map(row_to_field).transpose()
+    }
+}
+
+struct PersonFieldSeed {
+    name: &'static str,
+    label: &'static str,
+    field_type: FieldMetadataType,
+    nullable: bool,
+    unique: bool,
+    searchable: bool,
+}
+
+const PERSON_METADATA_FIELDS: &[PersonFieldSeed] = &[
+    PersonFieldSeed {
+        name: "id",
+        label: "ID",
+        field_type: FieldMetadataType::Uuid,
+        nullable: false,
+        unique: true,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "createdAt",
+        label: "Creation date",
+        field_type: FieldMetadataType::DateTime,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "updatedAt",
+        label: "Last update",
+        field_type: FieldMetadataType::DateTime,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "deletedAt",
+        label: "Deletion date",
+        field_type: FieldMetadataType::DateTime,
+        nullable: true,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "name",
+        label: "Name",
+        field_type: FieldMetadataType::FullName,
+        nullable: false,
+        unique: false,
+        searchable: true,
+    },
+    PersonFieldSeed {
+        name: "emails",
+        label: "Emails",
+        field_type: FieldMetadataType::Emails,
+        nullable: false,
+        unique: false,
+        searchable: true,
+    },
+    PersonFieldSeed {
+        name: "linkedinLink",
+        label: "Linkedin",
+        field_type: FieldMetadataType::Links,
+        nullable: true,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "jobTitle",
+        label: "Job title",
+        field_type: FieldMetadataType::Text,
+        nullable: true,
+        unique: false,
+        searchable: true,
+    },
+    PersonFieldSeed {
+        name: "phones",
+        label: "Phones",
+        field_type: FieldMetadataType::Phones,
+        nullable: true,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "avatarUrl",
+        label: "Avatar URL",
+        field_type: FieldMetadataType::Text,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "avatarFile",
+        label: "Avatar",
+        field_type: FieldMetadataType::Files,
+        nullable: true,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "position",
+        label: "Position",
+        field_type: FieldMetadataType::Position,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "createdBy",
+        label: "Created by",
+        field_type: FieldMetadataType::Actor,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "updatedBy",
+        label: "Updated by",
+        field_type: FieldMetadataType::Actor,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "searchVector",
+        label: "Search vector",
+        field_type: FieldMetadataType::TsVector,
+        nullable: true,
+        unique: false,
+        searchable: true,
+    },
+    PersonFieldSeed {
+        name: "companyId",
+        label: "Company",
+        field_type: FieldMetadataType::Uuid,
+        nullable: true,
+        unique: false,
+        searchable: false,
+    },
+];
+
+const OBJECT_SELECT: &str =
+    "id, universal_identifier::text AS universal_identifier, name_singular, \
+     name_plural, label_singular, label_plural, description, icon, color, shortcut, is_remote, \
+     is_active, is_system, is_ui_editable, is_ui_creatable, is_searchable, open_record_in, \
+     readability, sharing_reach, writability, application_id, created_at, updated_at, \
+     label_identifier_field_metadata_id, image_identifier_field_metadata_id, \
+     is_label_synced_with_name, duplicate_criteria::text AS duplicate_criteria";
+
+const FIELD_SELECT: &str = "id, universal_identifier::text AS universal_identifier, type, name, \
+     label, description, icon, is_active, is_system, is_ui_editable, writability, is_nullable, \
+     is_unique, is_searchable, is_audit_logged, default_value::text AS default_value, \
+     options::text AS options, settings::text AS settings, object_metadata_id, \
+     is_label_synced_with_name, morph_id, created_at, updated_at, application_id";
+
+fn row_to_object(row: &sqlx::postgres::PgRow) -> anyhow::Result<ObjectMetadata> {
+    Ok(ObjectMetadata {
+        id: row.get("id"),
+        universal_identifier: row.get("universal_identifier"),
+        name_singular: row.get("name_singular"),
+        name_plural: row.get("name_plural"),
+        label_singular: row.get("label_singular"),
+        label_plural: row.get("label_plural"),
+        description: row.get("description"),
+        icon: row.get("icon"),
+        shortcut: row.get("shortcut"),
+        color: row.get("color"),
+        is_remote: row.get("is_remote"),
+        is_active: row.get("is_active"),
+        is_system: row.get("is_system"),
+        is_ui_editable: row.get("is_ui_editable"),
+        is_ui_creatable: row.get("is_ui_creatable"),
+        is_searchable: row.get("is_searchable"),
+        open_record_in: ObjectOpenRecordIn::parse(row.get("open_record_in"))
+            .ok_or_else(|| anyhow::anyhow!("invalid open_record_in metadata value"))?,
+        readability: MetadataReadability::parse(row.get("readability"))
+            .ok_or_else(|| anyhow::anyhow!("invalid readability metadata value"))?,
+        sharing_reach: ObjectSharingReach::parse(row.get("sharing_reach"))
+            .ok_or_else(|| anyhow::anyhow!("invalid sharing_reach metadata value"))?,
+        writability: MetadataWritability::parse(row.get("writability"))
+            .ok_or_else(|| anyhow::anyhow!("invalid writability metadata value"))?,
+        application_id: row.get("application_id"),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+        label_identifier_field_metadata_id: row.get("label_identifier_field_metadata_id"),
+        image_identifier_field_metadata_id: row.get("image_identifier_field_metadata_id"),
+        is_label_synced_with_name: row.get("is_label_synced_with_name"),
+        duplicate_criteria: row
+            .get::<Option<String>, _>("duplicate_criteria")
+            .and_then(|raw| serde_json::from_str(&raw).ok()),
+        fields: Vec::new(),
+        index_metadata: Vec::new(),
+    })
+}
+
+fn row_to_field(row: &sqlx::postgres::PgRow) -> anyhow::Result<FieldMetadata> {
+    Ok(FieldMetadata {
+        id: row.get("id"),
+        universal_identifier: row.get("universal_identifier"),
+        field_type: FieldMetadataType::parse(row.get("type"))
+            .ok_or_else(|| anyhow::anyhow!("invalid field metadata type"))?,
+        name: row.get("name"),
+        label: row.get("label"),
+        description: row.get("description"),
+        icon: row.get("icon"),
+        is_active: row.get("is_active"),
+        is_system: row.get("is_system"),
+        is_ui_editable: row.get("is_ui_editable"),
+        writability: MetadataWritability::parse(row.get("writability"))
+            .ok_or_else(|| anyhow::anyhow!("invalid writability metadata value"))?,
+        is_nullable: row.get("is_nullable"),
+        is_unique: row.get("is_unique"),
+        is_searchable: row.get("is_searchable"),
+        is_audit_logged: row.get("is_audit_logged"),
+        default_value: parse_json_opt(row.get("default_value")),
+        options: parse_json_opt(row.get("options")),
+        settings: parse_json_opt(row.get("settings")),
+        object_metadata_id: row.get("object_metadata_id"),
+        is_label_synced_with_name: row.get("is_label_synced_with_name"),
+        morph_id: row.get("morph_id"),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+        application_id: row.get("application_id"),
+    })
+}
+
+fn parse_json_opt(raw: Option<String>) -> Option<squid_core::GqlJson<serde_json::Value>> {
+    raw.and_then(|raw| serde_json::from_str(&raw).ok())
+        .map(squid_core::GqlJson)
 }
 
 const PERSON_SELECT: &str = "id, created_at, updated_at, deleted_at, name_first, name_last, \
