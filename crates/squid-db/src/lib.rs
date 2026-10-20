@@ -16,9 +16,9 @@ use squid_core::{
     CreateTaskTargetInput, DateOp, Emails, FieldMetadata, FieldMetadataType, FilterExpr, FullName,
     MetadataReadability, MetadataWritability, Note, NoteTarget, ObjectMetadata, ObjectOpenRecordIn,
     ObjectSharingReach, Opportunity, OpportunityStage, Person, Role, StringOp, Task, TaskStatus,
-    TaskTarget, UpdateCompanyInput, UpdateNoteInput, UpdateOpportunityInput, UpdatePersonInput,
-    UpdateTaskInput, User, UuidOp, View, ViewCalendarLayout, ViewField, ViewKey, ViewOpenRecordIn,
-    ViewType, ViewVisibility, Workspace,
+    TaskTarget, UpdateCompanyInput, UpdateNoteInput, UpdateNoteTargetInput, UpdateOpportunityInput,
+    UpdatePersonInput, UpdateTaskInput, UpdateTaskTargetInput, User, UuidOp, View,
+    ViewCalendarLayout, ViewField, ViewKey, ViewOpenRecordIn, ViewType, ViewVisibility, Workspace,
 };
 use uuid::Uuid;
 
@@ -2254,6 +2254,76 @@ impl Db {
         Ok(row.as_ref().map(row_to_task_target))
     }
 
+    pub async fn update_task_target(
+        &self,
+        workspace_id: Uuid,
+        target_id: Uuid,
+        input: &UpdateTaskTargetInput,
+    ) -> anyhow::Result<Option<TaskTarget>> {
+        let Some(current) = self.get_task_target(workspace_id, target_id).await? else {
+            return Ok(None);
+        };
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let position = input.position.unwrap_or(current.position);
+        let company = input.target_company_id.or(current.target_company_id);
+        let opportunity = input
+            .target_opportunity_id
+            .or(current.target_opportunity_id);
+        let person = input.target_person_id.or(current.target_person_id);
+        let row = sqlx::query(&format!(
+            "UPDATE {schema}.task_target
+             SET position = $2, target_company_id = $3, target_opportunity_id = $4,
+                 target_person_id = $5, updated_at = now()
+             WHERE id = $1 AND deleted_at IS NULL
+             RETURNING {TASK_TARGET_SELECT}"
+        ))
+        .bind(target_id)
+        .bind(position)
+        .bind(company)
+        .bind(opportunity)
+        .bind(person)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.as_ref().map(row_to_task_target))
+    }
+
+    pub async fn destroy_task_target(
+        &self,
+        workspace_id: Uuid,
+        target_id: Uuid,
+    ) -> anyhow::Result<bool> {
+        self.ensure_workspace_task_target_table(workspace_id)
+            .await?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let result = sqlx::query(&format!("DELETE FROM {schema}.task_target WHERE id = $1"))
+            .bind(target_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    pub async fn restore_task_target(
+        &self,
+        workspace_id: Uuid,
+        target_id: Uuid,
+    ) -> anyhow::Result<Option<TaskTarget>> {
+        self.ensure_workspace_task_target_table(workspace_id)
+            .await?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let row = sqlx::query(&format!(
+            "UPDATE {schema}.task_target SET deleted_at = NULL, updated_at = now()
+             WHERE id = $1 AND deleted_at IS NOT NULL
+             RETURNING {TASK_TARGET_SELECT}"
+        ))
+        .bind(target_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.as_ref().map(row_to_task_target))
+    }
+
     pub async fn list_task_targets(
         &self,
         workspace_id: Uuid,
@@ -2359,6 +2429,76 @@ impl Db {
         let row = sqlx::query(&format!(
             "SELECT {NOTE_TARGET_SELECT} FROM {schema}.note_target
              WHERE id = $1 AND deleted_at IS NULL"
+        ))
+        .bind(target_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.as_ref().map(row_to_note_target))
+    }
+
+    pub async fn update_note_target(
+        &self,
+        workspace_id: Uuid,
+        target_id: Uuid,
+        input: &UpdateNoteTargetInput,
+    ) -> anyhow::Result<Option<NoteTarget>> {
+        let Some(current) = self.get_note_target(workspace_id, target_id).await? else {
+            return Ok(None);
+        };
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let position = input.position.unwrap_or(current.position);
+        let company = input.target_company_id.or(current.target_company_id);
+        let opportunity = input
+            .target_opportunity_id
+            .or(current.target_opportunity_id);
+        let person = input.target_person_id.or(current.target_person_id);
+        let row = sqlx::query(&format!(
+            "UPDATE {schema}.note_target
+             SET position = $2, target_company_id = $3, target_opportunity_id = $4,
+                 target_person_id = $5, updated_at = now()
+             WHERE id = $1 AND deleted_at IS NULL
+             RETURNING {NOTE_TARGET_SELECT}"
+        ))
+        .bind(target_id)
+        .bind(position)
+        .bind(company)
+        .bind(opportunity)
+        .bind(person)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.as_ref().map(row_to_note_target))
+    }
+
+    pub async fn destroy_note_target(
+        &self,
+        workspace_id: Uuid,
+        target_id: Uuid,
+    ) -> anyhow::Result<bool> {
+        self.ensure_workspace_note_target_table(workspace_id)
+            .await?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let result = sqlx::query(&format!("DELETE FROM {schema}.note_target WHERE id = $1"))
+            .bind(target_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    pub async fn restore_note_target(
+        &self,
+        workspace_id: Uuid,
+        target_id: Uuid,
+    ) -> anyhow::Result<Option<NoteTarget>> {
+        self.ensure_workspace_note_target_table(workspace_id)
+            .await?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let row = sqlx::query(&format!(
+            "UPDATE {schema}.note_target SET deleted_at = NULL, updated_at = now()
+             WHERE id = $1 AND deleted_at IS NOT NULL
+             RETURNING {NOTE_TARGET_SELECT}"
         ))
         .bind(target_id)
         .fetch_optional(&self.pool)

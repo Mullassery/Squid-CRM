@@ -798,9 +798,45 @@ pub struct TaskTargetFilterInput {
     pub target_person_id: Option<UuidFilter>,
 }
 
+#[derive(Debug, Clone, SimpleObject)]
+#[graphql(name = "TaskTarget", complex)]
+pub struct TaskTargetGql {
+    pub id: Uuid,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub deleted_at: Option<DateTime<Utc>>,
+    pub position: f64,
+    pub created_by: squid_core::Actor,
+    pub updated_by: squid_core::Actor,
+    pub search_vector: Option<String>,
+    pub task_id: Uuid,
+    pub target_company_id: Option<Uuid>,
+    pub target_opportunity_id: Option<Uuid>,
+    pub target_person_id: Option<Uuid>,
+}
+
+impl From<TaskTarget> for TaskTargetGql {
+    fn from(target: TaskTarget) -> Self {
+        Self {
+            id: target.id,
+            created_at: target.created_at,
+            updated_at: target.updated_at,
+            deleted_at: target.deleted_at,
+            position: target.position,
+            created_by: target.created_by,
+            updated_by: target.updated_by,
+            search_vector: target.search_vector,
+            task_id: target.task_id,
+            target_company_id: target.target_company_id,
+            target_opportunity_id: target.target_opportunity_id,
+            target_person_id: target.target_person_id,
+        }
+    }
+}
+
 #[derive(Debug, SimpleObject)]
 pub struct TaskTargetEdge {
-    pub node: TaskTarget,
+    pub node: TaskTargetGql,
     pub cursor: Cursor,
 }
 
@@ -908,9 +944,45 @@ pub struct NoteTargetFilterInput {
     pub target_person_id: Option<UuidFilter>,
 }
 
+#[derive(Debug, Clone, SimpleObject)]
+#[graphql(name = "NoteTarget", complex)]
+pub struct NoteTargetGql {
+    pub id: Uuid,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub deleted_at: Option<DateTime<Utc>>,
+    pub position: f64,
+    pub created_by: squid_core::Actor,
+    pub updated_by: squid_core::Actor,
+    pub search_vector: Option<String>,
+    pub note_id: Uuid,
+    pub target_company_id: Option<Uuid>,
+    pub target_opportunity_id: Option<Uuid>,
+    pub target_person_id: Option<Uuid>,
+}
+
+impl From<NoteTarget> for NoteTargetGql {
+    fn from(target: NoteTarget) -> Self {
+        Self {
+            id: target.id,
+            created_at: target.created_at,
+            updated_at: target.updated_at,
+            deleted_at: target.deleted_at,
+            position: target.position,
+            created_by: target.created_by,
+            updated_by: target.updated_by,
+            search_vector: target.search_vector,
+            note_id: target.note_id,
+            target_company_id: target.target_company_id,
+            target_opportunity_id: target.target_opportunity_id,
+            target_person_id: target.target_person_id,
+        }
+    }
+}
+
 #[derive(Debug, SimpleObject)]
 pub struct NoteTargetEdge {
-    pub node: NoteTarget,
+    pub node: NoteTargetGql,
     pub cursor: Cursor,
 }
 
@@ -946,6 +1018,44 @@ impl From<CreateTaskTargetInputGql> for CreateTaskTargetInput {
     fn from(input: CreateTaskTargetInputGql) -> Self {
         CreateTaskTargetInput {
             task_id: input.task_id,
+            target_company_id: input.target_company_id,
+            target_opportunity_id: input.target_opportunity_id,
+            target_person_id: input.target_person_id,
+        }
+    }
+}
+
+#[derive(Debug, InputObject)]
+pub struct UpdateTaskTargetInputGql {
+    pub position: Option<f64>,
+    pub target_company_id: Option<Uuid>,
+    pub target_opportunity_id: Option<Uuid>,
+    pub target_person_id: Option<Uuid>,
+}
+
+impl From<UpdateTaskTargetInputGql> for squid_core::UpdateTaskTargetInput {
+    fn from(input: UpdateTaskTargetInputGql) -> Self {
+        squid_core::UpdateTaskTargetInput {
+            position: input.position,
+            target_company_id: input.target_company_id,
+            target_opportunity_id: input.target_opportunity_id,
+            target_person_id: input.target_person_id,
+        }
+    }
+}
+
+#[derive(Debug, InputObject)]
+pub struct UpdateNoteTargetInputGql {
+    pub position: Option<f64>,
+    pub target_company_id: Option<Uuid>,
+    pub target_opportunity_id: Option<Uuid>,
+    pub target_person_id: Option<Uuid>,
+}
+
+impl From<UpdateNoteTargetInputGql> for squid_core::UpdateNoteTargetInput {
+    fn from(input: UpdateNoteTargetInputGql) -> Self {
+        squid_core::UpdateNoteTargetInput {
+            position: input.position,
             target_company_id: input.target_company_id,
             target_opportunity_id: input.target_opportunity_id,
             target_person_id: input.target_person_id,
@@ -1588,17 +1698,18 @@ impl TaskGql {
                 )
                 && option_uuid_filter_matches(&filter.target_person_id, target.target_person_id)
         });
+        let total = targets.len() as i64;
         let (targets, page_info) =
             paginate_targets(targets, first, last, offset, before, after, |t| t.id)?;
         let edges = targets
             .into_iter()
             .map(|node| TaskTargetEdge {
                 cursor: Cursor(crate::rest::encode_cursor(node.id)),
-                node,
+                node: node.into(),
             })
             .collect();
         Ok(TaskTargetConnection {
-            total_count: None,
+            total_count: Some(total),
             edges,
             page_info,
         })
@@ -1637,20 +1748,125 @@ impl NoteGql {
                 )
                 && option_uuid_filter_matches(&filter.target_person_id, target.target_person_id)
         });
+        let total = targets.len() as i64;
         let (targets, page_info) =
             paginate_targets(targets, first, last, offset, before, after, |t| t.id)?;
         let edges = targets
             .into_iter()
             .map(|node| NoteTargetEdge {
                 cursor: Cursor(crate::rest::encode_cursor(node.id)),
-                node,
+                node: node.into(),
             })
             .collect();
         Ok(NoteTargetConnection {
-            total_count: None,
+            total_count: Some(total),
             edges,
             page_info,
         })
+    }
+}
+
+#[ComplexObject]
+impl TaskTargetGql {
+    async fn task(&self, ctx: &Context<'_>) -> async_graphql::Result<Option<TaskGql>> {
+        let auth = require_auth(ctx)?;
+        Ok(state(ctx)
+            .db
+            .get_task(auth.workspace_id, self.task_id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .map(Into::into))
+    }
+
+    async fn target_company(&self, ctx: &Context<'_>) -> async_graphql::Result<Option<Company>> {
+        let Some(id) = self.target_company_id else {
+            return Ok(None);
+        };
+        let auth = require_auth(ctx)?;
+        state(ctx)
+            .db
+            .get_company(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))
+    }
+
+    async fn target_opportunity(
+        &self,
+        ctx: &Context<'_>,
+    ) -> async_graphql::Result<Option<Opportunity>> {
+        let Some(id) = self.target_opportunity_id else {
+            return Ok(None);
+        };
+        let auth = require_auth(ctx)?;
+        state(ctx)
+            .db
+            .get_opportunity(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))
+    }
+
+    async fn target_person(&self, ctx: &Context<'_>) -> async_graphql::Result<Option<Person>> {
+        let Some(id) = self.target_person_id else {
+            return Ok(None);
+        };
+        let auth = require_auth(ctx)?;
+        state(ctx)
+            .db
+            .get_person(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))
+    }
+}
+
+#[ComplexObject]
+impl NoteTargetGql {
+    async fn note(&self, ctx: &Context<'_>) -> async_graphql::Result<Option<NoteGql>> {
+        let auth = require_auth(ctx)?;
+        Ok(state(ctx)
+            .db
+            .get_note(auth.workspace_id, self.note_id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .map(Into::into))
+    }
+
+    async fn target_company(&self, ctx: &Context<'_>) -> async_graphql::Result<Option<Company>> {
+        let Some(id) = self.target_company_id else {
+            return Ok(None);
+        };
+        let auth = require_auth(ctx)?;
+        state(ctx)
+            .db
+            .get_company(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))
+    }
+
+    async fn target_opportunity(
+        &self,
+        ctx: &Context<'_>,
+    ) -> async_graphql::Result<Option<Opportunity>> {
+        let Some(id) = self.target_opportunity_id else {
+            return Ok(None);
+        };
+        let auth = require_auth(ctx)?;
+        state(ctx)
+            .db
+            .get_opportunity(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))
+    }
+
+    async fn target_person(&self, ctx: &Context<'_>) -> async_graphql::Result<Option<Person>> {
+        let Some(id) = self.target_person_id else {
+            return Ok(None);
+        };
+        let auth = require_auth(ctx)?;
+        state(ctx)
+            .db
+            .get_person(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))
     }
 }
 
@@ -2270,17 +2486,18 @@ impl QueryRoot {
                 )
                 && option_uuid_filter_matches(&filter.target_person_id, target.target_person_id)
         });
+        let total = targets.len() as i64;
         let (targets, page_info) =
             paginate_targets(targets, first, last, offset, before, after, |t| t.id)?;
         let edges = targets
             .into_iter()
             .map(|node| TaskTargetEdge {
                 cursor: Cursor(crate::rest::encode_cursor(node.id)),
-                node,
+                node: node.into(),
             })
             .collect();
         Ok(TaskTargetConnection {
-            total_count: None,
+            total_count: Some(total),
             edges,
             page_info,
         })
@@ -2290,7 +2507,7 @@ impl QueryRoot {
         &self,
         ctx: &Context<'_>,
         filter: TaskTargetFilterInput,
-    ) -> async_graphql::Result<Option<TaskTarget>> {
+    ) -> async_graphql::Result<Option<TaskTargetGql>> {
         let auth = require_auth(ctx)?;
         let targets = state(ctx)
             .db
@@ -2303,16 +2520,22 @@ impl QueryRoot {
             )
             .await
             .map_err(|e| gql_err(AppError::Internal(e)))?;
-        Ok(targets.into_iter().find(|target| {
-            uuid_filter_matches(&filter.id, target.id)
-                && uuid_filter_matches(&filter.task_id, target.task_id)
-                && option_uuid_filter_matches(&filter.target_company_id, target.target_company_id)
-                && option_uuid_filter_matches(
-                    &filter.target_opportunity_id,
-                    target.target_opportunity_id,
-                )
-                && option_uuid_filter_matches(&filter.target_person_id, target.target_person_id)
-        }))
+        Ok(targets
+            .into_iter()
+            .find(|target| {
+                uuid_filter_matches(&filter.id, target.id)
+                    && uuid_filter_matches(&filter.task_id, target.task_id)
+                    && option_uuid_filter_matches(
+                        &filter.target_company_id,
+                        target.target_company_id,
+                    )
+                    && option_uuid_filter_matches(
+                        &filter.target_opportunity_id,
+                        target.target_opportunity_id,
+                    )
+                    && option_uuid_filter_matches(&filter.target_person_id, target.target_person_id)
+            })
+            .map(Into::into))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2345,17 +2568,18 @@ impl QueryRoot {
                 )
                 && option_uuid_filter_matches(&filter.target_person_id, target.target_person_id)
         });
+        let total = targets.len() as i64;
         let (targets, page_info) =
             paginate_targets(targets, first, last, offset, before, after, |t| t.id)?;
         let edges = targets
             .into_iter()
             .map(|node| NoteTargetEdge {
                 cursor: Cursor(crate::rest::encode_cursor(node.id)),
-                node,
+                node: node.into(),
             })
             .collect();
         Ok(NoteTargetConnection {
-            total_count: None,
+            total_count: Some(total),
             edges,
             page_info,
         })
@@ -2365,7 +2589,7 @@ impl QueryRoot {
         &self,
         ctx: &Context<'_>,
         filter: NoteTargetFilterInput,
-    ) -> async_graphql::Result<Option<NoteTarget>> {
+    ) -> async_graphql::Result<Option<NoteTargetGql>> {
         let auth = require_auth(ctx)?;
         let targets = state(ctx)
             .db
@@ -2378,16 +2602,22 @@ impl QueryRoot {
             )
             .await
             .map_err(|e| gql_err(AppError::Internal(e)))?;
-        Ok(targets.into_iter().find(|target| {
-            uuid_filter_matches(&filter.id, target.id)
-                && uuid_filter_matches(&filter.note_id, target.note_id)
-                && option_uuid_filter_matches(&filter.target_company_id, target.target_company_id)
-                && option_uuid_filter_matches(
-                    &filter.target_opportunity_id,
-                    target.target_opportunity_id,
-                )
-                && option_uuid_filter_matches(&filter.target_person_id, target.target_person_id)
-        }))
+        Ok(targets
+            .into_iter()
+            .find(|target| {
+                uuid_filter_matches(&filter.id, target.id)
+                    && uuid_filter_matches(&filter.note_id, target.note_id)
+                    && option_uuid_filter_matches(
+                        &filter.target_company_id,
+                        target.target_company_id,
+                    )
+                    && option_uuid_filter_matches(
+                        &filter.target_opportunity_id,
+                        target.target_opportunity_id,
+                    )
+                    && option_uuid_filter_matches(&filter.target_person_id, target.target_person_id)
+            })
+            .map(Into::into))
     }
 
     async fn task(
@@ -3329,7 +3559,7 @@ impl MutationRoot {
         &self,
         ctx: &Context<'_>,
         data: CreateTaskTargetInputGql,
-    ) -> async_graphql::Result<TaskTarget> {
+    ) -> async_graphql::Result<TaskTargetGql> {
         let auth = require_auth(ctx)?;
         let input: CreateTaskTargetInput = data.into();
         if input.target_company_id.is_none()
@@ -3345,13 +3575,14 @@ impl MutationRoot {
             .create_task_target(auth.workspace_id, &input)
             .await
             .map_err(|e| gql_err(AppError::Internal(e)))
+            .map(Into::into)
     }
 
     async fn delete_task_target(
         &self,
         ctx: &Context<'_>,
         id: Uuid,
-    ) -> async_graphql::Result<TaskTarget> {
+    ) -> async_graphql::Result<TaskTargetGql> {
         let auth = require_auth(ctx)?;
         let state = state(ctx);
         let target = state
@@ -3365,14 +3596,14 @@ impl MutationRoot {
             .delete_task_target(auth.workspace_id, id)
             .await
             .map_err(|e| gql_err(AppError::Internal(e)))?;
-        Ok(target)
+        Ok(target.into())
     }
 
     async fn create_note_target(
         &self,
         ctx: &Context<'_>,
         data: CreateNoteTargetInputGql,
-    ) -> async_graphql::Result<NoteTarget> {
+    ) -> async_graphql::Result<NoteTargetGql> {
         let auth = require_auth(ctx)?;
         let input: CreateNoteTargetInput = data.into();
         if input.target_company_id.is_none()
@@ -3388,13 +3619,14 @@ impl MutationRoot {
             .create_note_target(auth.workspace_id, &input)
             .await
             .map_err(|e| gql_err(AppError::Internal(e)))
+            .map(Into::into)
     }
 
     async fn delete_note_target(
         &self,
         ctx: &Context<'_>,
         id: Uuid,
-    ) -> async_graphql::Result<NoteTarget> {
+    ) -> async_graphql::Result<NoteTargetGql> {
         let auth = require_auth(ctx)?;
         let state = state(ctx);
         let target = state
@@ -3408,7 +3640,418 @@ impl MutationRoot {
             .delete_note_target(auth.workspace_id, id)
             .await
             .map_err(|e| gql_err(AppError::Internal(e)))?;
-        Ok(target)
+        Ok(target.into())
+    }
+
+    async fn update_task_target(
+        &self,
+        ctx: &Context<'_>,
+        id: Uuid,
+        data: UpdateTaskTargetInputGql,
+    ) -> async_graphql::Result<TaskTargetGql> {
+        let auth = require_auth(ctx)?;
+        let input: squid_core::UpdateTaskTargetInput = data.into();
+        state(ctx)
+            .db
+            .update_task_target(auth.workspace_id, id, &input)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .map(Into::into)
+            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))
+    }
+
+    async fn destroy_task_target(
+        &self,
+        ctx: &Context<'_>,
+        id: Uuid,
+    ) -> async_graphql::Result<TaskTargetGql> {
+        let auth = require_auth(ctx)?;
+        let state = state(ctx);
+        let target = state
+            .db
+            .get_task_target(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))?;
+        state
+            .db
+            .destroy_task_target(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        Ok(target.into())
+    }
+
+    async fn restore_task_target(
+        &self,
+        ctx: &Context<'_>,
+        id: Uuid,
+    ) -> async_graphql::Result<TaskTargetGql> {
+        let auth = require_auth(ctx)?;
+        state(ctx)
+            .db
+            .restore_task_target(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .map(Into::into)
+            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))
+    }
+
+    async fn create_task_targets(
+        &self,
+        ctx: &Context<'_>,
+        data: Vec<CreateTaskTargetInputGql>,
+        #[graphql(default)] _upsert: bool,
+        _share_with: Option<Vec<ShareWithInput>>,
+    ) -> async_graphql::Result<Vec<TaskTargetGql>> {
+        let auth = require_auth(ctx)?;
+        let state = state(ctx);
+        let mut created = Vec::with_capacity(data.len());
+        for item in data {
+            let input: CreateTaskTargetInput = item.into();
+            if input.target_company_id.is_none()
+                && input.target_opportunity_id.is_none()
+                && input.target_person_id.is_none()
+            {
+                return Err(gql_err(AppError::BadRequest(
+                    "A task target must reference a company, opportunity or person".to_string(),
+                )));
+            }
+            created.push(
+                state
+                    .db
+                    .create_task_target(auth.workspace_id, &input)
+                    .await
+                    .map_err(|e| gql_err(AppError::Internal(e)))?
+                    .into(),
+            );
+        }
+        Ok(created)
+    }
+
+    async fn update_task_targets(
+        &self,
+        ctx: &Context<'_>,
+        data: UpdateTaskTargetInputGql,
+        filter: TaskTargetFilterInput,
+    ) -> async_graphql::Result<Vec<TaskTargetGql>> {
+        let auth = require_auth(ctx)?;
+        let state = state(ctx);
+        let input: squid_core::UpdateTaskTargetInput = data.into();
+        let targets = state
+            .db
+            .list_task_targets(
+                auth.workspace_id,
+                filter.task_id.as_ref().and_then(|f| f.eq),
+                filter.target_company_id.as_ref().and_then(|f| f.eq),
+                filter.target_opportunity_id.as_ref().and_then(|f| f.eq),
+                filter.target_person_id.as_ref().and_then(|f| f.eq),
+            )
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        let mut updated = Vec::new();
+        for target in targets {
+            if !uuid_filter_matches(&filter.id, target.id) {
+                continue;
+            }
+            if let Some(target) = state
+                .db
+                .update_task_target(auth.workspace_id, target.id, &input)
+                .await
+                .map_err(|e| gql_err(AppError::Internal(e)))?
+            {
+                updated.push(target.into());
+            }
+        }
+        Ok(updated)
+    }
+
+    async fn delete_task_targets(
+        &self,
+        ctx: &Context<'_>,
+        filter: TaskTargetFilterInput,
+    ) -> async_graphql::Result<Vec<TaskTargetGql>> {
+        let auth = require_auth(ctx)?;
+        let state = state(ctx);
+        let targets = state
+            .db
+            .list_task_targets(
+                auth.workspace_id,
+                filter.task_id.as_ref().and_then(|f| f.eq),
+                filter.target_company_id.as_ref().and_then(|f| f.eq),
+                filter.target_opportunity_id.as_ref().and_then(|f| f.eq),
+                filter.target_person_id.as_ref().and_then(|f| f.eq),
+            )
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        let mut deleted = Vec::new();
+        for target in targets {
+            if !uuid_filter_matches(&filter.id, target.id) {
+                continue;
+            }
+            state
+                .db
+                .delete_task_target(auth.workspace_id, target.id)
+                .await
+                .map_err(|e| gql_err(AppError::Internal(e)))?;
+            deleted.push(target.into());
+        }
+        Ok(deleted)
+    }
+
+    async fn restore_task_targets(
+        &self,
+        ctx: &Context<'_>,
+        filter: TaskTargetFilterInput,
+    ) -> async_graphql::Result<Vec<TaskTargetGql>> {
+        let auth = require_auth(ctx)?;
+        let state = state(ctx);
+        let targets = state
+            .db
+            .list_task_targets(
+                auth.workspace_id,
+                filter.task_id.as_ref().and_then(|f| f.eq),
+                filter.target_company_id.as_ref().and_then(|f| f.eq),
+                filter.target_opportunity_id.as_ref().and_then(|f| f.eq),
+                filter.target_person_id.as_ref().and_then(|f| f.eq),
+            )
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        let mut restored = Vec::new();
+        for target in targets {
+            if !uuid_filter_matches(&filter.id, target.id) {
+                continue;
+            }
+            if let Some(target) = state
+                .db
+                .restore_task_target(auth.workspace_id, target.id)
+                .await
+                .map_err(|e| gql_err(AppError::Internal(e)))?
+            {
+                restored.push(target.into());
+            }
+        }
+        Ok(restored)
+    }
+
+    async fn destroy_task_targets(
+        &self,
+        ctx: &Context<'_>,
+        filter: TaskTargetFilterInput,
+    ) -> async_graphql::Result<Vec<TaskTargetGql>> {
+        let auth = require_auth(ctx)?;
+        let state = state(ctx);
+        let targets = state
+            .db
+            .list_task_targets(
+                auth.workspace_id,
+                filter.task_id.as_ref().and_then(|f| f.eq),
+                filter.target_company_id.as_ref().and_then(|f| f.eq),
+                filter.target_opportunity_id.as_ref().and_then(|f| f.eq),
+                filter.target_person_id.as_ref().and_then(|f| f.eq),
+            )
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        let mut destroyed = Vec::new();
+        for target in targets {
+            if !uuid_filter_matches(&filter.id, target.id) {
+                continue;
+            }
+            state
+                .db
+                .destroy_task_target(auth.workspace_id, target.id)
+                .await
+                .map_err(|e| gql_err(AppError::Internal(e)))?;
+            destroyed.push(target.into());
+        }
+        Ok(destroyed)
+    }
+
+    async fn update_note_target(
+        &self,
+        ctx: &Context<'_>,
+        id: Uuid,
+        data: UpdateNoteTargetInputGql,
+    ) -> async_graphql::Result<NoteTargetGql> {
+        let auth = require_auth(ctx)?;
+        let input: squid_core::UpdateNoteTargetInput = data.into();
+        state(ctx)
+            .db
+            .update_note_target(auth.workspace_id, id, &input)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .map(Into::into)
+            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))
+    }
+
+    async fn destroy_note_target(
+        &self,
+        ctx: &Context<'_>,
+        id: Uuid,
+    ) -> async_graphql::Result<NoteTargetGql> {
+        let auth = require_auth(ctx)?;
+        let state = state(ctx);
+        let target = state
+            .db
+            .get_note_target(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))?;
+        state
+            .db
+            .destroy_note_target(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        Ok(target.into())
+    }
+
+    async fn restore_note_target(
+        &self,
+        ctx: &Context<'_>,
+        id: Uuid,
+    ) -> async_graphql::Result<NoteTargetGql> {
+        let auth = require_auth(ctx)?;
+        state(ctx)
+            .db
+            .restore_note_target(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .map(Into::into)
+            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))
+    }
+
+    async fn create_note_targets(
+        &self,
+        ctx: &Context<'_>,
+        data: Vec<CreateNoteTargetInputGql>,
+        #[graphql(default)] _upsert: bool,
+        _share_with: Option<Vec<ShareWithInput>>,
+    ) -> async_graphql::Result<Vec<NoteTargetGql>> {
+        let auth = require_auth(ctx)?;
+        let state = state(ctx);
+        let mut created = Vec::with_capacity(data.len());
+        for item in data {
+            let input: CreateNoteTargetInput = item.into();
+            if input.target_company_id.is_none()
+                && input.target_opportunity_id.is_none()
+                && input.target_person_id.is_none()
+            {
+                return Err(gql_err(AppError::BadRequest(
+                    "A note target must reference a company, opportunity or person".to_string(),
+                )));
+            }
+            created.push(
+                state
+                    .db
+                    .create_note_target(auth.workspace_id, &input)
+                    .await
+                    .map_err(|e| gql_err(AppError::Internal(e)))?
+                    .into(),
+            );
+        }
+        Ok(created)
+    }
+
+    async fn update_note_targets(
+        &self,
+        ctx: &Context<'_>,
+        data: UpdateNoteTargetInputGql,
+        filter: NoteTargetFilterInput,
+    ) -> async_graphql::Result<Vec<NoteTargetGql>> {
+        let auth = require_auth(ctx)?;
+        let state = state(ctx);
+        let input: squid_core::UpdateNoteTargetInput = data.into();
+        let targets = state
+            .db
+            .list_note_targets(
+                auth.workspace_id,
+                filter.note_id.as_ref().and_then(|f| f.eq),
+                filter.target_company_id.as_ref().and_then(|f| f.eq),
+                filter.target_opportunity_id.as_ref().and_then(|f| f.eq),
+                filter.target_person_id.as_ref().and_then(|f| f.eq),
+            )
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        let mut updated = Vec::new();
+        for target in targets {
+            if !uuid_filter_matches(&filter.id, target.id) {
+                continue;
+            }
+            if let Some(target) = state
+                .db
+                .update_note_target(auth.workspace_id, target.id, &input)
+                .await
+                .map_err(|e| gql_err(AppError::Internal(e)))?
+            {
+                updated.push(target.into());
+            }
+        }
+        Ok(updated)
+    }
+
+    async fn delete_note_targets(
+        &self,
+        ctx: &Context<'_>,
+        filter: NoteTargetFilterInput,
+    ) -> async_graphql::Result<Vec<NoteTargetGql>> {
+        let auth = require_auth(ctx)?;
+        let state = state(ctx);
+        let targets = state
+            .db
+            .list_note_targets(
+                auth.workspace_id,
+                filter.note_id.as_ref().and_then(|f| f.eq),
+                filter.target_company_id.as_ref().and_then(|f| f.eq),
+                filter.target_opportunity_id.as_ref().and_then(|f| f.eq),
+                filter.target_person_id.as_ref().and_then(|f| f.eq),
+            )
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        let mut deleted = Vec::new();
+        for target in targets {
+            if !uuid_filter_matches(&filter.id, target.id) {
+                continue;
+            }
+            state
+                .db
+                .delete_note_target(auth.workspace_id, target.id)
+                .await
+                .map_err(|e| gql_err(AppError::Internal(e)))?;
+            deleted.push(target.into());
+        }
+        Ok(deleted)
+    }
+
+    async fn destroy_note_targets(
+        &self,
+        ctx: &Context<'_>,
+        filter: NoteTargetFilterInput,
+    ) -> async_graphql::Result<Vec<NoteTargetGql>> {
+        let auth = require_auth(ctx)?;
+        let state = state(ctx);
+        let targets = state
+            .db
+            .list_note_targets(
+                auth.workspace_id,
+                filter.note_id.as_ref().and_then(|f| f.eq),
+                filter.target_company_id.as_ref().and_then(|f| f.eq),
+                filter.target_opportunity_id.as_ref().and_then(|f| f.eq),
+                filter.target_person_id.as_ref().and_then(|f| f.eq),
+            )
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        let mut destroyed = Vec::new();
+        for target in targets {
+            if !uuid_filter_matches(&filter.id, target.id) {
+                continue;
+            }
+            state
+                .db
+                .destroy_note_target(auth.workspace_id, target.id)
+                .await
+                .map_err(|e| gql_err(AppError::Internal(e)))?;
+            destroyed.push(target.into());
+        }
+        Ok(destroyed)
     }
 
     async fn sign_out(&self, ctx: &Context<'_>) -> async_graphql::Result<bool> {

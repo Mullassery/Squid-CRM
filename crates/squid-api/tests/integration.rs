@@ -2499,3 +2499,309 @@ async fn task_and_note_target_relations() {
         1
     );
 }
+
+#[tokio::test]
+async fn task_and_note_target_rest_and_batch_surfaces() {
+    let app = test_app().await;
+    let email = unique_email("target-surfaces");
+    let (token, _workspace) = signup(&app, &email).await;
+
+    let person = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/people",
+            &token,
+            Some(person_body("Grace", "Target", "grace.target@example.com")),
+        ),
+    )
+    .await;
+    let person_id = person.body["data"]["createPerson"]["id"]
+        .as_str()
+        .expect("person id")
+        .to_string();
+
+    let company = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/companies",
+            &token,
+            Some(json!({ "name": "Surface Co" })),
+        ),
+    )
+    .await;
+    let company_id = company.body["data"]["createCompany"]["id"]
+        .as_str()
+        .expect("company id")
+        .to_string();
+
+    let task = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/tasks",
+            &token,
+            Some(json!({ "title": "Surface task" })),
+        ),
+    )
+    .await;
+    let task_id = task.body["data"]["createTask"]["id"]
+        .as_str()
+        .expect("task id")
+        .to_string();
+
+    let created = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/taskTargets",
+            &token,
+            Some(json!({ "taskId": task_id, "targetPersonId": person_id })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        created.status,
+        StatusCode::CREATED,
+        "body: {}",
+        created.body
+    );
+    let target_id = created.body["data"]["createTaskTarget"]["id"]
+        .as_str()
+        .expect("target id")
+        .to_string();
+
+    let listed = send(&app, authorized("GET", "/rest/taskTargets", &token, None)).await;
+    assert_eq!(listed.status, StatusCode::OK, "body: {}", listed.body);
+    assert_eq!(listed.body["totalCount"], 1);
+    assert_eq!(
+        listed.body["data"]["taskTargets"][0]["targetPersonId"],
+        person_id
+    );
+
+    let fetched = send(
+        &app,
+        authorized(
+            "GET",
+            &format!("/rest/taskTargets/{target_id}"),
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(fetched.status, StatusCode::OK, "body: {}", fetched.body);
+    assert_eq!(fetched.body["data"]["taskTarget"]["taskId"], task_id);
+
+    let patched = send(
+        &app,
+        authorized(
+            "PATCH",
+            &format!("/rest/taskTargets/{target_id}"),
+            &token,
+            Some(json!({ "position": 3.5, "targetCompanyId": company_id })),
+        ),
+    )
+    .await;
+    assert_eq!(patched.status, StatusCode::OK, "body: {}", patched.body);
+    assert_eq!(patched.body["data"]["updateTaskTarget"]["position"], 3.5);
+    assert_eq!(
+        patched.body["data"]["updateTaskTarget"]["targetCompanyId"],
+        company_id
+    );
+
+    let nested = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": format!(
+                    "{{ taskTargets(filter: {{ taskId: {{ eq: \"{task_id}\" }} }}) {{ totalCount edges {{ node {{ id taskId position task {{ id title }} targetPerson {{ id }} targetCompany {{ id name }} }} }} }} }}"
+                )
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(nested.status, StatusCode::OK, "body: {}", nested.body);
+    let connection = &nested.body["data"]["taskTargets"];
+    assert_eq!(connection["totalCount"], 1);
+    let node = &connection["edges"][0]["node"];
+    assert_eq!(node["task"]["title"], "Surface task");
+    assert_eq!(node["targetPerson"]["id"], person_id.as_str());
+    assert_eq!(node["targetCompany"]["name"], "Surface Co");
+
+    let batch = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": format!(
+                    "mutation {{ createTaskTargets(data: [{{ taskId: \"{task_id}\", targetCompanyId: \"{company_id}\" }}]) {{ id targetCompanyId }} }}"
+                )
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(batch.status, StatusCode::OK, "body: {}", batch.body);
+    assert_eq!(
+        batch.body["data"]["createTaskTargets"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    let batch_update = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": format!(
+                    "mutation {{ updateTaskTargets(data: {{ position: 9.0 }}, filter: {{ taskId: {{ eq: \"{task_id}\" }} }}) {{ id position }} }}"
+                )
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(
+        batch_update.status,
+        StatusCode::OK,
+        "body: {}",
+        batch_update.body
+    );
+    let updated = batch_update.body["data"]["updateTaskTargets"]
+        .as_array()
+        .unwrap();
+    assert_eq!(updated.len(), 2);
+    assert!(updated.iter().all(|target| target["position"] == 9.0));
+
+    let batch_delete = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": format!(
+                    "mutation {{ deleteTaskTargets(filter: {{ taskId: {{ eq: \"{task_id}\" }} }}) {{ id }} }}"
+                )
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(
+        batch_delete.status,
+        StatusCode::OK,
+        "body: {}",
+        batch_delete.body
+    );
+    assert_eq!(
+        batch_delete.body["data"]["deleteTaskTargets"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    let after_delete = send(&app, authorized("GET", "/rest/taskTargets", &token, None)).await;
+    assert_eq!(after_delete.body["totalCount"], 0);
+
+    let restored = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": format!(
+                    "mutation {{ restoreTaskTarget(id: \"{target_id}\") {{ id deletedAt }} }}"
+                )
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(restored.status, StatusCode::OK, "body: {}", restored.body);
+    assert!(restored.body["data"]["restoreTaskTarget"]["deletedAt"].is_null());
+
+    let destroyed = send(
+        &app,
+        authorized(
+            "DELETE",
+            &format!("/rest/taskTargets/{target_id}"),
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(destroyed.status, StatusCode::OK, "body: {}", destroyed.body);
+    assert_eq!(
+        destroyed.body["data"]["deleteTaskTarget"]["id"],
+        target_id.as_str()
+    );
+
+    let note = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/notes",
+            &token,
+            Some(json!({ "title": "Surface note" })),
+        ),
+    )
+    .await;
+    let note_id = note.body["data"]["createNote"]["id"]
+        .as_str()
+        .expect("note id")
+        .to_string();
+
+    let note_target = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/noteTargets",
+            &token,
+            Some(json!({ "noteId": note_id, "targetCompanyId": company_id })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        note_target.status,
+        StatusCode::CREATED,
+        "body: {}",
+        note_target.body
+    );
+    assert_eq!(
+        note_target.body["data"]["createNoteTarget"]["targetCompanyId"],
+        company_id
+    );
+
+    let note_connection = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": format!(
+                    "{{ noteTargets(filter: {{ noteId: {{ eq: \"{note_id}\" }} }}) {{ totalCount edges {{ node {{ noteId note {{ id title }} targetCompany {{ id }} }} }} }} }}"
+                )
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(
+        note_connection.status,
+        StatusCode::OK,
+        "body: {}",
+        note_connection.body
+    );
+    let note_node = &note_connection.body["data"]["noteTargets"]["edges"][0]["node"];
+    assert_eq!(note_node["note"]["title"], "Surface note");
+    assert_eq!(note_node["targetCompany"]["id"], company_id.as_str());
+}

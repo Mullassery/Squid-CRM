@@ -15,10 +15,11 @@ use base64::Engine;
 use serde::Deserialize;
 use serde_json::json;
 use squid_core::{
-    AppError, AppResult, Company, CreateCompanyInput, CreateNoteInput, CreateOpportunityInput,
-    CreatePersonInput, CreateTaskInput, DateOp, FilterExpr, FindManyResponse, Note, Opportunity,
-    PageInfo, Person, StringOp, Task, UpdateCompanyInput, UpdateNoteInput, UpdateOpportunityInput,
-    UpdatePersonInput, UpdateTaskInput, UuidOp,
+    AppError, AppResult, Company, CreateCompanyInput, CreateNoteInput, CreateNoteTargetInput,
+    CreateOpportunityInput, CreatePersonInput, CreateTaskInput, CreateTaskTargetInput, DateOp,
+    FilterExpr, FindManyResponse, Note, NoteTarget, Opportunity, PageInfo, Person, StringOp, Task,
+    TaskTarget, UpdateCompanyInput, UpdateNoteInput, UpdateNoteTargetInput, UpdateOpportunityInput,
+    UpdatePersonInput, UpdateTaskInput, UpdateTaskTargetInput, UuidOp,
 };
 use squid_db::{OrderTerm, PersonColumn};
 use uuid::Uuid;
@@ -910,6 +911,314 @@ pub async fn restore_note(
         .map_err(AppError::Internal)?
         .ok_or_else(|| AppError::NotFound("Record not found".to_string()))?;
     Ok(Json(json!({ "data": { "restoreNote": note } })))
+}
+
+fn list_target_page<T: Clone>(
+    mut rows: Vec<T>,
+    limit: i64,
+    offset: i64,
+    starting_after: Option<Uuid>,
+    ending_before: Option<Uuid>,
+    id_of: impl Fn(&T) -> Uuid,
+) -> (Vec<T>, PageInfo) {
+    let mut offset = offset;
+    if let Some(after) = starting_after {
+        if let Some(index) = rows.iter().position(|row| id_of(row) == after) {
+            rows.drain(..=index);
+            offset = 0;
+        }
+    }
+    if let Some(before) = ending_before {
+        if let Some(index) = rows.iter().position(|row| id_of(row) == before) {
+            rows.truncate(index);
+        }
+    }
+    let start = (offset as usize).min(rows.len());
+    let end = (start + limit as usize).min(rows.len());
+    let start_cursor = rows.get(start).map(|row| encode_cursor(id_of(row)));
+    let end_cursor = rows
+        .get(end.saturating_sub(1))
+        .map(|row| encode_cursor(id_of(row)));
+    let page = rows[start..end].to_vec();
+    (
+        page,
+        PageInfo {
+            has_next_page: end < rows.len(),
+            has_previous_page: start > 0 || starting_after.is_some(),
+            start_cursor,
+            end_cursor,
+        },
+    )
+}
+
+pub async fn list_task_targets(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<ListOpportunitiesParams>,
+) -> AppResult<Json<FindManyResponse<TaskTarget>>> {
+    let auth = require(&state, &headers).await?;
+    let _ = (&params.order_by, &params.filter);
+    let limit = params
+        .limit
+        .unwrap_or(20)
+        .clamp(1, state.config.max_page_size);
+    let starting_after = params
+        .starting_after
+        .as_deref()
+        .map(decode_cursor)
+        .transpose()?;
+    let ending_before = params
+        .ending_before
+        .as_deref()
+        .map(decode_cursor)
+        .transpose()?;
+    let targets = state
+        .db
+        .list_task_targets(auth.workspace_id, None, None, None, None)
+        .await
+        .map_err(AppError::Internal)?;
+    let total = targets.len() as i64;
+    let (page, page_info) = list_target_page(
+        targets,
+        limit,
+        params.offset.unwrap_or(0).max(0),
+        starting_after,
+        ending_before,
+        |target| target.id,
+    );
+    let mut data = BTreeMap::new();
+    data.insert("taskTargets".to_string(), page);
+    Ok(Json(FindManyResponse {
+        data,
+        total_count: total.max(0) as u64,
+        page_info,
+    }))
+}
+
+pub async fn get_task_target(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<serde_json::Value>> {
+    let auth = require(&state, &headers).await?;
+    let target = state
+        .db
+        .get_task_target(auth.workspace_id, id)
+        .await
+        .map_err(AppError::Internal)?
+        .ok_or_else(|| AppError::NotFound("Record not found".to_string()))?;
+    Ok(Json(json!({ "data": { "taskTarget": target } })))
+}
+
+pub async fn create_task_target(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(input): Json<CreateTaskTargetInput>,
+) -> AppResult<(axum::http::StatusCode, Json<serde_json::Value>)> {
+    let auth = require(&state, &headers).await?;
+    let target = state
+        .db
+        .create_task_target(auth.workspace_id, &input)
+        .await
+        .map_err(AppError::Internal)?;
+    Ok((
+        axum::http::StatusCode::CREATED,
+        Json(json!({ "data": { "createTaskTarget": target } })),
+    ))
+}
+
+pub async fn update_task_target(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Json(input): Json<UpdateTaskTargetInput>,
+) -> AppResult<Json<serde_json::Value>> {
+    let auth = require(&state, &headers).await?;
+    let target = state
+        .db
+        .update_task_target(auth.workspace_id, id, &input)
+        .await
+        .map_err(AppError::Internal)?
+        .ok_or_else(|| AppError::NotFound("Record not found".to_string()))?;
+    Ok(Json(json!({ "data": { "updateTaskTarget": target } })))
+}
+
+pub async fn delete_task_target(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Query(params): Query<DeletePersonParams>,
+) -> AppResult<Json<serde_json::Value>> {
+    let auth = require(&state, &headers).await?;
+    let deleted = if params.soft_delete {
+        state
+            .db
+            .delete_task_target(auth.workspace_id, id)
+            .await
+            .map_err(AppError::Internal)?
+    } else {
+        state
+            .db
+            .destroy_task_target(auth.workspace_id, id)
+            .await
+            .map_err(AppError::Internal)?
+    };
+    if !deleted {
+        return Err(AppError::NotFound("Record not found".to_string()));
+    }
+    Ok(Json(
+        json!({ "data": { "deleteTaskTarget": { "id": id } } }),
+    ))
+}
+
+pub async fn restore_task_target(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<serde_json::Value>> {
+    let auth = require(&state, &headers).await?;
+    let target = state
+        .db
+        .restore_task_target(auth.workspace_id, id)
+        .await
+        .map_err(AppError::Internal)?
+        .ok_or_else(|| AppError::NotFound("Record not found".to_string()))?;
+    Ok(Json(json!({ "data": { "restoreTaskTarget": target } })))
+}
+
+pub async fn list_note_targets(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<ListOpportunitiesParams>,
+) -> AppResult<Json<FindManyResponse<NoteTarget>>> {
+    let auth = require(&state, &headers).await?;
+    let _ = (&params.order_by, &params.filter);
+    let limit = params
+        .limit
+        .unwrap_or(20)
+        .clamp(1, state.config.max_page_size);
+    let starting_after = params
+        .starting_after
+        .as_deref()
+        .map(decode_cursor)
+        .transpose()?;
+    let ending_before = params
+        .ending_before
+        .as_deref()
+        .map(decode_cursor)
+        .transpose()?;
+    let targets = state
+        .db
+        .list_note_targets(auth.workspace_id, None, None, None, None)
+        .await
+        .map_err(AppError::Internal)?;
+    let total = targets.len() as i64;
+    let (page, page_info) = list_target_page(
+        targets,
+        limit,
+        params.offset.unwrap_or(0).max(0),
+        starting_after,
+        ending_before,
+        |target| target.id,
+    );
+    let mut data = BTreeMap::new();
+    data.insert("noteTargets".to_string(), page);
+    Ok(Json(FindManyResponse {
+        data,
+        total_count: total.max(0) as u64,
+        page_info,
+    }))
+}
+
+pub async fn get_note_target(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<serde_json::Value>> {
+    let auth = require(&state, &headers).await?;
+    let target = state
+        .db
+        .get_note_target(auth.workspace_id, id)
+        .await
+        .map_err(AppError::Internal)?
+        .ok_or_else(|| AppError::NotFound("Record not found".to_string()))?;
+    Ok(Json(json!({ "data": { "noteTarget": target } })))
+}
+
+pub async fn create_note_target(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(input): Json<CreateNoteTargetInput>,
+) -> AppResult<(axum::http::StatusCode, Json<serde_json::Value>)> {
+    let auth = require(&state, &headers).await?;
+    let target = state
+        .db
+        .create_note_target(auth.workspace_id, &input)
+        .await
+        .map_err(AppError::Internal)?;
+    Ok((
+        axum::http::StatusCode::CREATED,
+        Json(json!({ "data": { "createNoteTarget": target } })),
+    ))
+}
+
+pub async fn update_note_target(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Json(input): Json<UpdateNoteTargetInput>,
+) -> AppResult<Json<serde_json::Value>> {
+    let auth = require(&state, &headers).await?;
+    let target = state
+        .db
+        .update_note_target(auth.workspace_id, id, &input)
+        .await
+        .map_err(AppError::Internal)?
+        .ok_or_else(|| AppError::NotFound("Record not found".to_string()))?;
+    Ok(Json(json!({ "data": { "updateNoteTarget": target } })))
+}
+
+pub async fn delete_note_target(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Query(params): Query<DeletePersonParams>,
+) -> AppResult<Json<serde_json::Value>> {
+    let auth = require(&state, &headers).await?;
+    let deleted = if params.soft_delete {
+        state
+            .db
+            .delete_note_target(auth.workspace_id, id)
+            .await
+            .map_err(AppError::Internal)?
+    } else {
+        state
+            .db
+            .destroy_note_target(auth.workspace_id, id)
+            .await
+            .map_err(AppError::Internal)?
+    };
+    if !deleted {
+        return Err(AppError::NotFound("Record not found".to_string()));
+    }
+    Ok(Json(
+        json!({ "data": { "deleteNoteTarget": { "id": id } } }),
+    ))
+}
+
+pub async fn restore_note_target(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<serde_json::Value>> {
+    let auth = require(&state, &headers).await?;
+    let target = state
+        .db
+        .restore_note_target(auth.workspace_id, id)
+        .await
+        .map_err(AppError::Internal)?
+        .ok_or_else(|| AppError::NotFound("Record not found".to_string()))?;
+    Ok(Json(json!({ "data": { "restoreNoteTarget": target } })))
 }
 
 pub async fn me(

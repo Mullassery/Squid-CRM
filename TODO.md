@@ -64,15 +64,16 @@
       metadata + default views, REST CRUD and GraphQL CRUD with status/title
       filters; `RichText` body support.
 - [x] Task/note targets: `task_target`/`note_target` migrations, GraphQL
-      `taskTargets`/`noteTargets` connection fields, root queries, and
-      create/delete mutations with tenant scoping.
+      `taskTargets`/`noteTargets` connections with `totalCount`, root queries,
+      create/update/delete/destroy/restore single and batch mutations, nested
+      target records, and REST `/rest/taskTargets` + `/rest/noteTargets` CRUD.
 - [ ] Metadata writes, view writes/filters/sorts/groups, roles, indexes/relations,
       remaining standard objects, and metadata-driven dynamic schema generation.
 - [x] `currentUser`/`currentWorkspace` full frontend boot fragment (ADR 0005;
       enterprise surfaces are explicit empty/static defaults).
 - [ ] Role/permission engine, billing/SSO data, feature flags, and
       `ApiKey.role` as the upstream `Role` object.
-- [ ] REST target routes, target updates/batches, and nested target record resolution (`TaskTarget.targetCompany` etc.).
+- [x] REST target routes, target updates/batches, and nested target record resolution (`TaskTarget.targetCompany` etc.).
 - [ ] Views/filters/sorts/groups parity (relation filters and view semantics).
 - [ ] Search, files, export/import.
 - [ ] Jobs/cron, webhooks, workflows, integrations.
@@ -93,9 +94,8 @@
 - Opportunity filters cover scalar fields (id, name, stage, closeDate,
   companyId, pointOfContactId, ownerId); relation filters and `orderBy` are not
   yet applied; REST opportunity `filter`/`order_by` are ignored.
-- Task/Note targets exist over GraphQL; REST target endpoints, target updates,
-  batches, and nested target records are not implemented.
-- Task/Note target connections omit `totalCount` (upstream returns it).
+- Task/Note target REST list `filter`/`order_by` are ignored (stable position
+  order); GraphQL target filters cover id/taskId/noteId/target*Id.
 - Task `orderBy` and REST `filter`/`order_by` are not applied (stable position
   order); filters cover id/title/status/dueAt/assigneeId.
 - No OpenAPI document emitted yet.

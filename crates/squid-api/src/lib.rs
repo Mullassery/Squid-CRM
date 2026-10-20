@@ -154,6 +154,34 @@ pub fn app(state: AppState) -> Router {
                 .delete(rest::delete_note),
         )
         .route("/rest/notes/{id}/restore", patch(rest::restore_note))
+        .route(
+            "/rest/taskTargets",
+            get(rest::list_task_targets).post(rest::create_task_target),
+        )
+        .route(
+            "/rest/taskTargets/{id}",
+            get(rest::get_task_target)
+                .patch(rest::update_task_target)
+                .delete(rest::delete_task_target),
+        )
+        .route(
+            "/rest/taskTargets/{id}/restore",
+            patch(rest::restore_task_target),
+        )
+        .route(
+            "/rest/noteTargets",
+            get(rest::list_note_targets).post(rest::create_note_target),
+        )
+        .route(
+            "/rest/noteTargets/{id}",
+            get(rest::get_note_target)
+                .patch(rest::update_note_target)
+                .delete(rest::delete_note_target),
+        )
+        .route(
+            "/rest/noteTargets/{id}/restore",
+            patch(rest::restore_note_target),
+        )
         .route("/rest/me", get(rest::me))
         .route("/auth/signup", post(auth::signup))
         .route("/auth/signin", post(auth::signin))
