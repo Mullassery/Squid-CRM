@@ -10,12 +10,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
 
+pub mod company;
 pub mod config;
 pub mod error;
 pub mod metadata;
 pub mod view;
 
 pub use async_graphql::Json as GqlJson;
+pub use company::*;
 pub use config::Config;
 pub use error::{AppError, AppResult};
 pub use metadata::*;
@@ -120,8 +122,17 @@ pub struct Emails {
 
 /// Composite `LinksMetadata` shape (`linkedinLink`).
 #[derive(
-    Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, async_graphql::SimpleObject,
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    Default,
+    async_graphql::SimpleObject,
+    async_graphql::InputObject,
 )]
+#[graphql(input_name = "LinksInput")]
 pub struct Links {
     #[serde(rename = "primaryLinkLabel", default)]
     pub primary_link_label: String,

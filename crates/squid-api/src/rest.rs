@@ -15,8 +15,8 @@ use base64::Engine;
 use serde::Deserialize;
 use serde_json::json;
 use squid_core::{
-    AppError, AppResult, CreatePersonInput, DateOp, FilterExpr, FindManyResponse, PageInfo, Person,
-    StringOp, UpdatePersonInput, UuidOp,
+    AppError, AppResult, Company, CreateCompanyInput, CreatePersonInput, DateOp, FilterExpr,
+    FindManyResponse, PageInfo, Person, StringOp, UpdateCompanyInput, UpdatePersonInput, UuidOp,
 };
 use squid_db::{OrderTerm, PersonColumn};
 use uuid::Uuid;
@@ -270,6 +270,171 @@ pub async fn restore_person(
         .ok_or_else(|| AppError::NotFound("Record not found".to_string()))?;
 
     Ok(Json(json!({ "data": { "restorePerson": person } })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ListCompaniesParams {
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+    pub starting_after: Option<String>,
+    pub ending_before: Option<String>,
+    pub order_by: Option<String>,
+    pub filter: Option<String>,
+}
+
+pub async fn list_companies(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<ListCompaniesParams>,
+) -> AppResult<Json<FindManyResponse<Company>>> {
+    let auth = require(&state, &headers).await?;
+    let _ = (&params.order_by, &params.filter);
+
+    let limit = params
+        .limit
+        .unwrap_or(20)
+        .clamp(1, state.config.max_page_size);
+    let mut offset = params.offset.unwrap_or(0).max(0);
+    let starting_after = params
+        .starting_after
+        .as_deref()
+        .map(decode_cursor)
+        .transpose()?;
+    let ending_before = params
+        .ending_before
+        .as_deref()
+        .map(decode_cursor)
+        .transpose()?;
+
+    let (mut companies, total) = state
+        .db
+        .list_companies(auth.workspace_id, 10_000, 0)
+        .await
+        .map_err(AppError::Internal)?;
+
+    if let Some(after) = starting_after {
+        if let Some(index) = companies.iter().position(|company| company.id == after) {
+            companies.drain(..=index);
+            offset = 0;
+        }
+    }
+    if let Some(before) = ending_before {
+        if let Some(index) = companies.iter().position(|company| company.id == before) {
+            companies.truncate(index);
+        }
+    }
+
+    let start = (offset as usize).min(companies.len());
+    let end = (start + limit as usize).min(companies.len());
+    let has_next_page = end < companies.len();
+    let has_previous_page = start > 0 || starting_after.is_some();
+    let page: Vec<Company> = companies[start..end].to_vec();
+
+    let start_cursor = page.first().map(|company| encode_cursor(company.id));
+    let end_cursor = page.last().map(|company| encode_cursor(company.id));
+
+    let mut data = BTreeMap::new();
+    data.insert("companies".to_string(), page);
+
+    Ok(Json(FindManyResponse {
+        data,
+        total_count: total.max(0) as u64,
+        page_info: PageInfo {
+            has_next_page,
+            has_previous_page,
+            start_cursor,
+            end_cursor,
+        },
+    }))
+}
+
+pub async fn get_company(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<serde_json::Value>> {
+    let auth = require(&state, &headers).await?;
+    let company = state
+        .db
+        .get_company(auth.workspace_id, id)
+        .await
+        .map_err(AppError::Internal)?
+        .ok_or_else(|| AppError::NotFound("Record not found".to_string()))?;
+    Ok(Json(json!({ "data": { "company": company } })))
+}
+
+pub async fn create_company(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(input): Json<CreateCompanyInput>,
+) -> AppResult<(axum::http::StatusCode, Json<serde_json::Value>)> {
+    let auth = require(&state, &headers).await?;
+    let company = state
+        .db
+        .create_company(auth.workspace_id, &input)
+        .await
+        .map_err(AppError::Internal)?;
+    Ok((
+        axum::http::StatusCode::CREATED,
+        Json(json!({ "data": { "createCompany": company } })),
+    ))
+}
+
+pub async fn update_company(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Json(input): Json<UpdateCompanyInput>,
+) -> AppResult<Json<serde_json::Value>> {
+    let auth = require(&state, &headers).await?;
+    let company = state
+        .db
+        .update_company(auth.workspace_id, id, &input)
+        .await
+        .map_err(AppError::Internal)?
+        .ok_or_else(|| AppError::NotFound("Record not found".to_string()))?;
+    Ok(Json(json!({ "data": { "updateCompany": company } })))
+}
+
+pub async fn delete_company(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Query(params): Query<DeletePersonParams>,
+) -> AppResult<Json<serde_json::Value>> {
+    let auth = require(&state, &headers).await?;
+    let deleted = if params.soft_delete {
+        state
+            .db
+            .soft_delete_company(auth.workspace_id, id)
+            .await
+            .map_err(AppError::Internal)?
+    } else {
+        state
+            .db
+            .destroy_company(auth.workspace_id, id)
+            .await
+            .map_err(AppError::Internal)?
+    };
+    if !deleted {
+        return Err(AppError::NotFound("Record not found".to_string()));
+    }
+    Ok(Json(json!({ "data": { "deleteCompany": { "id": id } } })))
+}
+
+pub async fn restore_company(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<serde_json::Value>> {
+    let auth = require(&state, &headers).await?;
+    let company = state
+        .db
+        .restore_company(auth.workspace_id, id)
+        .await
+        .map_err(AppError::Internal)?
+        .ok_or_else(|| AppError::NotFound("Record not found".to_string()))?;
+    Ok(Json(json!({ "data": { "restoreCompany": company } })))
 }
 
 pub async fn me(

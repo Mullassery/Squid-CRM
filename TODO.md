@@ -9,7 +9,7 @@
 - [x] GraphQL login flow + person query/mutations.
 - [x] REST people list/get/create/delete with upstream envelope + error contract.
 - [x] Tenant isolation enforced and tested against real PostgreSQL.
-- [x] 15 unit + 15 integration tests passing; clippy clean; live smoke test.
+- [x] 15 unit + 16 integration tests passing; clippy clean; live smoke test.
 - [x] Dockerfile, docker-compose, CI workflow, Makefile, smoke script.
 
 ## Phase 2 (contracts)
@@ -53,13 +53,17 @@
       API for the standard person object/fields (frontend boot fragment passes).
 - [x] Default person view and `getViews`/`getView` read API matching the
       frontend `ViewFragment`.
+- [x] Company object slice: workspace `0003_company.sql`, seeded metadata +
+      default view, REST `/rest/companies` CRUD, GraphQL
+      `companies`/`company`/`createCompany`/`updateCompany`/`deleteCompany`/
+      `destroyCompany`/`restoreCompany`.
 - [ ] Metadata writes, view writes/filters/sorts/groups, roles, indexes/relations,
       remaining standard objects, and metadata-driven dynamic schema generation.
 - [x] `currentUser`/`currentWorkspace` full frontend boot fragment (ADR 0005;
       enterprise surfaces are explicit empty/static defaults).
 - [ ] Role/permission engine, billing/SSO data, feature flags, and
       `ApiKey.role` as the upstream `Role` object.
-- [ ] Companies, opportunities, tasks, notes.
+- [ ] Opportunities, tasks, notes.
 - [ ] Views/filters/sorts/groups parity (relation filters and view semantics).
 - [ ] Search, files, export/import.
 - [ ] Jobs/cron, webhooks, workflows, integrations.
@@ -75,6 +79,8 @@
 - Static person schema; not metadata-driven.
 - Cursor pagination, `order_by`, and scalar/composite filters implemented for
   whitelisted person columns; relation filters and view-based paging are not.
+- Company filters are limited to `id`/`name`; company `orderBy` is accepted and
+  ignored (stable name order); REST company `filter`/`order_by` are ignored.
 - No OpenAPI document emitted yet.
 - Workspace activation lifecycle (`PENDING_CREATION` / `activateWorkspace`) and
   `signUpInNewWorkspace` are not implemented; `/auth/signup` activates directly.

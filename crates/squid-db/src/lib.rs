@@ -11,11 +11,11 @@ use serde::de::DeserializeOwned;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
 use squid_core::{
-    Actor, AggregateOperations, ApiKey, CreatePersonInput, DateOp, Emails, FieldMetadata,
-    FieldMetadataType, FilterExpr, FullName, MetadataReadability, MetadataWritability,
-    ObjectMetadata, ObjectOpenRecordIn, ObjectSharingReach, Person, Role, StringOp,
-    UpdatePersonInput, User, UuidOp, View, ViewCalendarLayout, ViewField, ViewKey,
-    ViewOpenRecordIn, ViewType, ViewVisibility, Workspace,
+    Actor, AggregateOperations, ApiKey, Company, CreateCompanyInput, CreatePersonInput, DateOp,
+    Emails, FieldMetadata, FieldMetadataType, FilterExpr, FullName, MetadataReadability,
+    MetadataWritability, ObjectMetadata, ObjectOpenRecordIn, ObjectSharingReach, Person, Role,
+    StringOp, UpdateCompanyInput, UpdatePersonInput, User, UuidOp, View, ViewCalendarLayout,
+    ViewField, ViewKey, ViewOpenRecordIn, ViewType, ViewVisibility, Workspace,
 };
 use uuid::Uuid;
 
@@ -23,6 +23,7 @@ const CORE_SCHEMA_SQL: &str = include_str!("../migrations/core/0001_core.sql");
 const WORKSPACE_PERSON_SQL: &str = include_str!("../migrations/workspace/0001_person.sql");
 const WORKSPACE_PERSON_CONTRACT_SQL: &str =
     include_str!("../migrations/workspace/0002_person_contract.sql");
+const WORKSPACE_COMPANY_SQL: &str = include_str!("../migrations/workspace/0003_company.sql");
 const CORE_API_KEYS_SQL: &str = include_str!("../migrations/core/0002_api_keys.sql");
 const CORE_METADATA_SQL: &str = include_str!("../migrations/core/0003_metadata.sql");
 const CORE_VIEWS_SQL: &str = include_str!("../migrations/core/0004_views.sql");
@@ -647,7 +648,11 @@ impl Db {
             .execute(&self.pool)
             .await?;
 
-        for ddl in [WORKSPACE_PERSON_SQL, WORKSPACE_PERSON_CONTRACT_SQL] {
+        for ddl in [
+            WORKSPACE_PERSON_SQL,
+            WORKSPACE_PERSON_CONTRACT_SQL,
+            WORKSPACE_COMPANY_SQL,
+        ] {
             let ddl = ddl.replace("{{schema}}", &schema);
             sqlx::raw_sql(&ddl).execute(&self.pool).await?;
         }
@@ -1255,13 +1260,314 @@ impl Db {
         Ok(())
     }
 
+    pub async fn ensure_standard_metadata(&self, workspace_id: Uuid) -> anyhow::Result<()> {
+        self.ensure_person_metadata(workspace_id).await?;
+        self.ensure_company_metadata(workspace_id).await?;
+        Ok(())
+    }
+
+    pub async fn ensure_company_metadata(&self, workspace_id: Uuid) -> anyhow::Result<()> {
+        self.ensure_workspace_company_table(workspace_id).await?;
+        let mut tx = self.pool.begin().await?;
+
+        sqlx::query(
+            "INSERT INTO core.object_metadata
+                (workspace_id, name_singular, name_plural, label_singular, label_plural,
+                 description, icon, color, shortcut, is_remote, is_active, is_system,
+                 is_ui_editable, is_ui_creatable, is_searchable, open_record_in,
+                 readability, sharing_reach, writability, is_label_synced_with_name)
+             VALUES ($1, 'company', 'companies', 'Company', 'Companies', NULL,
+                     'IconBuildingSkyscraper', 'turquoise', 'c', false, true, true, true,
+                     true, true, 'SIDE_PANEL', 'OPEN', 'ROLE_ACCESS', 'OPEN', false)
+             ON CONFLICT (workspace_id, name_singular) DO NOTHING",
+        )
+        .bind(workspace_id)
+        .execute(&mut *tx)
+        .await?;
+
+        let object_id: Uuid = sqlx::query(
+            "SELECT id FROM core.object_metadata
+             WHERE workspace_id = $1 AND name_singular = 'company'",
+        )
+        .bind(workspace_id)
+        .fetch_one(&mut *tx)
+        .await?
+        .get("id");
+
+        for field in COMPANY_METADATA_FIELDS {
+            sqlx::query(
+                "INSERT INTO core.field_metadata
+                    (workspace_id, object_metadata_id, type, name, label, is_system,
+                     is_ui_editable, is_nullable, is_unique, is_searchable, is_audit_logged)
+                 VALUES ($1, $2, $3, $4, $5, true, true, $6, $7, $8, true)
+                 ON CONFLICT (object_metadata_id, name) DO NOTHING",
+            )
+            .bind(workspace_id)
+            .bind(object_id)
+            .bind(field.field_type.as_str())
+            .bind(field.name)
+            .bind(field.label)
+            .bind(field.nullable)
+            .bind(field.unique)
+            .bind(field.searchable)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        sqlx::query(
+            "UPDATE core.object_metadata
+             SET label_identifier_field_metadata_id = (
+                    SELECT id FROM core.field_metadata
+                    WHERE object_metadata_id = $1 AND name = 'name')
+             WHERE id = $1 AND label_identifier_field_metadata_id IS NULL",
+        )
+        .bind(object_id)
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query(
+            "INSERT INTO core.views
+                (workspace_id, name, object_metadata_id, type, key, icon, position,
+                 is_compact, is_custom, open_record_in, should_hide_empty_groups,
+                 visibility, is_active)
+             VALUES ($1, 'All companies', $2, 'TABLE', 'INDEX', 'IconList', 0,
+                     false, false, 'SIDE_PANEL', false, 'WORKSPACE', true)
+             ON CONFLICT (workspace_id, object_metadata_id, key) DO NOTHING",
+        )
+        .bind(workspace_id)
+        .bind(object_id)
+        .execute(&mut *tx)
+        .await?;
+
+        let view_id: Uuid = sqlx::query(
+            "SELECT id FROM core.views
+             WHERE workspace_id = $1 AND object_metadata_id = $2 AND key = 'INDEX'",
+        )
+        .bind(workspace_id)
+        .bind(object_id)
+        .fetch_one(&mut *tx)
+        .await?
+        .get("id");
+
+        for (position, (field_name, size)) in DEFAULT_COMPANY_VIEW_FIELDS.iter().enumerate() {
+            sqlx::query(
+                "INSERT INTO core.view_fields
+                    (workspace_id, view_id, field_metadata_id, position, size)
+                 SELECT $1, $2, id, $3, $4 FROM core.field_metadata
+                 WHERE object_metadata_id = $5 AND name = $6
+                 ON CONFLICT (view_id, field_metadata_id) DO NOTHING",
+            )
+            .bind(workspace_id)
+            .bind(view_id)
+            .bind(position as f64)
+            .bind(*size)
+            .bind(object_id)
+            .bind(*field_name)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn ensure_workspace_company_table(&self, workspace_id: Uuid) -> anyhow::Result<()> {
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let ddl = WORKSPACE_COMPANY_SQL.replace("{{schema}}", &schema);
+        sqlx::raw_sql(&ddl).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    // ----- companies -----------------------------------------------------
+
+    pub async fn create_company(
+        &self,
+        workspace_id: Uuid,
+        input: &CreateCompanyInput,
+    ) -> anyhow::Result<Company> {
+        self.ensure_workspace_company_table(workspace_id).await?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let domain = input.domain_name.clone().unwrap_or_default();
+        let address = input.address.clone().unwrap_or_default();
+        let linkedin = input.linkedin_link.clone().unwrap_or_default();
+        let revenue = input.annual_revenue.clone().unwrap_or_default();
+        let actor = Actor::default();
+        let search_vector = squid_core::company_search_vector(input.name.as_deref(), &domain);
+
+        let row = sqlx::query(&format!(
+            "INSERT INTO {schema}.company
+                (name, domain_name, address, linkedin_link, annual_revenue, position,
+                 created_by, updated_by, search_vector, account_owner_id)
+             VALUES ($1, $2::jsonb, $3::jsonb, $4::jsonb, $5::jsonb, $6,
+                     $7::jsonb, $8::jsonb, $9, $10)
+             RETURNING {COMPANY_SELECT}"
+        ))
+        .bind(&input.name)
+        .bind(serde_json::to_string(&domain)?)
+        .bind(serde_json::to_string(&address)?)
+        .bind(serde_json::to_string(&linkedin)?)
+        .bind(serde_json::to_string(&revenue)?)
+        .bind(input.position.unwrap_or(0.0))
+        .bind(serde_json::to_string(&actor)?)
+        .bind(serde_json::to_string(&actor)?)
+        .bind(search_vector)
+        .bind(input.account_owner_id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row_to_company(&row))
+    }
+
+    pub async fn get_company(
+        &self,
+        workspace_id: Uuid,
+        company_id: Uuid,
+    ) -> anyhow::Result<Option<Company>> {
+        self.ensure_workspace_company_table(workspace_id).await?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let row = sqlx::query(&format!(
+            "SELECT {COMPANY_SELECT} FROM {schema}.company
+             WHERE id = $1 AND deleted_at IS NULL"
+        ))
+        .bind(company_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.as_ref().map(row_to_company))
+    }
+
+    pub async fn update_company(
+        &self,
+        workspace_id: Uuid,
+        company_id: Uuid,
+        input: &UpdateCompanyInput,
+    ) -> anyhow::Result<Option<Company>> {
+        let Some(current) = self.get_company(workspace_id, company_id).await? else {
+            return Ok(None);
+        };
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let name = input.name.clone().or(current.name);
+        let domain = input.domain_name.clone().unwrap_or(current.domain_name);
+        let address = input.address.clone().unwrap_or(current.address);
+        let linkedin = input.linkedin_link.clone().unwrap_or(current.linkedin_link);
+        let revenue = input
+            .annual_revenue
+            .clone()
+            .unwrap_or(current.annual_revenue);
+        let position = input.position.unwrap_or(current.position);
+        let owner = input.account_owner_id.or(current.account_owner_id);
+        let search_vector = squid_core::company_search_vector(name.as_deref(), &domain);
+
+        let row = sqlx::query(&format!(
+            "UPDATE {schema}.company
+             SET name = $2, domain_name = $3::jsonb, address = $4::jsonb,
+                 linkedin_link = $5::jsonb, annual_revenue = $6::jsonb, position = $7,
+                 search_vector = $8, account_owner_id = $9, updated_at = now()
+             WHERE id = $1 AND deleted_at IS NULL
+             RETURNING {COMPANY_SELECT}"
+        ))
+        .bind(company_id)
+        .bind(&name)
+        .bind(serde_json::to_string(&domain)?)
+        .bind(serde_json::to_string(&address)?)
+        .bind(serde_json::to_string(&linkedin)?)
+        .bind(serde_json::to_string(&revenue)?)
+        .bind(position)
+        .bind(search_vector)
+        .bind(owner)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.as_ref().map(row_to_company))
+    }
+
+    pub async fn soft_delete_company(
+        &self,
+        workspace_id: Uuid,
+        company_id: Uuid,
+    ) -> anyhow::Result<bool> {
+        self.ensure_workspace_company_table(workspace_id).await?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let result = sqlx::query(&format!(
+            "UPDATE {schema}.company SET deleted_at = now(), updated_at = now()
+             WHERE id = $1 AND deleted_at IS NULL"
+        ))
+        .bind(company_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    pub async fn destroy_company(
+        &self,
+        workspace_id: Uuid,
+        company_id: Uuid,
+    ) -> anyhow::Result<bool> {
+        self.ensure_workspace_company_table(workspace_id).await?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let result = sqlx::query(&format!("DELETE FROM {schema}.company WHERE id = $1"))
+            .bind(company_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    pub async fn restore_company(
+        &self,
+        workspace_id: Uuid,
+        company_id: Uuid,
+    ) -> anyhow::Result<Option<Company>> {
+        self.ensure_workspace_company_table(workspace_id).await?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let row = sqlx::query(&format!(
+            "UPDATE {schema}.company SET deleted_at = NULL, updated_at = now()
+             WHERE id = $1 AND deleted_at IS NOT NULL
+             RETURNING {COMPANY_SELECT}"
+        ))
+        .bind(company_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.as_ref().map(row_to_company))
+    }
+
+    pub async fn list_companies(
+        &self,
+        workspace_id: Uuid,
+        limit: i64,
+        offset: i64,
+    ) -> anyhow::Result<(Vec<Company>, i64)> {
+        self.ensure_workspace_company_table(workspace_id).await?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let total: i64 = sqlx::query_scalar(&format!(
+            "SELECT count(*) FROM {schema}.company WHERE deleted_at IS NULL"
+        ))
+        .fetch_one(&self.pool)
+        .await?;
+        let rows = sqlx::query(&format!(
+            "SELECT {COMPANY_SELECT} FROM {schema}.company
+             WHERE deleted_at IS NULL
+             ORDER BY name NULLS LAST, created_at ASC
+             LIMIT $1 OFFSET $2"
+        ))
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok((rows.iter().map(row_to_company).collect(), total))
+    }
+
     pub async fn list_views(
         &self,
         workspace_id: Uuid,
         object_id: Option<Uuid>,
         view_types: Option<&[String]>,
     ) -> anyhow::Result<Vec<View>> {
-        self.ensure_person_metadata(workspace_id).await?;
+        self.ensure_standard_metadata(workspace_id).await?;
         let rows = sqlx::query(&format!(
             "SELECT {VIEW_SELECT} FROM core.views
              WHERE workspace_id = $1 AND deleted_at IS NULL
@@ -1288,7 +1594,7 @@ impl Db {
     }
 
     pub async fn get_view(&self, workspace_id: Uuid, id: Uuid) -> anyhow::Result<Option<View>> {
-        self.ensure_person_metadata(workspace_id).await?;
+        self.ensure_standard_metadata(workspace_id).await?;
         let row = sqlx::query(&format!(
             "SELECT {VIEW_SELECT} FROM core.views
              WHERE workspace_id = $1 AND id = $2 AND deleted_at IS NULL"
@@ -1323,7 +1629,7 @@ impl Db {
     }
 
     pub async fn list_objects(&self, workspace_id: Uuid) -> anyhow::Result<Vec<ObjectMetadata>> {
-        self.ensure_person_metadata(workspace_id).await?;
+        self.ensure_standard_metadata(workspace_id).await?;
         let rows = sqlx::query(&format!(
             "SELECT {OBJECT_SELECT} FROM core.object_metadata
              WHERE workspace_id = $1 ORDER BY created_at ASC, name_singular ASC"
@@ -1346,7 +1652,7 @@ impl Db {
         workspace_id: Uuid,
         object_id: Uuid,
     ) -> anyhow::Result<Option<ObjectMetadata>> {
-        self.ensure_person_metadata(workspace_id).await?;
+        self.ensure_standard_metadata(workspace_id).await?;
         let row = sqlx::query(&format!(
             "SELECT {OBJECT_SELECT} FROM core.object_metadata
              WHERE workspace_id = $1 AND id = $2"
@@ -1404,6 +1710,154 @@ struct PersonFieldSeed {
     nullable: bool,
     unique: bool,
     searchable: bool,
+}
+
+const COMPANY_METADATA_FIELDS: &[PersonFieldSeed] = &[
+    PersonFieldSeed {
+        name: "id",
+        label: "ID",
+        field_type: FieldMetadataType::Uuid,
+        nullable: false,
+        unique: true,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "createdAt",
+        label: "Creation date",
+        field_type: FieldMetadataType::DateTime,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "updatedAt",
+        label: "Last update",
+        field_type: FieldMetadataType::DateTime,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "deletedAt",
+        label: "Deletion date",
+        field_type: FieldMetadataType::DateTime,
+        nullable: true,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "name",
+        label: "Name",
+        field_type: FieldMetadataType::Text,
+        nullable: true,
+        unique: false,
+        searchable: true,
+    },
+    PersonFieldSeed {
+        name: "domainName",
+        label: "Domain name",
+        field_type: FieldMetadataType::Links,
+        nullable: true,
+        unique: false,
+        searchable: true,
+    },
+    PersonFieldSeed {
+        name: "address",
+        label: "Address",
+        field_type: FieldMetadataType::Address,
+        nullable: true,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "linkedinLink",
+        label: "Linkedin",
+        field_type: FieldMetadataType::Links,
+        nullable: true,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "annualRevenue",
+        label: "Annual revenue",
+        field_type: FieldMetadataType::Currency,
+        nullable: true,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "position",
+        label: "Position",
+        field_type: FieldMetadataType::Position,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "createdBy",
+        label: "Created by",
+        field_type: FieldMetadataType::Actor,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "updatedBy",
+        label: "Updated by",
+        field_type: FieldMetadataType::Actor,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "searchVector",
+        label: "Search vector",
+        field_type: FieldMetadataType::TsVector,
+        nullable: true,
+        unique: false,
+        searchable: true,
+    },
+    PersonFieldSeed {
+        name: "accountOwnerId",
+        label: "Account owner",
+        field_type: FieldMetadataType::Uuid,
+        nullable: true,
+        unique: false,
+        searchable: false,
+    },
+];
+
+const DEFAULT_COMPANY_VIEW_FIELDS: &[(&str, f64)] =
+    &[("name", 180.0), ("domainName", 200.0), ("createdAt", 160.0)];
+
+const COMPANY_SELECT: &str = "id, created_at, updated_at, deleted_at, name, \
+     domain_name::text AS domain_name, address::text AS address, \
+     linkedin_link::text AS linkedin_link, annual_revenue::text AS annual_revenue, \
+     position, created_by::text AS created_by, updated_by::text AS updated_by, \
+     search_vector, account_owner_id";
+
+fn row_to_company(row: &sqlx::postgres::PgRow) -> Company {
+    Company {
+        id: row.get("id"),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+        deleted_at: row.get("deleted_at"),
+        name: row.get("name"),
+        domain_name: parse_json_option(row.get("domain_name")),
+        address: parse_json_option(row.get("address")),
+        linkedin_link: parse_json_option(row.get("linkedin_link")),
+        annual_revenue: parse_json_option(row.get("annual_revenue")),
+        position: row.get("position"),
+        created_by: parse_json_option(row.get("created_by")),
+        updated_by: parse_json_option(row.get("updated_by")),
+        search_vector: row.get("search_vector"),
+        account_owner_id: row.get("account_owner_id"),
+    }
+}
+
+fn parse_json_option<T: DeserializeOwned + Default>(raw: Option<String>) -> T {
+    raw.and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default()
 }
 
 const PERSON_METADATA_FIELDS: &[PersonFieldSeed] = &[
@@ -1837,8 +2291,8 @@ fn row_to_person(row: &sqlx::postgres::PgRow) -> Person {
         avatar_url: row.get("avatar_url"),
         avatar_file: avatar_file.map(|raw| squid_core::GqlJson(parse_value(&raw))),
         position: row.get("position"),
-        created_by: parse_json(row.get("created_by")),
-        updated_by: parse_json(row.get("updated_by")),
+        created_by: parse_json_option(row.get("created_by")),
+        updated_by: parse_json_option(row.get("updated_by")),
         search_vector: row.get("search_vector"),
         company_id: row.get("company_id"),
     }

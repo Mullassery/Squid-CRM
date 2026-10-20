@@ -1329,8 +1329,12 @@ async fn metadata_objects_match_frontend_fragment() {
         let objects = response.body["data"]["objects"]["edges"]
             .as_array()
             .unwrap();
-        assert_eq!(objects.len(), 1, "seed must be idempotent");
-        let object = &objects[0]["node"];
+        assert_eq!(objects.len(), 2, "seed must be idempotent");
+        let object = objects
+            .iter()
+            .map(|edge| &edge["node"])
+            .find(|node| node["nameSingular"] == "person")
+            .expect("person object seeded");
         if first_object_id.is_empty() {
             first_object_id = object["id"].as_str().unwrap().to_string();
         }
@@ -1392,8 +1396,13 @@ async fn metadata_default_view_matches_frontend_fragment() {
         ),
     )
     .await;
-    let object_id = objects.body["data"]["objects"]["edges"][0]["node"]["id"]
-        .as_str()
+    let object_id = objects.body["data"]["objects"]["edges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|edge| &edge["node"])
+        .find(|node| node["nameSingular"] == "person")
+        .and_then(|node| node["id"].as_str())
         .expect("person object id")
         .to_string();
 
@@ -1841,4 +1850,137 @@ async fn current_user_matches_frontend_boot_fragment() {
         workspace["workspaceUrls"]["subdomainUrl"],
         "http://localhost:3001"
     );
+}
+
+#[tokio::test]
+async fn company_crud_rest_and_graphql() {
+    let app = test_app().await;
+    let email = unique_email("company");
+    let (token, _workspace) = signup(&app, &email).await;
+
+    let created = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/companies",
+            &token,
+            Some(json!({
+                "name": "Acme",
+                "domainName": { "primaryLinkLabel": "acme.com", "primaryLinkUrl": "https://acme.com", "secondaryLinks": [] },
+                "address": { "addressCity": "Paris", "addressCountry": "France" },
+                "annualRevenue": { "amountMicros": 1200000, "currencyCode": "EUR" }
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        created.status,
+        StatusCode::CREATED,
+        "body: {}",
+        created.body
+    );
+    let company = &created.body["data"]["createCompany"];
+    assert_eq!(company["name"], "Acme");
+    assert_eq!(company["domainName"]["primaryLinkUrl"], "https://acme.com");
+    assert_eq!(company["address"]["addressCity"], "Paris");
+    assert_eq!(company["annualRevenue"]["amountMicros"], 1200000);
+    let id = company["id"].as_str().expect("company id").to_string();
+
+    let listed = send(&app, authorized("GET", "/rest/companies", &token, None)).await;
+    assert_eq!(listed.status, StatusCode::OK);
+    assert_eq!(listed.body["totalCount"], 1);
+    assert_eq!(
+        listed.body["data"]["companies"].as_array().unwrap().len(),
+        1
+    );
+
+    let fetched = send(
+        &app,
+        authorized("GET", &format!("/rest/companies/{id}"), &token, None),
+    )
+    .await;
+    assert_eq!(fetched.status, StatusCode::OK);
+    assert_eq!(fetched.body["data"]["company"]["name"], "Acme");
+
+    let updated = send(
+        &app,
+        authorized(
+            "PATCH",
+            &format!("/rest/companies/{id}"),
+            &token,
+            Some(json!({ "name": "Acme Inc" })),
+        ),
+    )
+    .await;
+    assert_eq!(updated.status, StatusCode::OK, "body: {}", updated.body);
+    assert_eq!(updated.body["data"]["updateCompany"]["name"], "Acme Inc");
+    assert_eq!(
+        updated.body["data"]["updateCompany"]["address"]["addressCity"],
+        "Paris"
+    );
+
+    let graphql = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": format!(
+                    "{{ companies {{ totalCount edges {{ node {{ id name }} }} }} company(filter: {{ id: {{ eq: \"{id}\" }} }}) {{ name domainName {{ primaryLinkUrl }} }} }}"
+                )
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(graphql.status, StatusCode::OK, "body: {}", graphql.body);
+    assert_eq!(graphql.body["data"]["companies"]["totalCount"], 1);
+    assert_eq!(graphql.body["data"]["company"]["name"], "Acme Inc");
+
+    let deleted = send(
+        &app,
+        authorized(
+            "DELETE",
+            &format!("/rest/companies/{id}?soft_delete=true"),
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(deleted.status, StatusCode::OK);
+    assert_eq!(deleted.body["data"]["deleteCompany"]["id"], id);
+    let after_delete = send(
+        &app,
+        authorized("GET", &format!("/rest/companies/{id}"), &token, None),
+    )
+    .await;
+    assert_eq!(after_delete.status, StatusCode::NOT_FOUND);
+
+    let restored = send(
+        &app,
+        authorized(
+            "PATCH",
+            &format!("/rest/companies/{id}/restore"),
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(restored.status, StatusCode::OK, "body: {}", restored.body);
+    assert_eq!(restored.body["data"]["restoreCompany"]["name"], "Acme Inc");
+
+    let destroyed = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": format!("mutation {{ destroyCompany(id: \"{id}\") {{ id }} }}")
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(destroyed.status, StatusCode::OK, "body: {}", destroyed.body);
+    assert_eq!(destroyed.body["data"]["destroyCompany"]["id"], id);
 }

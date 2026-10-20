@@ -299,6 +299,8 @@ Known remaining divergences (do not claim parity):
 | GraphQL auth host | `/metadata` | `/metadata`, `/graphql` and `/auth` | tighten later |
 | Data-API auth | API keys only | API keys **and** access token/cookie | tighten before release |
 | Workspace bootstrap | `PENDING_CREATION` + `activateWorkspace` | atomic signup + immediate schema | document; add lifecycle |
+| Company filters | full `CompanyFilterInput` with relations | `id`/`name` only | extend as company relations land |
+| Company ordering | GraphQL `orderBy` + REST `order_by` | accepted but stable name order | implement whitelisted company sorts |
 | Workspace prefill | sample people/companies on activation | none (new workspace has 0 people) | implement prefill |
 | Filter coverage | all person fields/relations | scalar person fields (`id`, name, email, jobTitle, timestamps); relation filters absent | expand as metadata lands |
 | REST sort/filter errors | `FIELD_NOT_FOUND` for unknown fields | `400 BadRequestException` text | align error code |

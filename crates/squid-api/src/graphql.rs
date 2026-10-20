@@ -15,10 +15,11 @@ use chrono::{DateTime, Utc};
 use squid_auth::AuthToken;
 use squid_auth::{hash_password, hash_token, verify_password, AuthContext};
 use squid_core::{
-    ApiKey, AppError, AppResult, CreatePersonInput, CursorPagingInput, DateOp, FieldConnection,
-    FieldFilterInput, FieldMetadata, FilterExpr, GqlJson, ObjectConnection, ObjectEdge,
-    ObjectFilterInput, ObjectMetadata, PageInfo, Person, Role, StringOp, UpdatePersonInput,
-    User as CoreUser, UuidOp, View, ViewType,
+    Address, ApiKey, AppError, AppResult, Company, CreateCompanyInput, CreatePersonInput, Currency,
+    CursorPagingInput, DateOp, FieldConnection, FieldFilterInput, FieldMetadata, FilterExpr,
+    GqlJson, Links, ObjectConnection, ObjectEdge, ObjectFilterInput, ObjectMetadata, PageInfo,
+    Person, Role, StringOp, UpdateCompanyInput, UpdatePersonInput, User as CoreUser, UuidOp, View,
+    ViewType,
 };
 use squid_db::{OrderTerm, PersonColumn};
 use uuid::Uuid;
@@ -492,6 +493,117 @@ pub struct PersonOrderByInput {
     pub job_title: Option<OrderByDirection>,
 }
 
+#[derive(Debug, InputObject)]
+pub struct AddressInput {
+    pub address_street_1: Option<String>,
+    pub address_street_2: Option<String>,
+    pub address_city: Option<String>,
+    pub address_postcode: Option<String>,
+    pub address_state: Option<String>,
+    pub address_country: Option<String>,
+    pub address_lat: Option<f64>,
+    pub address_lng: Option<f64>,
+}
+
+impl From<AddressInput> for Address {
+    fn from(input: AddressInput) -> Self {
+        Address {
+            address_street_1: input.address_street_1,
+            address_street_2: input.address_street_2,
+            address_city: input.address_city,
+            address_postcode: input.address_postcode,
+            address_state: input.address_state,
+            address_country: input.address_country,
+            address_lat: input.address_lat,
+            address_lng: input.address_lng,
+        }
+    }
+}
+
+#[derive(Debug, InputObject)]
+pub struct CurrencyInput {
+    pub amount_micros: Option<i64>,
+    pub currency_code: Option<String>,
+}
+
+impl From<CurrencyInput> for Currency {
+    fn from(input: CurrencyInput) -> Self {
+        Currency {
+            amount_micros: input.amount_micros,
+            currency_code: input.currency_code.unwrap_or_default(),
+        }
+    }
+}
+
+#[derive(Debug, InputObject)]
+pub struct CreateCompanyInputGql {
+    pub name: Option<String>,
+    pub domain_name: Option<Links>,
+    pub address: Option<AddressInput>,
+    pub linkedin_link: Option<Links>,
+    pub annual_revenue: Option<CurrencyInput>,
+    pub position: Option<f64>,
+    pub account_owner_id: Option<Uuid>,
+}
+
+impl From<CreateCompanyInputGql> for CreateCompanyInput {
+    fn from(input: CreateCompanyInputGql) -> Self {
+        CreateCompanyInput {
+            name: input.name,
+            domain_name: input.domain_name,
+            address: input.address.map(Into::into),
+            linkedin_link: input.linkedin_link,
+            annual_revenue: input.annual_revenue.map(Into::into),
+            position: input.position,
+            account_owner_id: input.account_owner_id,
+        }
+    }
+}
+
+#[derive(Debug, InputObject)]
+pub struct UpdateCompanyInputGql {
+    pub name: Option<String>,
+    pub domain_name: Option<Links>,
+    pub address: Option<AddressInput>,
+    pub linkedin_link: Option<Links>,
+    pub annual_revenue: Option<CurrencyInput>,
+    pub position: Option<f64>,
+    pub account_owner_id: Option<Uuid>,
+}
+
+impl From<UpdateCompanyInputGql> for UpdateCompanyInput {
+    fn from(input: UpdateCompanyInputGql) -> Self {
+        UpdateCompanyInput {
+            name: input.name,
+            domain_name: input.domain_name,
+            address: input.address.map(Into::into),
+            linkedin_link: input.linkedin_link,
+            annual_revenue: input.annual_revenue.map(Into::into),
+            position: input.position,
+            account_owner_id: input.account_owner_id,
+        }
+    }
+}
+
+#[derive(Debug, Default, InputObject)]
+pub struct CompanyFilterInput {
+    pub id: Option<UuidFilter>,
+    pub name: Option<StringFilter>,
+}
+
+#[derive(Debug, SimpleObject)]
+pub struct CompanyEdge {
+    pub node: Company,
+    pub cursor: Cursor,
+}
+
+#[derive(Debug, SimpleObject)]
+pub struct CompanyConnection {
+    pub total_count: Option<i64>,
+    pub edges: Vec<CompanyEdge>,
+    pub page_info: PageInfo,
+}
+
 #[derive(Debug, SimpleObject)]
 pub struct PersonEdge {
     pub node: Person,
@@ -746,6 +858,54 @@ fn require_auth<'a>(ctx: &'a Context<'_>) -> async_graphql::Result<&'a AuthConte
     })
 }
 
+fn company_matches(company: &Company, filter: &CompanyFilterInput) -> bool {
+    if let Some(id) = filter.id.as_ref() {
+        if let Some(eq) = id.eq {
+            if company.id != eq {
+                return false;
+            }
+        }
+        if let Some(neq) = id.neq {
+            if company.id == neq {
+                return false;
+            }
+        }
+        if let Some(list) = id.r#in.as_ref() {
+            if !list.contains(&company.id) {
+                return false;
+            }
+        }
+    }
+    if let Some(name) = filter.name.as_ref() {
+        let value = company.name.as_deref().unwrap_or_default();
+        if let Some(eq) = name.eq.as_deref() {
+            if value != eq {
+                return false;
+            }
+        }
+        if let Some(neq) = name.neq.as_deref() {
+            if value == neq {
+                return false;
+            }
+        }
+        if let Some(like) = name.ilike.as_deref() {
+            let needle = like.trim_matches('%').to_lowercase();
+            if !value.to_lowercase().contains(&needle) {
+                return false;
+            }
+        }
+        if let Some(starts_with) = name.starts_with.as_deref() {
+            if !value
+                .to_lowercase()
+                .starts_with(&starts_with.to_lowercase())
+            {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 fn gql_err(error: AppError) -> async_graphql::Error {
     let code = error.graphql_code();
     async_graphql::Error::new(error.public_message()).extend_with(|_, ext| {
@@ -845,7 +1005,7 @@ impl QueryRoot {
         let state = state(ctx);
         state
             .db
-            .ensure_person_metadata(auth.workspace_id)
+            .ensure_standard_metadata(auth.workspace_id)
             .await
             .map_err(|e| gql_err(AppError::Internal(e)))?;
         let filter = filter.unwrap_or_default();
@@ -981,6 +1141,107 @@ impl QueryRoot {
             .get_api_key(auth.workspace_id, input.id)
             .await
             .map_err(|e| gql_err(AppError::Internal(anyhow::anyhow!(e))))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn companies(
+        &self,
+        ctx: &Context<'_>,
+        first: Option<i64>,
+        last: Option<i64>,
+        offset: Option<i64>,
+        before: Option<String>,
+        after: Option<String>,
+        filter: Option<CompanyFilterInput>,
+        order_by: Option<Vec<serde_json::Value>>,
+    ) -> async_graphql::Result<CompanyConnection> {
+        let auth = require_auth(ctx)?;
+        let _ = order_by;
+        let (mut all, _) = state(ctx)
+            .db
+            .list_companies(auth.workspace_id, 10_000, 0)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        let filter = filter.unwrap_or_default();
+        all.retain(|company| company_matches(company, &filter));
+
+        let total = all.len() as i64;
+        let limit = first
+            .or(last)
+            .unwrap_or(20)
+            .clamp(1, state(ctx).config.max_page_size) as usize;
+        let offset = offset.unwrap_or(0).max(0) as usize;
+
+        let starting_after = after
+            .as_deref()
+            .map(crate::rest::decode_cursor)
+            .transpose()
+            .map_err(gql_err)?;
+        let ending_before = before
+            .as_deref()
+            .map(crate::rest::decode_cursor)
+            .transpose()
+            .map_err(gql_err)?;
+
+        if let Some(after) = starting_after {
+            if let Some(index) = all.iter().position(|company| company.id == after) {
+                all.drain(..=index);
+            }
+        }
+        if let Some(before) = ending_before {
+            if let Some(index) = all.iter().position(|company| company.id == before) {
+                all.truncate(index);
+            }
+        }
+
+        let start = offset.min(all.len());
+        let end = (start + limit).min(all.len());
+        let has_next_page = end < all.len();
+        let has_previous_page = start > 0 || starting_after.is_some();
+        let edges = all[start..end]
+            .iter()
+            .cloned()
+            .map(|company| CompanyEdge {
+                cursor: Cursor(crate::rest::encode_cursor(company.id)),
+                node: company,
+            })
+            .collect();
+
+        Ok(CompanyConnection {
+            total_count: Some(total),
+            edges,
+            page_info: PageInfo {
+                has_next_page,
+                has_previous_page,
+                start_cursor: all
+                    .get(start)
+                    .map(|company| crate::rest::encode_cursor(company.id)),
+                end_cursor: all
+                    .get(end.saturating_sub(1))
+                    .map(|company| crate::rest::encode_cursor(company.id)),
+            },
+        })
+    }
+
+    async fn company(
+        &self,
+        ctx: &Context<'_>,
+        filter: CompanyFilterInput,
+    ) -> async_graphql::Result<Option<Company>> {
+        let auth = require_auth(ctx)?;
+        if filter.id.is_none() && filter.name.is_none() {
+            return Err(gql_err(AppError::BadRequest(
+                "company requires a non-empty filter".to_string(),
+            )));
+        }
+        let (companies, _) = state(ctx)
+            .db
+            .list_companies(auth.workspace_id, 10_000, 0)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        Ok(companies
+            .into_iter()
+            .find(|company| company_matches(company, &filter)))
     }
 
     async fn person(
@@ -1482,6 +1743,82 @@ impl MutationRoot {
             .map_err(|e| gql_err(AppError::Internal(e)))?;
 
         Ok(person)
+    }
+
+    async fn create_company(
+        &self,
+        ctx: &Context<'_>,
+        data: CreateCompanyInputGql,
+        #[graphql(default)] _upsert: bool,
+        _share_with: Option<Vec<ShareWithInput>>,
+    ) -> async_graphql::Result<Company> {
+        let auth = require_auth(ctx)?;
+        let input: CreateCompanyInput = data.into();
+        state(ctx)
+            .db
+            .create_company(auth.workspace_id, &input)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))
+    }
+
+    async fn update_company(
+        &self,
+        ctx: &Context<'_>,
+        id: Uuid,
+        data: UpdateCompanyInputGql,
+    ) -> async_graphql::Result<Company> {
+        let auth = require_auth(ctx)?;
+        let input: UpdateCompanyInput = data.into();
+        state(ctx)
+            .db
+            .update_company(auth.workspace_id, id, &input)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))
+    }
+
+    async fn delete_company(&self, ctx: &Context<'_>, id: Uuid) -> async_graphql::Result<Company> {
+        let auth = require_auth(ctx)?;
+        let state = state(ctx);
+        let company = state
+            .db
+            .get_company(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))?;
+        state
+            .db
+            .soft_delete_company(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        Ok(company)
+    }
+
+    async fn destroy_company(&self, ctx: &Context<'_>, id: Uuid) -> async_graphql::Result<Company> {
+        let auth = require_auth(ctx)?;
+        let state = state(ctx);
+        let company = state
+            .db
+            .get_company(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))?;
+        state
+            .db
+            .destroy_company(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        Ok(company)
+    }
+
+    async fn restore_company(&self, ctx: &Context<'_>, id: Uuid) -> async_graphql::Result<Company> {
+        let auth = require_auth(ctx)?;
+        state(ctx)
+            .db
+            .restore_company(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))
     }
 
     async fn sign_out(&self, ctx: &Context<'_>) -> async_graphql::Result<bool> {
