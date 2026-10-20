@@ -1796,14 +1796,38 @@ impl Db {
         };
         let schema = Self::workspace_schema_name(workspace_id);
         assert_valid_schema(&schema)?;
-        let name = input.name.clone().or(current.name);
-        let amount = input.amount.clone().unwrap_or(current.amount);
-        let close_date = input.close_date.or(current.close_date);
-        let stage = input.stage.unwrap_or(current.stage);
-        let position = input.position.unwrap_or(current.position);
-        let company_id = input.company_id.or(current.company_id);
-        let point_of_contact_id = input.point_of_contact_id.or(current.point_of_contact_id);
-        let owner_id = input.owner_id.or(current.owner_id);
+        let name = match &input.name {
+            MaybeUndefined::Value(value) => Some(value.clone()),
+            MaybeUndefined::Null => None,
+            MaybeUndefined::Undefined => current.name.clone(),
+        };
+        let amount = match &input.amount {
+            MaybeUndefined::Value(value) => value.clone(),
+            MaybeUndefined::Null => current.amount.clone(),
+            MaybeUndefined::Undefined => current.amount.clone(),
+        };
+        let close_date = match input.close_date {
+            MaybeUndefined::Value(value) => Some(value),
+            MaybeUndefined::Null => None,
+            MaybeUndefined::Undefined => current.close_date,
+        };
+        let stage = input.stage.value().copied().unwrap_or(current.stage);
+        let position = input.position.value().copied().unwrap_or(current.position);
+        let company_id = match input.company_id {
+            MaybeUndefined::Value(value) => Some(value),
+            MaybeUndefined::Null => None,
+            MaybeUndefined::Undefined => current.company_id,
+        };
+        let point_of_contact_id = match input.point_of_contact_id {
+            MaybeUndefined::Value(value) => Some(value),
+            MaybeUndefined::Null => None,
+            MaybeUndefined::Undefined => current.point_of_contact_id,
+        };
+        let owner_id = match input.owner_id {
+            MaybeUndefined::Value(value) => Some(value),
+            MaybeUndefined::Null => None,
+            MaybeUndefined::Undefined => current.owner_id,
+        };
         let search_vector = squid_core::opportunity_search_vector(name.as_deref());
 
         let row = sqlx::query(&format!(
@@ -2139,12 +2163,32 @@ impl Db {
         };
         let schema = Self::workspace_schema_name(workspace_id);
         assert_valid_schema(&schema)?;
-        let position = input.position.unwrap_or(current.position);
-        let title = input.title.clone().or(current.title);
-        let body = input.body_v2.clone().unwrap_or(current.body_v2);
-        let due_at = input.due_at.or(current.due_at);
-        let status = input.status.or(current.status).unwrap_or_default();
-        let assignee_id = input.assignee_id.or(current.assignee_id);
+        let position = input.position.value().copied().unwrap_or(current.position);
+        let title = match &input.title {
+            MaybeUndefined::Value(value) => Some(value.clone()),
+            MaybeUndefined::Null => None,
+            MaybeUndefined::Undefined => current.title.clone(),
+        };
+        let body = match &input.body_v2 {
+            MaybeUndefined::Value(value) => value.clone(),
+            MaybeUndefined::Null => Default::default(),
+            MaybeUndefined::Undefined => current.body_v2.clone(),
+        };
+        let due_at = match input.due_at {
+            MaybeUndefined::Value(value) => Some(value),
+            MaybeUndefined::Null => None,
+            MaybeUndefined::Undefined => current.due_at,
+        };
+        let status = input
+            .status
+            .value()
+            .copied()
+            .unwrap_or_else(|| current.status.unwrap_or_default());
+        let assignee_id = match input.assignee_id {
+            MaybeUndefined::Value(value) => Some(value),
+            MaybeUndefined::Null => None,
+            MaybeUndefined::Undefined => current.assignee_id,
+        };
         let search_vector = title.as_ref().map(|title| title.to_lowercase());
 
         let row = sqlx::query(&format!(
@@ -2310,9 +2354,17 @@ impl Db {
         };
         let schema = Self::workspace_schema_name(workspace_id);
         assert_valid_schema(&schema)?;
-        let position = input.position.unwrap_or(current.position);
-        let title = input.title.clone().or(current.title);
-        let body = input.body_v2.clone().unwrap_or(current.body_v2);
+        let position = input.position.value().copied().unwrap_or(current.position);
+        let title = match &input.title {
+            MaybeUndefined::Value(value) => Some(value.clone()),
+            MaybeUndefined::Null => None,
+            MaybeUndefined::Undefined => current.title.clone(),
+        };
+        let body = match &input.body_v2 {
+            MaybeUndefined::Value(value) => value.clone(),
+            MaybeUndefined::Null => Default::default(),
+            MaybeUndefined::Undefined => current.body_v2.clone(),
+        };
         let search_vector = title.as_ref().map(|title| title.to_lowercase());
 
         let row = sqlx::query(&format!(
@@ -2477,12 +2529,22 @@ impl Db {
         };
         let schema = Self::workspace_schema_name(workspace_id);
         assert_valid_schema(&schema)?;
-        let position = input.position.unwrap_or(current.position);
-        let company = input.target_company_id.or(current.target_company_id);
-        let opportunity = input
-            .target_opportunity_id
-            .or(current.target_opportunity_id);
-        let person = input.target_person_id.or(current.target_person_id);
+        let position = input.position.value().copied().unwrap_or(current.position);
+        let company = match input.target_company_id {
+            MaybeUndefined::Value(value) => Some(value),
+            MaybeUndefined::Null => None,
+            MaybeUndefined::Undefined => current.target_company_id,
+        };
+        let opportunity = match input.target_opportunity_id {
+            MaybeUndefined::Value(value) => Some(value),
+            MaybeUndefined::Null => None,
+            MaybeUndefined::Undefined => current.target_opportunity_id,
+        };
+        let person = match input.target_person_id {
+            MaybeUndefined::Value(value) => Some(value),
+            MaybeUndefined::Null => None,
+            MaybeUndefined::Undefined => current.target_person_id,
+        };
         let row = sqlx::query(&format!(
             "UPDATE {schema}.task_target
              SET position = $2, target_company_id = $3, target_opportunity_id = $4,
@@ -2659,12 +2721,22 @@ impl Db {
         };
         let schema = Self::workspace_schema_name(workspace_id);
         assert_valid_schema(&schema)?;
-        let position = input.position.unwrap_or(current.position);
-        let company = input.target_company_id.or(current.target_company_id);
-        let opportunity = input
-            .target_opportunity_id
-            .or(current.target_opportunity_id);
-        let person = input.target_person_id.or(current.target_person_id);
+        let position = input.position.value().copied().unwrap_or(current.position);
+        let company = match input.target_company_id {
+            MaybeUndefined::Value(value) => Some(value),
+            MaybeUndefined::Null => None,
+            MaybeUndefined::Undefined => current.target_company_id,
+        };
+        let opportunity = match input.target_opportunity_id {
+            MaybeUndefined::Value(value) => Some(value),
+            MaybeUndefined::Null => None,
+            MaybeUndefined::Undefined => current.target_opportunity_id,
+        };
+        let person = match input.target_person_id {
+            MaybeUndefined::Value(value) => Some(value),
+            MaybeUndefined::Null => None,
+            MaybeUndefined::Undefined => current.target_person_id,
+        };
         let row = sqlx::query(&format!(
             "UPDATE {schema}.note_target
              SET position = $2, target_company_id = $3, target_opportunity_id = $4,
@@ -2848,16 +2920,37 @@ impl Db {
         };
         let schema = Self::workspace_schema_name(workspace_id);
         assert_valid_schema(&schema)?;
-        let name = input.name.clone().or(current.name);
-        let domain = input.domain_name.clone().unwrap_or(current.domain_name);
-        let address = input.address.clone().unwrap_or(current.address);
-        let linkedin = input.linkedin_link.clone().unwrap_or(current.linkedin_link);
-        let revenue = input
-            .annual_revenue
-            .clone()
-            .unwrap_or(current.annual_revenue);
-        let position = input.position.unwrap_or(current.position);
-        let owner = input.account_owner_id.or(current.account_owner_id);
+        let name = match &input.name {
+            MaybeUndefined::Value(value) => Some(value.clone()),
+            MaybeUndefined::Null => None,
+            MaybeUndefined::Undefined => current.name.clone(),
+        };
+        let domain = match &input.domain_name {
+            MaybeUndefined::Value(value) => value.clone(),
+            MaybeUndefined::Null => Default::default(),
+            MaybeUndefined::Undefined => current.domain_name.clone(),
+        };
+        let address = match &input.address {
+            MaybeUndefined::Value(value) => value.clone(),
+            MaybeUndefined::Null => Default::default(),
+            MaybeUndefined::Undefined => current.address.clone(),
+        };
+        let linkedin = match &input.linkedin_link {
+            MaybeUndefined::Value(value) => value.clone(),
+            MaybeUndefined::Null => Default::default(),
+            MaybeUndefined::Undefined => current.linkedin_link.clone(),
+        };
+        let revenue = match &input.annual_revenue {
+            MaybeUndefined::Value(value) => value.clone(),
+            MaybeUndefined::Null => Default::default(),
+            MaybeUndefined::Undefined => current.annual_revenue.clone(),
+        };
+        let position = input.position.value().copied().unwrap_or(current.position);
+        let owner = match input.account_owner_id {
+            MaybeUndefined::Value(value) => Some(value),
+            MaybeUndefined::Null => None,
+            MaybeUndefined::Undefined => current.account_owner_id,
+        };
         let search_vector = squid_core::company_search_vector(name.as_deref(), &domain);
 
         let row = sqlx::query(&format!(

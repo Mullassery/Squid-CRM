@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{Actor, RichText};
+use crate::{Actor, MaybeUndefined, RichText};
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, async_graphql::Enum,
@@ -85,15 +85,15 @@ pub struct CreateTaskInput {
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct UpdateTaskInput {
     #[serde(default)]
-    pub position: Option<f64>,
+    pub position: MaybeUndefined<f64>,
     #[serde(default)]
-    pub title: Option<String>,
+    pub title: MaybeUndefined<String>,
     #[serde(rename = "bodyV2", default)]
-    pub body_v2: Option<RichText>,
+    pub body_v2: MaybeUndefined<RichText>,
     #[serde(rename = "dueAt", default)]
-    pub due_at: Option<DateTime<Utc>>,
+    pub due_at: MaybeUndefined<DateTime<Utc>>,
     #[serde(default)]
-    pub status: Option<TaskStatus>,
+    pub status: MaybeUndefined<TaskStatus>,
     #[serde(rename = "assigneeId", default)]
-    pub assignee_id: Option<Uuid>,
+    pub assignee_id: MaybeUndefined<Uuid>,
 }

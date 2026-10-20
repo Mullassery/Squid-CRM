@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::Actor;
+use crate::{Actor, MaybeUndefined};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
@@ -88,24 +88,24 @@ pub struct CreateNoteTargetInput {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateTaskTargetInput {
     #[serde(default)]
-    pub position: Option<f64>,
+    pub position: MaybeUndefined<f64>,
     #[serde(default)]
-    pub target_company_id: Option<Uuid>,
+    pub target_company_id: MaybeUndefined<Uuid>,
     #[serde(default)]
-    pub target_opportunity_id: Option<Uuid>,
+    pub target_opportunity_id: MaybeUndefined<Uuid>,
     #[serde(default)]
-    pub target_person_id: Option<Uuid>,
+    pub target_person_id: MaybeUndefined<Uuid>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateNoteTargetInput {
     #[serde(default)]
-    pub position: Option<f64>,
+    pub position: MaybeUndefined<f64>,
     #[serde(default)]
-    pub target_company_id: Option<Uuid>,
+    pub target_company_id: MaybeUndefined<Uuid>,
     #[serde(default)]
-    pub target_opportunity_id: Option<Uuid>,
+    pub target_opportunity_id: MaybeUndefined<Uuid>,
     #[serde(default)]
-    pub target_person_id: Option<Uuid>,
+    pub target_person_id: MaybeUndefined<Uuid>,
 }

@@ -615,13 +615,13 @@ impl From<CreateCompanyInputGql> for CreateCompanyInput {
 
 #[derive(Debug, InputObject)]
 pub struct UpdateCompanyInputGql {
-    pub name: Option<String>,
-    pub domain_name: Option<Links>,
-    pub address: Option<AddressInput>,
-    pub linkedin_link: Option<Links>,
-    pub annual_revenue: Option<CurrencyInput>,
-    pub position: Option<f64>,
-    pub account_owner_id: Option<Uuid>,
+    pub name: MaybeUndefined<String>,
+    pub domain_name: MaybeUndefined<Links>,
+    pub address: MaybeUndefined<AddressInput>,
+    pub linkedin_link: MaybeUndefined<Links>,
+    pub annual_revenue: MaybeUndefined<CurrencyInput>,
+    pub position: MaybeUndefined<f64>,
+    pub account_owner_id: MaybeUndefined<Uuid>,
 }
 
 impl From<UpdateCompanyInputGql> for UpdateCompanyInput {
@@ -629,9 +629,9 @@ impl From<UpdateCompanyInputGql> for UpdateCompanyInput {
         UpdateCompanyInput {
             name: input.name,
             domain_name: input.domain_name,
-            address: input.address.map(Into::into),
+            address: input.address.map_value(Into::into),
             linkedin_link: input.linkedin_link,
-            annual_revenue: input.annual_revenue.map(Into::into),
+            annual_revenue: input.annual_revenue.map_value(Into::into),
             position: input.position,
             account_owner_id: input.account_owner_id,
         }
@@ -667,21 +667,21 @@ impl From<CreateOpportunityInputGql> for CreateOpportunityInput {
 
 #[derive(Debug, InputObject)]
 pub struct UpdateOpportunityInputGql {
-    pub name: Option<String>,
-    pub amount: Option<CurrencyInput>,
-    pub close_date: Option<DateTime<Utc>>,
-    pub stage: Option<OpportunityStage>,
-    pub position: Option<f64>,
-    pub company_id: Option<Uuid>,
-    pub point_of_contact_id: Option<Uuid>,
-    pub owner_id: Option<Uuid>,
+    pub name: MaybeUndefined<String>,
+    pub amount: MaybeUndefined<CurrencyInput>,
+    pub close_date: MaybeUndefined<DateTime<Utc>>,
+    pub stage: MaybeUndefined<OpportunityStage>,
+    pub position: MaybeUndefined<f64>,
+    pub company_id: MaybeUndefined<Uuid>,
+    pub point_of_contact_id: MaybeUndefined<Uuid>,
+    pub owner_id: MaybeUndefined<Uuid>,
 }
 
 impl From<UpdateOpportunityInputGql> for UpdateOpportunityInput {
     fn from(input: UpdateOpportunityInputGql) -> Self {
         UpdateOpportunityInput {
             name: input.name,
-            amount: input.amount.map(Into::into),
+            amount: input.amount.map_value(Into::into),
             close_date: input.close_date,
             stage: input.stage,
             position: input.position,
@@ -758,12 +758,12 @@ impl From<CreateTaskInputGql> for CreateTaskInput {
 
 #[derive(Debug, InputObject)]
 pub struct UpdateTaskInputGql {
-    pub position: Option<f64>,
-    pub title: Option<String>,
-    pub body_v2: Option<RichText>,
-    pub due_at: Option<DateTime<Utc>>,
-    pub status: Option<TaskStatus>,
-    pub assignee_id: Option<Uuid>,
+    pub position: MaybeUndefined<f64>,
+    pub title: MaybeUndefined<String>,
+    pub body_v2: MaybeUndefined<RichText>,
+    pub due_at: MaybeUndefined<DateTime<Utc>>,
+    pub status: MaybeUndefined<TaskStatus>,
+    pub assignee_id: MaybeUndefined<Uuid>,
 }
 
 impl From<UpdateTaskInputGql> for UpdateTaskInput {
@@ -927,9 +927,9 @@ impl From<CreateNoteInputGql> for CreateNoteInput {
 
 #[derive(Debug, InputObject)]
 pub struct UpdateNoteInputGql {
-    pub position: Option<f64>,
-    pub title: Option<String>,
-    pub body_v2: Option<RichText>,
+    pub position: MaybeUndefined<f64>,
+    pub title: MaybeUndefined<String>,
+    pub body_v2: MaybeUndefined<RichText>,
 }
 
 impl From<UpdateNoteInputGql> for UpdateNoteInput {
@@ -1075,10 +1075,10 @@ impl From<CreateTaskTargetInputGql> for CreateTaskTargetInput {
 
 #[derive(Debug, InputObject)]
 pub struct UpdateTaskTargetInputGql {
-    pub position: Option<f64>,
-    pub target_company_id: Option<Uuid>,
-    pub target_opportunity_id: Option<Uuid>,
-    pub target_person_id: Option<Uuid>,
+    pub position: MaybeUndefined<f64>,
+    pub target_company_id: MaybeUndefined<Uuid>,
+    pub target_opportunity_id: MaybeUndefined<Uuid>,
+    pub target_person_id: MaybeUndefined<Uuid>,
 }
 
 impl From<UpdateTaskTargetInputGql> for squid_core::UpdateTaskTargetInput {
@@ -1094,10 +1094,10 @@ impl From<UpdateTaskTargetInputGql> for squid_core::UpdateTaskTargetInput {
 
 #[derive(Debug, InputObject)]
 pub struct UpdateNoteTargetInputGql {
-    pub position: Option<f64>,
-    pub target_company_id: Option<Uuid>,
-    pub target_opportunity_id: Option<Uuid>,
-    pub target_person_id: Option<Uuid>,
+    pub position: MaybeUndefined<f64>,
+    pub target_company_id: MaybeUndefined<Uuid>,
+    pub target_opportunity_id: MaybeUndefined<Uuid>,
+    pub target_person_id: MaybeUndefined<Uuid>,
 }
 
 impl From<UpdateNoteTargetInputGql> for squid_core::UpdateNoteTargetInput {

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::{Actor, Links};
+use crate::{Actor, Links, MaybeUndefined};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
@@ -86,19 +86,19 @@ pub struct CreateCompanyInput {
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct UpdateCompanyInput {
     #[serde(default)]
-    pub name: Option<String>,
+    pub name: MaybeUndefined<String>,
     #[serde(rename = "domainName", default)]
-    pub domain_name: Option<Links>,
+    pub domain_name: MaybeUndefined<Links>,
     #[serde(default)]
-    pub address: Option<Address>,
+    pub address: MaybeUndefined<Address>,
     #[serde(rename = "linkedinLink", default)]
-    pub linkedin_link: Option<Links>,
+    pub linkedin_link: MaybeUndefined<Links>,
     #[serde(rename = "annualRevenue", default)]
-    pub annual_revenue: Option<Currency>,
+    pub annual_revenue: MaybeUndefined<Currency>,
     #[serde(default)]
-    pub position: Option<f64>,
+    pub position: MaybeUndefined<f64>,
     #[serde(rename = "accountOwnerId", default)]
-    pub account_owner_id: Option<Uuid>,
+    pub account_owner_id: MaybeUndefined<Uuid>,
 }
 
 pub fn company_search_vector(name: Option<&str>, domain: &Links) -> Option<String> {

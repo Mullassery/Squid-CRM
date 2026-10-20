@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{Actor, RichText};
+use crate::{Actor, MaybeUndefined, RichText};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
@@ -41,9 +41,9 @@ pub struct CreateNoteInput {
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct UpdateNoteInput {
     #[serde(default)]
-    pub position: Option<f64>,
+    pub position: MaybeUndefined<f64>,
     #[serde(default)]
-    pub title: Option<String>,
+    pub title: MaybeUndefined<String>,
     #[serde(rename = "bodyV2", default)]
-    pub body_v2: Option<RichText>,
+    pub body_v2: MaybeUndefined<RichText>,
 }

@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{Actor, Currency};
+use crate::{Actor, Currency, MaybeUndefined};
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, async_graphql::Enum,
@@ -100,21 +100,21 @@ pub struct CreateOpportunityInput {
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct UpdateOpportunityInput {
     #[serde(default)]
-    pub name: Option<String>,
+    pub name: MaybeUndefined<String>,
     #[serde(default)]
-    pub amount: Option<Currency>,
+    pub amount: MaybeUndefined<Currency>,
     #[serde(rename = "closeDate", default)]
-    pub close_date: Option<DateTime<Utc>>,
+    pub close_date: MaybeUndefined<DateTime<Utc>>,
     #[serde(default)]
-    pub stage: Option<OpportunityStage>,
+    pub stage: MaybeUndefined<OpportunityStage>,
     #[serde(default)]
-    pub position: Option<f64>,
+    pub position: MaybeUndefined<f64>,
     #[serde(rename = "companyId", default)]
-    pub company_id: Option<Uuid>,
+    pub company_id: MaybeUndefined<Uuid>,
     #[serde(rename = "pointOfContactId", default)]
-    pub point_of_contact_id: Option<Uuid>,
+    pub point_of_contact_id: MaybeUndefined<Uuid>,
     #[serde(rename = "ownerId", default)]
-    pub owner_id: Option<Uuid>,
+    pub owner_id: MaybeUndefined<Uuid>,
 }
 
 pub fn opportunity_search_vector(name: Option<&str>) -> Option<String> {

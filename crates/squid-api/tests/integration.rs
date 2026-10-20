@@ -4638,3 +4638,218 @@ async fn person_updates_clear_nullable_fields_but_keep_omitted_ones() {
     );
     assert!(gql_cleared.body["data"]["updatePerson"]["jobTitle"].is_null());
 }
+
+#[tokio::test]
+async fn object_updates_clear_nullable_fields() {
+    let app = test_app().await;
+    let email = unique_email("object-null-clearing");
+    let (token, _workspace) = signup(&app, &email).await;
+
+    let person = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/people",
+            &token,
+            Some(person_body("Clear", "Owner", "clear.owner@example.com")),
+        ),
+    )
+    .await;
+    let person_id = person.body["data"]["createPerson"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let company = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/companies",
+            &token,
+            Some(json!({ "name": "Null Co" })),
+        ),
+    )
+    .await;
+    let company_id = company.body["data"]["createCompany"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let company_owner = send(
+        &app,
+        authorized(
+            "PATCH",
+            &format!("/rest/companies/{company_id}"),
+            &token,
+            Some(json!({ "accountOwnerId": person_id })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        company_owner.body["data"]["updateCompany"]["accountOwnerId"],
+        person_id
+    );
+    let company_cleared = send(
+        &app,
+        authorized(
+            "PATCH",
+            &format!("/rest/companies/{company_id}"),
+            &token,
+            Some(json!({ "name": null, "accountOwnerId": null })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        company_cleared.status,
+        StatusCode::OK,
+        "body: {}",
+        company_cleared.body
+    );
+    assert!(company_cleared.body["data"]["updateCompany"]["name"].is_null());
+    assert!(company_cleared.body["data"]["updateCompany"]["accountOwnerId"].is_null());
+
+    let opportunity = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/opportunities",
+            &token,
+            Some(json!({
+                "name": "Null deal",
+                "amount": { "amountMicros": 1000000, "currencyCode": "USD" },
+                "closeDate": "2026-12-31T00:00:00Z",
+                "stage": "PROPOSAL",
+                "pointOfContactId": person_id
+            })),
+        ),
+    )
+    .await;
+    let opportunity_id = opportunity.body["data"]["createOpportunity"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let opportunity_cleared = send(
+        &app,
+        authorized(
+            "PATCH",
+            &format!("/rest/opportunities/{opportunity_id}"),
+            &token,
+            Some(json!({ "closeDate": null, "pointOfContactId": null })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        opportunity_cleared.status,
+        StatusCode::OK,
+        "body: {}",
+        opportunity_cleared.body
+    );
+    assert!(opportunity_cleared.body["data"]["updateOpportunity"]["closeDate"].is_null());
+    assert!(opportunity_cleared.body["data"]["updateOpportunity"]["pointOfContactId"].is_null());
+
+    let task = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/tasks",
+            &token,
+            Some(json!({ "title": "Null task" })),
+        ),
+    )
+    .await;
+    let task_id = task.body["data"]["createTask"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let task_updated = send(
+        &app,
+        authorized(
+            "PATCH",
+            &format!("/rest/tasks/{task_id}"),
+            &token,
+            Some(json!({ "dueAt": "2026-11-01T00:00:00Z", "assigneeId": person_id })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        task_updated.body["data"]["updateTask"]["assigneeId"],
+        person_id
+    );
+    let task_cleared = send(
+        &app,
+        authorized(
+            "PATCH",
+            &format!("/rest/tasks/{task_id}"),
+            &token,
+            Some(json!({ "title": null, "dueAt": null, "assigneeId": null })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        task_cleared.status,
+        StatusCode::OK,
+        "body: {}",
+        task_cleared.body
+    );
+    assert!(task_cleared.body["data"]["updateTask"]["title"].is_null());
+    assert!(task_cleared.body["data"]["updateTask"]["dueAt"].is_null());
+    assert!(task_cleared.body["data"]["updateTask"]["assigneeId"].is_null());
+
+    let note = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/notes",
+            &token,
+            Some(json!({ "title": "Null note" })),
+        ),
+    )
+    .await;
+    let note_id = note.body["data"]["createNote"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let note_cleared = send(
+        &app,
+        authorized(
+            "PATCH",
+            &format!("/rest/notes/{note_id}"),
+            &token,
+            Some(json!({ "title": null })),
+        ),
+    )
+    .await;
+    assert!(note_cleared.body["data"]["updateNote"]["title"].is_null());
+
+    let target = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/taskTargets",
+            &token,
+            Some(json!({ "taskId": task_id, "targetCompanyId": company_id })),
+        ),
+    )
+    .await;
+    let target_id = target.body["data"]["createTaskTarget"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let target_cleared = send(
+        &app,
+        authorized(
+            "PATCH",
+            &format!("/rest/taskTargets/{target_id}"),
+            &token,
+            Some(json!({ "targetCompanyId": null })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        target_cleared.status,
+        StatusCode::OK,
+        "body: {}",
+        target_cleared.body
+    );
+    assert!(target_cleared.body["data"]["updateTaskTarget"]["targetCompanyId"].is_null());
+}
