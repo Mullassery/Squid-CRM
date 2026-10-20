@@ -2273,3 +2273,229 @@ async fn task_and_note_crud_rest_and_graphql() {
     assert_eq!(destroyed.body["data"]["destroyTask"]["id"], task_id);
     assert_eq!(destroyed.body["data"]["destroyNote"]["id"], note_id);
 }
+
+#[tokio::test]
+async fn task_and_note_target_relations() {
+    let app = test_app().await;
+    let email = unique_email("targets");
+    let (token, _workspace) = signup(&app, &email).await;
+
+    let person = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/people",
+            &token,
+            Some(person_body("Ada", "Target", "ada.target@example.com")),
+        ),
+    )
+    .await;
+    let person_id = person.body["data"]["createPerson"]["id"]
+        .as_str()
+        .expect("person id")
+        .to_string();
+
+    let company = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/companies",
+            &token,
+            Some(json!({ "name": "Target Co" })),
+        ),
+    )
+    .await;
+    let company_id = company.body["data"]["createCompany"]["id"]
+        .as_str()
+        .expect("company id")
+        .to_string();
+
+    let task = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/tasks",
+            &token,
+            Some(json!({ "title": "Linked task" })),
+        ),
+    )
+    .await;
+    let task_id = task.body["data"]["createTask"]["id"]
+        .as_str()
+        .expect("task id")
+        .to_string();
+
+    let created = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": format!(
+                    "mutation {{ createTaskTarget(data: {{ taskId: \"{task_id}\", targetPersonId: \"{person_id}\" }}) {{ id taskId targetPersonId }} }}"
+                )
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(created.status, StatusCode::OK, "body: {}", created.body);
+    let target_id = created.body["data"]["createTaskTarget"]["id"]
+        .as_str()
+        .expect("target id")
+        .to_string();
+    assert_eq!(
+        created.body["data"]["createTaskTarget"]["targetPersonId"],
+        person_id
+    );
+
+    let company_target = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": format!(
+                    "mutation {{ createTaskTarget(data: {{ taskId: \"{task_id}\", targetCompanyId: \"{company_id}\" }}) {{ id targetCompanyId }} }}"
+                )
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(
+        company_target.body["data"]["createTaskTarget"]["targetCompanyId"],
+        company_id
+    );
+
+    let nested = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": format!(
+                    "{{ task(filter: {{ id: {{ eq: \"{task_id}\" }} }}) {{ id taskTargets {{ edges {{ node {{ id taskId targetPersonId targetCompanyId }} }} }} }} taskTargets(filter: {{ targetCompanyId: {{ eq: \"{company_id}\" }} }}) {{ edges {{ node {{ id }} }} }} }}"
+                )
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(nested.status, StatusCode::OK, "body: {}", nested.body);
+    let edges = nested.body["data"]["task"]["taskTargets"]["edges"]
+        .as_array()
+        .unwrap();
+    assert_eq!(edges.len(), 2, "body: {}", nested.body);
+    assert_eq!(
+        nested.body["data"]["taskTargets"]["edges"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    let invalid = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": format!(
+                    "mutation {{ createTaskTarget(data: {{ taskId: \"{task_id}\" }}) {{ id }} }}"
+                )
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(invalid.status, StatusCode::OK);
+    assert!(!invalid.body["errors"].is_null(), "body: {}", invalid.body);
+
+    let deleted = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": format!(
+                    "mutation {{ deleteTaskTarget(id: \"{target_id}\") {{ id targetPersonId }} }}"
+                )
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(deleted.status, StatusCode::OK, "body: {}", deleted.body);
+    assert_eq!(
+        deleted.body["data"]["deleteTaskTarget"]["targetPersonId"],
+        person_id
+    );
+
+    let note = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/notes",
+            &token,
+            Some(json!({ "title": "Linked note" })),
+        ),
+    )
+    .await;
+    let note_id = note.body["data"]["createNote"]["id"]
+        .as_str()
+        .expect("note id")
+        .to_string();
+    let note_target = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": format!(
+                    "mutation {{ createNoteTarget(data: {{ noteId: \"{note_id}\", targetCompanyId: \"{company_id}\" }}) {{ id noteId targetCompanyId }} }}"
+                )
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(
+        note_target.status,
+        StatusCode::OK,
+        "body: {}",
+        note_target.body
+    );
+    assert_eq!(
+        note_target.body["data"]["createNoteTarget"]["targetCompanyId"],
+        company_id
+    );
+
+    let note_nested = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": format!(
+                    "{{ note(filter: {{ id: {{ eq: \"{note_id}\" }} }}) {{ id noteTargets {{ edges {{ node {{ noteId targetCompanyId }} }} }} }} }}"
+                )
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(
+        note_nested.status,
+        StatusCode::OK,
+        "body: {}",
+        note_nested.body
+    );
+    assert_eq!(
+        note_nested.body["data"]["note"]["noteTargets"]["edges"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+}

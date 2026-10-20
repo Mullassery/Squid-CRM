@@ -9,7 +9,7 @@
 - [x] GraphQL login flow + person query/mutations.
 - [x] REST people list/get/create/delete with upstream envelope + error contract.
 - [x] Tenant isolation enforced and tested against real PostgreSQL.
-- [x] 15 unit + 18 integration tests passing; clippy clean; live smoke test.
+- [x] 15 unit + 19 integration tests passing; clippy clean; live smoke test.
 - [x] Dockerfile, docker-compose, CI workflow, Makefile, smoke script.
 
 ## Phase 2 (contracts)
@@ -63,13 +63,16 @@
 - [x] Task and Note slices: workspace `0005_task.sql` / `0006_note.sql`, seeded
       metadata + default views, REST CRUD and GraphQL CRUD with status/title
       filters; `RichText` body support.
+- [x] Task/note targets: `task_target`/`note_target` migrations, GraphQL
+      `taskTargets`/`noteTargets` connection fields, root queries, and
+      create/delete mutations with tenant scoping.
 - [ ] Metadata writes, view writes/filters/sorts/groups, roles, indexes/relations,
       remaining standard objects, and metadata-driven dynamic schema generation.
 - [x] `currentUser`/`currentWorkspace` full frontend boot fragment (ADR 0005;
       enterprise surfaces are explicit empty/static defaults).
 - [ ] Role/permission engine, billing/SSO data, feature flags, and
       `ApiKey.role` as the upstream `Role` object.
-- [ ] Task/Note target relations (`taskTargets`/`noteTargets`).
+- [ ] REST target routes, target updates/batches, and nested target record resolution (`TaskTarget.targetCompany` etc.).
 - [ ] Views/filters/sorts/groups parity (relation filters and view semantics).
 - [ ] Search, files, export/import.
 - [ ] Jobs/cron, webhooks, workflows, integrations.
@@ -90,8 +93,9 @@
 - Opportunity filters cover scalar fields (id, name, stage, closeDate,
   companyId, pointOfContactId, ownerId); relation filters and `orderBy` are not
   yet applied; REST opportunity `filter`/`order_by` are ignored.
-- Task/Note target relations are not implemented yet; standalone tasks/notes do
-  not appear on person/company/opportunity records.
+- Task/Note targets exist over GraphQL; REST target endpoints, target updates,
+  batches, and nested target records are not implemented.
+- Task/Note target connections omit `totalCount` (upstream returns it).
 - Task `orderBy` and REST `filter`/`order_by` are not applied (stable position
   order); filters cover id/title/status/dueAt/assigneeId.
 - No OpenAPI document emitted yet.

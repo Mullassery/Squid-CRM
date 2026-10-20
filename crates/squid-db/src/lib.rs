@@ -12,12 +12,13 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
 use squid_core::{
     Actor, AggregateOperations, ApiKey, Company, CreateCompanyInput, CreateNoteInput,
-    CreateOpportunityInput, CreatePersonInput, CreateTaskInput, DateOp, Emails, FieldMetadata,
-    FieldMetadataType, FilterExpr, FullName, MetadataReadability, MetadataWritability, Note,
-    ObjectMetadata, ObjectOpenRecordIn, ObjectSharingReach, Opportunity, OpportunityStage, Person,
-    Role, StringOp, Task, TaskStatus, UpdateCompanyInput, UpdateNoteInput, UpdateOpportunityInput,
-    UpdatePersonInput, UpdateTaskInput, User, UuidOp, View, ViewCalendarLayout, ViewField, ViewKey,
-    ViewOpenRecordIn, ViewType, ViewVisibility, Workspace,
+    CreateNoteTargetInput, CreateOpportunityInput, CreatePersonInput, CreateTaskInput,
+    CreateTaskTargetInput, DateOp, Emails, FieldMetadata, FieldMetadataType, FilterExpr, FullName,
+    MetadataReadability, MetadataWritability, Note, NoteTarget, ObjectMetadata, ObjectOpenRecordIn,
+    ObjectSharingReach, Opportunity, OpportunityStage, Person, Role, StringOp, Task, TaskStatus,
+    TaskTarget, UpdateCompanyInput, UpdateNoteInput, UpdateOpportunityInput, UpdatePersonInput,
+    UpdateTaskInput, User, UuidOp, View, ViewCalendarLayout, ViewField, ViewKey, ViewOpenRecordIn,
+    ViewType, ViewVisibility, Workspace,
 };
 use uuid::Uuid;
 
@@ -30,6 +31,10 @@ const WORKSPACE_OPPORTUNITY_SQL: &str =
     include_str!("../migrations/workspace/0004_opportunity.sql");
 const WORKSPACE_TASK_SQL: &str = include_str!("../migrations/workspace/0005_task.sql");
 const WORKSPACE_NOTE_SQL: &str = include_str!("../migrations/workspace/0006_note.sql");
+const WORKSPACE_TASK_TARGET_SQL: &str =
+    include_str!("../migrations/workspace/0007_task_target.sql");
+const WORKSPACE_NOTE_TARGET_SQL: &str =
+    include_str!("../migrations/workspace/0008_note_target.sql");
 const CORE_API_KEYS_SQL: &str = include_str!("../migrations/core/0002_api_keys.sql");
 const CORE_METADATA_SQL: &str = include_str!("../migrations/core/0003_metadata.sql");
 const CORE_VIEWS_SQL: &str = include_str!("../migrations/core/0004_views.sql");
@@ -661,6 +666,8 @@ impl Db {
             WORKSPACE_OPPORTUNITY_SQL,
             WORKSPACE_TASK_SQL,
             WORKSPACE_NOTE_SQL,
+            WORKSPACE_TASK_TARGET_SQL,
+            WORKSPACE_NOTE_TARGET_SQL,
         ] {
             let ddl = ddl.replace("{{schema}}", &schema);
             sqlx::raw_sql(&ddl).execute(&self.pool).await?;
@@ -2196,6 +2203,230 @@ impl Db {
         Ok(())
     }
 
+    // ----- task targets --------------------------------------------------
+
+    pub async fn create_task_target(
+        &self,
+        workspace_id: Uuid,
+        input: &CreateTaskTargetInput,
+    ) -> anyhow::Result<TaskTarget> {
+        self.ensure_workspace_task_table(workspace_id).await?;
+        self.ensure_workspace_task_target_table(workspace_id)
+            .await?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let actor = Actor::default();
+        let row = sqlx::query(&format!(
+            "INSERT INTO {schema}.task_target
+                (created_by, updated_by, task_id, target_company_id,
+                 target_opportunity_id, target_person_id)
+             VALUES ($1::jsonb, $2::jsonb, $3, $4, $5, $6)
+             RETURNING {TASK_TARGET_SELECT}"
+        ))
+        .bind(serde_json::to_string(&actor)?)
+        .bind(serde_json::to_string(&actor)?)
+        .bind(input.task_id)
+        .bind(input.target_company_id)
+        .bind(input.target_opportunity_id)
+        .bind(input.target_person_id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row_to_task_target(&row))
+    }
+
+    pub async fn get_task_target(
+        &self,
+        workspace_id: Uuid,
+        target_id: Uuid,
+    ) -> anyhow::Result<Option<TaskTarget>> {
+        self.ensure_workspace_task_table(workspace_id).await?;
+        self.ensure_workspace_task_target_table(workspace_id)
+            .await?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let row = sqlx::query(&format!(
+            "SELECT {TASK_TARGET_SELECT} FROM {schema}.task_target
+             WHERE id = $1 AND deleted_at IS NULL"
+        ))
+        .bind(target_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.as_ref().map(row_to_task_target))
+    }
+
+    pub async fn list_task_targets(
+        &self,
+        workspace_id: Uuid,
+        task_id: Option<Uuid>,
+        company_id: Option<Uuid>,
+        opportunity_id: Option<Uuid>,
+        person_id: Option<Uuid>,
+    ) -> anyhow::Result<Vec<TaskTarget>> {
+        self.ensure_workspace_task_table(workspace_id).await?;
+        self.ensure_workspace_task_target_table(workspace_id)
+            .await?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let rows = sqlx::query(&format!(
+            "SELECT {TASK_TARGET_SELECT} FROM {schema}.task_target
+             WHERE deleted_at IS NULL
+               AND ($1::uuid IS NULL OR task_id = $1)
+               AND ($2::uuid IS NULL OR target_company_id = $2)
+               AND ($3::uuid IS NULL OR target_opportunity_id = $3)
+               AND ($4::uuid IS NULL OR target_person_id = $4)
+             ORDER BY position ASC, created_at ASC"
+        ))
+        .bind(task_id)
+        .bind(company_id)
+        .bind(opportunity_id)
+        .bind(person_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.iter().map(row_to_task_target).collect())
+    }
+
+    pub async fn delete_task_target(
+        &self,
+        workspace_id: Uuid,
+        target_id: Uuid,
+    ) -> anyhow::Result<bool> {
+        self.ensure_workspace_task_target_table(workspace_id)
+            .await?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let result = sqlx::query(&format!(
+            "UPDATE {schema}.task_target SET deleted_at = now(), updated_at = now()
+             WHERE id = $1 AND deleted_at IS NULL"
+        ))
+        .bind(target_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    pub async fn ensure_workspace_task_target_table(
+        &self,
+        workspace_id: Uuid,
+    ) -> anyhow::Result<()> {
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let ddl = WORKSPACE_TASK_TARGET_SQL.replace("{{schema}}", &schema);
+        sqlx::raw_sql(&ddl).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    // ----- note targets --------------------------------------------------
+
+    pub async fn create_note_target(
+        &self,
+        workspace_id: Uuid,
+        input: &CreateNoteTargetInput,
+    ) -> anyhow::Result<NoteTarget> {
+        self.ensure_workspace_note_table(workspace_id).await?;
+        self.ensure_workspace_note_target_table(workspace_id)
+            .await?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let actor = Actor::default();
+        let row = sqlx::query(&format!(
+            "INSERT INTO {schema}.note_target
+                (created_by, updated_by, note_id, target_company_id,
+                 target_opportunity_id, target_person_id)
+             VALUES ($1::jsonb, $2::jsonb, $3, $4, $5, $6)
+             RETURNING {NOTE_TARGET_SELECT}"
+        ))
+        .bind(serde_json::to_string(&actor)?)
+        .bind(serde_json::to_string(&actor)?)
+        .bind(input.note_id)
+        .bind(input.target_company_id)
+        .bind(input.target_opportunity_id)
+        .bind(input.target_person_id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row_to_note_target(&row))
+    }
+
+    pub async fn get_note_target(
+        &self,
+        workspace_id: Uuid,
+        target_id: Uuid,
+    ) -> anyhow::Result<Option<NoteTarget>> {
+        self.ensure_workspace_note_table(workspace_id).await?;
+        self.ensure_workspace_note_target_table(workspace_id)
+            .await?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let row = sqlx::query(&format!(
+            "SELECT {NOTE_TARGET_SELECT} FROM {schema}.note_target
+             WHERE id = $1 AND deleted_at IS NULL"
+        ))
+        .bind(target_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.as_ref().map(row_to_note_target))
+    }
+
+    pub async fn list_note_targets(
+        &self,
+        workspace_id: Uuid,
+        note_id: Option<Uuid>,
+        company_id: Option<Uuid>,
+        opportunity_id: Option<Uuid>,
+        person_id: Option<Uuid>,
+    ) -> anyhow::Result<Vec<NoteTarget>> {
+        self.ensure_workspace_note_table(workspace_id).await?;
+        self.ensure_workspace_note_target_table(workspace_id)
+            .await?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let rows = sqlx::query(&format!(
+            "SELECT {NOTE_TARGET_SELECT} FROM {schema}.note_target
+             WHERE deleted_at IS NULL
+               AND ($1::uuid IS NULL OR note_id = $1)
+               AND ($2::uuid IS NULL OR target_company_id = $2)
+               AND ($3::uuid IS NULL OR target_opportunity_id = $3)
+               AND ($4::uuid IS NULL OR target_person_id = $4)
+             ORDER BY position ASC, created_at ASC"
+        ))
+        .bind(note_id)
+        .bind(company_id)
+        .bind(opportunity_id)
+        .bind(person_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.iter().map(row_to_note_target).collect())
+    }
+
+    pub async fn delete_note_target(
+        &self,
+        workspace_id: Uuid,
+        target_id: Uuid,
+    ) -> anyhow::Result<bool> {
+        self.ensure_workspace_note_target_table(workspace_id)
+            .await?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let result = sqlx::query(&format!(
+            "UPDATE {schema}.note_target SET deleted_at = now(), updated_at = now()
+             WHERE id = $1 AND deleted_at IS NULL"
+        ))
+        .bind(target_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    pub async fn ensure_workspace_note_target_table(
+        &self,
+        workspace_id: Uuid,
+    ) -> anyhow::Result<()> {
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let ddl = WORKSPACE_NOTE_TARGET_SQL.replace("{{schema}}", &schema);
+        sqlx::raw_sql(&ddl).execute(&self.pool).await?;
+        Ok(())
+    }
+
     // ----- companies -----------------------------------------------------
 
     pub async fn create_company(
@@ -2527,6 +2758,48 @@ struct PersonFieldSeed {
     nullable: bool,
     unique: bool,
     searchable: bool,
+}
+
+const TASK_TARGET_SELECT: &str = "id, created_at, updated_at, deleted_at, position, \
+     created_by::text AS created_by, updated_by::text AS updated_by, search_vector, \
+     task_id, target_company_id, target_opportunity_id, target_person_id";
+
+const NOTE_TARGET_SELECT: &str = "id, created_at, updated_at, deleted_at, position, \
+     created_by::text AS created_by, updated_by::text AS updated_by, search_vector, \
+     note_id, target_company_id, target_opportunity_id, target_person_id";
+
+fn row_to_task_target(row: &sqlx::postgres::PgRow) -> TaskTarget {
+    TaskTarget {
+        id: row.get("id"),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+        deleted_at: row.get("deleted_at"),
+        position: row.get("position"),
+        created_by: parse_json_option(row.get("created_by")),
+        updated_by: parse_json_option(row.get("updated_by")),
+        search_vector: row.get("search_vector"),
+        task_id: row.get("task_id"),
+        target_company_id: row.get("target_company_id"),
+        target_opportunity_id: row.get("target_opportunity_id"),
+        target_person_id: row.get("target_person_id"),
+    }
+}
+
+fn row_to_note_target(row: &sqlx::postgres::PgRow) -> NoteTarget {
+    NoteTarget {
+        id: row.get("id"),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+        deleted_at: row.get("deleted_at"),
+        position: row.get("position"),
+        created_by: parse_json_option(row.get("created_by")),
+        updated_by: parse_json_option(row.get("updated_by")),
+        search_vector: row.get("search_vector"),
+        note_id: row.get("note_id"),
+        target_company_id: row.get("target_company_id"),
+        target_opportunity_id: row.get("target_opportunity_id"),
+        target_person_id: row.get("target_person_id"),
+    }
 }
 
 struct StandardObjectSeed<'a> {

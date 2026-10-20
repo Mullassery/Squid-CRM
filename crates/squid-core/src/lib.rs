@@ -16,6 +16,7 @@ pub mod error;
 pub mod metadata;
 pub mod note;
 pub mod opportunity;
+pub mod target;
 pub mod task;
 pub mod view;
 
@@ -26,6 +27,7 @@ pub use error::{AppError, AppResult};
 pub use metadata::*;
 pub use note::*;
 pub use opportunity::*;
+pub use target::*;
 pub use task::*;
 pub use view::*;
 

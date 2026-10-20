@@ -303,7 +303,7 @@ Known remaining divergences (do not claim parity):
 | Company ordering | GraphQL `orderBy` + REST `order_by` | accepted but stable name order | implement whitelisted company sorts |
 | Opportunity filters | full scalar + relation filters | scalar `id`/`name`/`stage`/`closeDate`/`companyId`/`pointOfContactId`/`ownerId` | add relation filters |
 | Opportunity ordering | GraphQL `orderBy` + REST `order_by` | accepted but stable name order | implement whitelisted opportunity sorts |
-| Task/Note targets | `taskTargets`/`noteTargets` polymorphic relations | not implemented | add target tables + mutations |
+| Task/Note targets | full polymorphic relations + REST | GraphQL nested/root queries + create/delete, no REST/update/nested records | add target REST + relation resolvers |
 | Task/Note ordering | GraphQL `orderBy` + REST `order_by` | stable position order | implement whitelisted task/note sorts |
 | Workspace prefill | sample people/companies on activation | none (new workspace has 0 people) | implement prefill |
 | Filter coverage | all person fields/relations | scalar person fields (`id`, name, email, jobTitle, timestamps); relation filters absent | expand as metadata lands |
