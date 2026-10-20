@@ -24,6 +24,11 @@ use squid_core::{
 use squid_db::{OrderTerm, PersonColumn};
 use uuid::Uuid;
 
+use crate::graphql::{
+    sort_companies, sort_note_targets, sort_notes, sort_opportunities, sort_task_targets,
+    sort_tasks,
+};
+use crate::sorting::SortTerm;
 use crate::{resolve_auth, AppState};
 
 #[derive(Debug, Deserialize)]
@@ -291,7 +296,21 @@ pub async fn list_companies(
     Query(params): Query<ListCompaniesParams>,
 ) -> AppResult<Json<FindManyResponse<Company>>> {
     let auth = require(&state, &headers).await?;
-    let _ = (&params.order_by, &params.filter);
+    let _ = &params.filter;
+    let order = parse_generic_order_by(
+        params.order_by.as_deref(),
+        &[
+            "id",
+            "createdAt",
+            "updatedAt",
+            "deletedAt",
+            "name",
+            "position",
+            "accountOwnerId",
+            "searchVector",
+            "annualRevenue",
+        ],
+    )?;
 
     let limit = params
         .limit
@@ -314,6 +333,7 @@ pub async fn list_companies(
         .list_companies(auth.workspace_id, 10_000, 0)
         .await
         .map_err(AppError::Internal)?;
+    sort_companies(&mut companies, &order);
 
     if let Some(after) = starting_after {
         if let Some(index) = companies.iter().position(|company| company.id == after) {
@@ -456,7 +476,25 @@ pub async fn list_opportunities(
     Query(params): Query<ListOpportunitiesParams>,
 ) -> AppResult<Json<FindManyResponse<Opportunity>>> {
     let auth = require(&state, &headers).await?;
-    let _ = (&params.order_by, &params.filter);
+    let _ = &params.filter;
+    let order = parse_generic_order_by(
+        params.order_by.as_deref(),
+        &[
+            "id",
+            "createdAt",
+            "updatedAt",
+            "deletedAt",
+            "name",
+            "amount",
+            "closeDate",
+            "stage",
+            "position",
+            "companyId",
+            "pointOfContactId",
+            "ownerId",
+            "searchVector",
+        ],
+    )?;
 
     let limit = params
         .limit
@@ -479,6 +517,7 @@ pub async fn list_opportunities(
         .list_opportunities(auth.workspace_id, 10_000, 0)
         .await
         .map_err(AppError::Internal)?;
+    sort_opportunities(&mut opportunities, &order);
 
     if let Some(after) = starting_after {
         if let Some(index) = opportunities.iter().position(|row| row.id == after) {
@@ -617,7 +656,22 @@ pub async fn list_tasks(
     Query(params): Query<ListOpportunitiesParams>,
 ) -> AppResult<Json<FindManyResponse<Task>>> {
     let auth = require(&state, &headers).await?;
-    let _ = (&params.order_by, &params.filter);
+    let _ = &params.filter;
+    let order = parse_generic_order_by(
+        params.order_by.as_deref(),
+        &[
+            "id",
+            "createdAt",
+            "updatedAt",
+            "deletedAt",
+            "position",
+            "title",
+            "dueAt",
+            "status",
+            "assigneeId",
+            "searchVector",
+        ],
+    )?;
 
     let limit = params
         .limit
@@ -640,6 +694,7 @@ pub async fn list_tasks(
         .list_tasks(auth.workspace_id, 10_000, 0)
         .await
         .map_err(AppError::Internal)?;
+    sort_tasks(&mut tasks, &order);
     if let Some(after) = starting_after {
         if let Some(index) = tasks.iter().position(|row| row.id == after) {
             tasks.drain(..=index);
@@ -768,7 +823,19 @@ pub async fn list_notes(
     Query(params): Query<ListOpportunitiesParams>,
 ) -> AppResult<Json<FindManyResponse<Note>>> {
     let auth = require(&state, &headers).await?;
-    let _ = (&params.order_by, &params.filter);
+    let _ = &params.filter;
+    let order = parse_generic_order_by(
+        params.order_by.as_deref(),
+        &[
+            "id",
+            "createdAt",
+            "updatedAt",
+            "deletedAt",
+            "position",
+            "title",
+            "searchVector",
+        ],
+    )?;
 
     let limit = params
         .limit
@@ -791,6 +858,7 @@ pub async fn list_notes(
         .list_notes(auth.workspace_id, 10_000, 0)
         .await
         .map_err(AppError::Internal)?;
+    sort_notes(&mut notes, &order);
     if let Some(after) = starting_after {
         if let Some(index) = notes.iter().position(|row| row.id == after) {
             notes.drain(..=index);
@@ -957,7 +1025,22 @@ pub async fn list_task_targets(
     Query(params): Query<ListOpportunitiesParams>,
 ) -> AppResult<Json<FindManyResponse<TaskTarget>>> {
     let auth = require(&state, &headers).await?;
-    let _ = (&params.order_by, &params.filter);
+    let _ = &params.filter;
+    let order = parse_generic_order_by(
+        params.order_by.as_deref(),
+        &[
+            "id",
+            "createdAt",
+            "updatedAt",
+            "deletedAt",
+            "position",
+            "searchVector",
+            "taskId",
+            "targetCompanyId",
+            "targetOpportunityId",
+            "targetPersonId",
+        ],
+    )?;
     let limit = params
         .limit
         .unwrap_or(20)
@@ -972,11 +1055,12 @@ pub async fn list_task_targets(
         .as_deref()
         .map(decode_cursor)
         .transpose()?;
-    let targets = state
+    let mut targets = state
         .db
         .list_task_targets(auth.workspace_id, None, None, None, None)
         .await
         .map_err(AppError::Internal)?;
+    sort_task_targets(&mut targets, &order);
     let total = targets.len() as i64;
     let (page, page_info) = list_target_page(
         targets,
@@ -1092,7 +1176,22 @@ pub async fn list_note_targets(
     Query(params): Query<ListOpportunitiesParams>,
 ) -> AppResult<Json<FindManyResponse<NoteTarget>>> {
     let auth = require(&state, &headers).await?;
-    let _ = (&params.order_by, &params.filter);
+    let _ = &params.filter;
+    let order = parse_generic_order_by(
+        params.order_by.as_deref(),
+        &[
+            "id",
+            "createdAt",
+            "updatedAt",
+            "deletedAt",
+            "position",
+            "searchVector",
+            "noteId",
+            "targetCompanyId",
+            "targetOpportunityId",
+            "targetPersonId",
+        ],
+    )?;
     let limit = params
         .limit
         .unwrap_or(20)
@@ -1107,11 +1206,12 @@ pub async fn list_note_targets(
         .as_deref()
         .map(decode_cursor)
         .transpose()?;
-    let targets = state
+    let mut targets = state
         .db
         .list_note_targets(auth.workspace_id, None, None, None, None)
         .await
         .map_err(AppError::Internal)?;
+    sort_note_targets(&mut targets, &order);
     let total = targets.len() as i64;
     let (page, page_info) = list_target_page(
         targets,
@@ -1331,6 +1431,33 @@ fn parse_order_by(raw: Option<&str>) -> AppResult<Vec<OrderTerm>> {
             descending,
             nulls_first,
         });
+    }
+    Ok(terms)
+}
+
+fn parse_generic_order_by(raw: Option<&str>, allowed: &[&str]) -> AppResult<Vec<SortTerm>> {
+    let Some(raw) = raw else {
+        return Ok(Vec::new());
+    };
+
+    let mut terms = Vec::new();
+    for item in raw.split(',').filter(|item| !item.trim().is_empty()) {
+        let (field, direction) = match item.split_once('[') {
+            Some((field, rest)) => (field.trim(), rest.trim_end_matches(']').trim()),
+            None => (item.trim(), "AscNullsFirst"),
+        };
+        if !allowed.contains(&field) {
+            return Err(AppError::BadRequest(format!(
+                "Field \"{field}\" does not exist or is not sortable"
+            )));
+        }
+        let term = SortTerm::parse(field, direction).ok_or_else(|| {
+            AppError::BadRequest(format!(
+                "'order_by' direction '{direction}' invalid. Allowed values are \
+                 'AscNullsFirst', 'AscNullsLast', 'DescNullsFirst', 'DescNullsLast'."
+            ))
+        })?;
+        terms.push(term);
     }
     Ok(terms)
 }

@@ -31,6 +31,7 @@ use uuid::Uuid;
 
 use crate::auth::{normalize_email, unique_subdomain};
 use crate::current_user::{self, User, Workspace};
+use crate::sorting::{sort_records, SortTerm, SortValue};
 use crate::{clear_session_cookie, resolve_auth, session_cookie, AppState, AuthTokenPair};
 
 pub type SquidSchema = Schema<QueryRoot, MutationRoot, EmptySubscription>;
@@ -475,6 +476,129 @@ pub enum OrderByDirection {
     AscNullsLast,
     DescNullsFirst,
     DescNullsLast,
+}
+
+fn json_order_terms(raw: &[serde_json::Value]) -> Vec<SortTerm> {
+    let mut terms = Vec::new();
+    for item in raw {
+        let Some(object) = item.as_object() else {
+            continue;
+        };
+        for (field, direction) in object {
+            let Some(direction) = direction.as_str() else {
+                continue;
+            };
+            if let Some(term) = SortTerm::parse(field, direction) {
+                terms.push(term);
+            }
+        }
+    }
+    terms
+}
+
+fn text(value: impl ToString) -> SortValue {
+    SortValue::Text(value.to_string())
+}
+
+pub(crate) fn sort_companies(items: &mut [Company], terms: &[SortTerm]) {
+    sort_records(items, terms, |company, field| match field {
+        "id" => Some(text(company.id)),
+        "createdAt" => Some(SortValue::Time(company.created_at)),
+        "updatedAt" => Some(SortValue::Time(company.updated_at)),
+        "deletedAt" => company.deleted_at.map(SortValue::Time),
+        "name" => company.name.clone().map(SortValue::Text),
+        "position" => Some(SortValue::Number(company.position)),
+        "accountOwnerId" => company.account_owner_id.map(text),
+        "searchVector" => company.search_vector.clone().map(SortValue::Text),
+        "annualRevenue" => company
+            .annual_revenue
+            .amount_micros
+            .map(|value| SortValue::Number(value as f64)),
+        _ => None,
+    });
+}
+
+pub(crate) fn sort_opportunities(items: &mut [Opportunity], terms: &[SortTerm]) {
+    sort_records(items, terms, |opportunity, field| match field {
+        "id" => Some(text(opportunity.id)),
+        "createdAt" => Some(SortValue::Time(opportunity.created_at)),
+        "updatedAt" => Some(SortValue::Time(opportunity.updated_at)),
+        "deletedAt" => opportunity.deleted_at.map(SortValue::Time),
+        "name" => opportunity.name.clone().map(SortValue::Text),
+        "amount" => opportunity
+            .amount
+            .amount_micros
+            .map(|value| SortValue::Number(value as f64)),
+        "closeDate" => opportunity.close_date.map(SortValue::Time),
+        "stage" => Some(text(opportunity.stage.as_str())),
+        "position" => Some(SortValue::Number(opportunity.position)),
+        "companyId" => opportunity.company_id.map(text),
+        "pointOfContactId" => opportunity.point_of_contact_id.map(text),
+        "ownerId" => opportunity.owner_id.map(text),
+        "searchVector" => opportunity.search_vector.clone().map(SortValue::Text),
+        _ => None,
+    });
+}
+
+pub(crate) fn sort_tasks(items: &mut [Task], terms: &[SortTerm]) {
+    sort_records(items, terms, |task, field| match field {
+        "id" => Some(text(task.id)),
+        "createdAt" => Some(SortValue::Time(task.created_at)),
+        "updatedAt" => Some(SortValue::Time(task.updated_at)),
+        "deletedAt" => task.deleted_at.map(SortValue::Time),
+        "position" => Some(SortValue::Number(task.position)),
+        "title" => task.title.clone().map(SortValue::Text),
+        "dueAt" => task.due_at.map(SortValue::Time),
+        "status" => task.status.map(|status| text(status.as_str())),
+        "assigneeId" => task.assignee_id.map(text),
+        "searchVector" => task.search_vector.clone().map(SortValue::Text),
+        _ => None,
+    });
+}
+
+pub(crate) fn sort_notes(items: &mut [Note], terms: &[SortTerm]) {
+    sort_records(items, terms, |note, field| match field {
+        "id" => Some(text(note.id)),
+        "createdAt" => Some(SortValue::Time(note.created_at)),
+        "updatedAt" => Some(SortValue::Time(note.updated_at)),
+        "deletedAt" => note.deleted_at.map(SortValue::Time),
+        "position" => Some(SortValue::Number(note.position)),
+        "title" => note.title.clone().map(SortValue::Text),
+        "searchVector" => note.search_vector.clone().map(SortValue::Text),
+        _ => None,
+    });
+}
+
+pub(crate) fn sort_task_targets(items: &mut [TaskTarget], terms: &[SortTerm]) {
+    sort_records(items, terms, |target, field| match field {
+        "id" => Some(text(target.id)),
+        "createdAt" => Some(SortValue::Time(target.created_at)),
+        "updatedAt" => Some(SortValue::Time(target.updated_at)),
+        "deletedAt" => target.deleted_at.map(SortValue::Time),
+        "position" => Some(SortValue::Number(target.position)),
+        "taskId" => Some(text(target.task_id)),
+        "targetCompanyId" => target.target_company_id.map(text),
+        "targetOpportunityId" => target.target_opportunity_id.map(text),
+        "targetPersonId" => target.target_person_id.map(text),
+        "searchVector" => target.search_vector.clone().map(SortValue::Text),
+        _ => None,
+    });
+}
+
+pub(crate) fn sort_note_targets(items: &mut [NoteTarget], terms: &[SortTerm]) {
+    sort_records(items, terms, |target, field| match field {
+        "id" => Some(text(target.id)),
+        "createdAt" => Some(SortValue::Time(target.created_at)),
+        "updatedAt" => Some(SortValue::Time(target.updated_at)),
+        "deletedAt" => target.deleted_at.map(SortValue::Time),
+        "position" => Some(SortValue::Number(target.position)),
+        "noteId" => Some(text(target.note_id)),
+        "targetCompanyId" => target.target_company_id.map(text),
+        "targetOpportunityId" => target.target_opportunity_id.map(text),
+        "targetPersonId" => target.target_person_id.map(text),
+        "searchVector" => target.search_vector.clone().map(SortValue::Text),
+        _ => None,
+    });
 }
 
 #[derive(Debug, InputObject)]
@@ -1680,7 +1804,7 @@ impl TaskGql {
         filter: Option<TaskTargetFilterInput>,
         order_by: Option<Vec<serde_json::Value>>,
     ) -> async_graphql::Result<TaskTargetConnection> {
-        let _ = order_by;
+        let order = json_order_terms(order_by.as_deref().unwrap_or_default());
         let auth = require_auth(ctx)?;
         let filter = filter.unwrap_or_default();
         let mut targets = state(ctx)
@@ -1698,6 +1822,7 @@ impl TaskGql {
                 )
                 && option_uuid_filter_matches(&filter.target_person_id, target.target_person_id)
         });
+        sort_task_targets(&mut targets, &order);
         let total = targets.len() as i64;
         let (targets, page_info) =
             paginate_targets(targets, first, last, offset, before, after, |t| t.id)?;
@@ -1730,7 +1855,7 @@ impl NoteGql {
         filter: Option<NoteTargetFilterInput>,
         order_by: Option<Vec<serde_json::Value>>,
     ) -> async_graphql::Result<NoteTargetConnection> {
-        let _ = order_by;
+        let order = json_order_terms(order_by.as_deref().unwrap_or_default());
         let auth = require_auth(ctx)?;
         let filter = filter.unwrap_or_default();
         let mut targets = state(ctx)
@@ -1748,6 +1873,7 @@ impl NoteGql {
                 )
                 && option_uuid_filter_matches(&filter.target_person_id, target.target_person_id)
         });
+        sort_note_targets(&mut targets, &order);
         let total = targets.len() as i64;
         let (targets, page_info) =
             paginate_targets(targets, first, last, offset, before, after, |t| t.id)?;
@@ -2194,7 +2320,7 @@ impl QueryRoot {
         order_by: Option<Vec<serde_json::Value>>,
     ) -> async_graphql::Result<CompanyConnection> {
         let auth = require_auth(ctx)?;
-        let _ = order_by;
+        let order = json_order_terms(order_by.as_deref().unwrap_or_default());
         let (mut all, _) = state(ctx)
             .db
             .list_companies(auth.workspace_id, 10_000, 0)
@@ -2202,6 +2328,7 @@ impl QueryRoot {
             .map_err(|e| gql_err(AppError::Internal(e)))?;
         let filter = filter.unwrap_or_default();
         all.retain(|company| company_matches(company, &filter));
+        sort_companies(&mut all, &order);
 
         let total = all.len() as i64;
         let limit = first
@@ -2295,7 +2422,7 @@ impl QueryRoot {
         order_by: Option<Vec<serde_json::Value>>,
     ) -> async_graphql::Result<OpportunityConnection> {
         let auth = require_auth(ctx)?;
-        let _ = order_by;
+        let order = json_order_terms(order_by.as_deref().unwrap_or_default());
         let (mut all, _) = state(ctx)
             .db
             .list_opportunities(auth.workspace_id, 10_000, 0)
@@ -2303,6 +2430,7 @@ impl QueryRoot {
             .map_err(|e| gql_err(AppError::Internal(e)))?;
         let filter = filter.unwrap_or_default();
         all.retain(|opportunity| opportunity_matches(opportunity, &filter));
+        sort_opportunities(&mut all, &order);
 
         let total = all.len() as i64;
         let limit = first
@@ -2391,7 +2519,7 @@ impl QueryRoot {
         order_by: Option<Vec<serde_json::Value>>,
     ) -> async_graphql::Result<TaskConnection> {
         let auth = require_auth(ctx)?;
-        let _ = order_by;
+        let order = json_order_terms(order_by.as_deref().unwrap_or_default());
         let (mut all, _) = state(ctx)
             .db
             .list_tasks(auth.workspace_id, 10_000, 0)
@@ -2399,6 +2527,7 @@ impl QueryRoot {
             .map_err(|e| gql_err(AppError::Internal(e)))?;
         let filter = filter.unwrap_or_default();
         all.retain(|task| task_matches(task, &filter));
+        sort_tasks(&mut all, &order);
 
         let total = all.len() as i64;
         let limit = first
@@ -2468,7 +2597,7 @@ impl QueryRoot {
         filter: Option<TaskTargetFilterInput>,
         order_by: Option<Vec<serde_json::Value>>,
     ) -> async_graphql::Result<TaskTargetConnection> {
-        let _ = order_by;
+        let order = json_order_terms(order_by.as_deref().unwrap_or_default());
         let auth = require_auth(ctx)?;
         let filter = filter.unwrap_or_default();
         let mut targets = state(ctx)
@@ -2486,6 +2615,7 @@ impl QueryRoot {
                 )
                 && option_uuid_filter_matches(&filter.target_person_id, target.target_person_id)
         });
+        sort_task_targets(&mut targets, &order);
         let total = targets.len() as i64;
         let (targets, page_info) =
             paginate_targets(targets, first, last, offset, before, after, |t| t.id)?;
@@ -2550,7 +2680,7 @@ impl QueryRoot {
         filter: Option<NoteTargetFilterInput>,
         order_by: Option<Vec<serde_json::Value>>,
     ) -> async_graphql::Result<NoteTargetConnection> {
-        let _ = order_by;
+        let order = json_order_terms(order_by.as_deref().unwrap_or_default());
         let auth = require_auth(ctx)?;
         let filter = filter.unwrap_or_default();
         let mut targets = state(ctx)
@@ -2568,6 +2698,7 @@ impl QueryRoot {
                 )
                 && option_uuid_filter_matches(&filter.target_person_id, target.target_person_id)
         });
+        sort_note_targets(&mut targets, &order);
         let total = targets.len() as i64;
         let (targets, page_info) =
             paginate_targets(targets, first, last, offset, before, after, |t| t.id)?;
@@ -2650,7 +2781,7 @@ impl QueryRoot {
         order_by: Option<Vec<serde_json::Value>>,
     ) -> async_graphql::Result<NoteConnection> {
         let auth = require_auth(ctx)?;
-        let _ = order_by;
+        let order = json_order_terms(order_by.as_deref().unwrap_or_default());
         let (mut all, _) = state(ctx)
             .db
             .list_notes(auth.workspace_id, 10_000, 0)
@@ -2658,6 +2789,7 @@ impl QueryRoot {
             .map_err(|e| gql_err(AppError::Internal(e)))?;
         let filter = filter.unwrap_or_default();
         all.retain(|note| note_matches(note, &filter));
+        sort_notes(&mut all, &order);
 
         let total = all.len() as i64;
         let limit = first

@@ -74,6 +74,8 @@
 - [ ] Role/permission engine, billing/SSO data, feature flags, and
       `ApiKey.role` as the upstream `Role` object.
 - [x] REST target routes, target updates/batches, and nested target record resolution (`TaskTarget.targetCompany` etc.).
+- [x] Scalar ordering parity (`orderBy` + REST `order_by`) for company,
+      opportunity, task, note and task/note targets; relation ordering pending.
 - [ ] Views/filters/sorts/groups parity (relation filters and view semantics).
 - [ ] Search, files, export/import.
 - [ ] Jobs/cron, webhooks, workflows, integrations.
@@ -89,15 +91,15 @@
 - Static person schema; not metadata-driven.
 - Cursor pagination, `order_by`, and scalar/composite filters implemented for
   whitelisted person columns; relation filters and view-based paging are not.
-- Company filters are limited to `id`/`name`; company `orderBy` is accepted and
-  ignored (stable name order); REST company `filter`/`order_by` are ignored.
+- Company filters are limited to `id`/`name`; REST company `filter` is ignored.
+  Scalar `orderBy`/`order_by` is applied (nested relation ordering is not).
 - Opportunity filters cover scalar fields (id, name, stage, closeDate,
-  companyId, pointOfContactId, ownerId); relation filters and `orderBy` are not
-  yet applied; REST opportunity `filter`/`order_by` are ignored.
-- Task/Note target REST list `filter`/`order_by` are ignored (stable position
-  order); GraphQL target filters cover id/taskId/noteId/target*Id.
-- Task `orderBy` and REST `filter`/`order_by` are not applied (stable position
-  order); filters cover id/title/status/dueAt/assigneeId.
+  companyId, pointOfContactId, ownerId); relation filters are not yet applied;
+  REST opportunity `filter` is ignored. Scalar ordering is applied.
+- Task/Note target REST list `filter` is ignored; scalar `orderBy`/`order_by`
+  is applied. GraphQL target filters cover id/taskId/noteId/target*Id.
+- Task/Note REST `filter` is not applied; scalar `orderBy`/`order_by` is applied;
+  filters cover id/title/status/dueAt/assigneeId.
 - No OpenAPI document emitted yet.
 - Workspace activation lifecycle (`PENDING_CREATION` / `activateWorkspace`) and
   `signUpInNewWorkspace` are not implemented; `/auth/signup` activates directly.

@@ -2805,3 +2805,160 @@ async fn task_and_note_target_rest_and_batch_surfaces() {
     assert_eq!(note_node["note"]["title"], "Surface note");
     assert_eq!(note_node["targetCompany"]["id"], company_id.as_str());
 }
+
+#[tokio::test]
+async fn scalar_ordering_rest_and_graphql() {
+    let app = test_app().await;
+    let email = unique_email("ordering");
+    let (token, _workspace) = signup(&app, &email).await;
+
+    for name in ["Zebra Corp", "Alpha Corp", "Mango Corp"] {
+        let response = send(
+            &app,
+            authorized(
+                "POST",
+                "/rest/companies",
+                &token,
+                Some(json!({ "name": name })),
+            ),
+        )
+        .await;
+        assert_eq!(
+            response.status,
+            StatusCode::CREATED,
+            "body: {}",
+            response.body
+        );
+    }
+
+    let descending = send(
+        &app,
+        authorized(
+            "GET",
+            "/rest/companies?order_by=name%5BDescNullsLast%5D",
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(
+        descending.status,
+        StatusCode::OK,
+        "body: {}",
+        descending.body
+    );
+    let names: Vec<&str> = descending.body["data"]["companies"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|company| company["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, vec!["Zebra Corp", "Mango Corp", "Alpha Corp"]);
+
+    let page = send(
+        &app,
+        authorized(
+            "GET",
+            "/rest/companies?limit=2&order_by=name%5BAscNullsLast%5D",
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(page.status, StatusCode::OK, "body: {}", page.body);
+    assert_eq!(page.body["data"]["companies"][0]["name"], "Alpha Corp");
+    assert_eq!(page.body["data"]["companies"][1]["name"], "Mango Corp");
+    assert_eq!(page.body["pageInfo"]["hasNextPage"], true);
+
+    let graphql = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "query($order: [JSON!]) { companies(orderBy: $order) { edges { node { name } } } }",
+                "variables": { "order": [{ "name": "DescNullsLast" }] }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(graphql.status, StatusCode::OK, "body: {}", graphql.body);
+    let edges = graphql.body["data"]["companies"]["edges"]
+        .as_array()
+        .unwrap();
+    assert_eq!(edges[0]["node"]["name"], "Zebra Corp");
+    assert_eq!(edges[2]["node"]["name"], "Alpha Corp");
+
+    for title in ["First task", "Third task", "Second task"] {
+        let response = send(
+            &app,
+            authorized(
+                "POST",
+                "/rest/tasks",
+                &token,
+                Some(json!({ "title": title })),
+            ),
+        )
+        .await;
+        assert_eq!(
+            response.status,
+            StatusCode::CREATED,
+            "body: {}",
+            response.body
+        );
+    }
+
+    let tasks = send(
+        &app,
+        authorized(
+            "GET",
+            "/rest/tasks?order_by=title%5BAscNullsLast%5D",
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(tasks.status, StatusCode::OK, "body: {}", tasks.body);
+    let titles: Vec<&str> = tasks.body["data"]["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|task| task["title"].as_str().unwrap())
+        .collect();
+    assert_eq!(titles, vec!["First task", "Second task", "Third task"]);
+
+    let invalid = send(
+        &app,
+        authorized(
+            "GET",
+            "/rest/companies?order_by=doesNotExist%5BAscNullsFirst%5D",
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(
+        invalid.status,
+        StatusCode::BAD_REQUEST,
+        "body: {}",
+        invalid.body
+    );
+
+    let invalid_direction = send(
+        &app,
+        authorized(
+            "GET",
+            "/rest/companies?order_by=name%5BSideways%5D",
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(
+        invalid_direction.status,
+        StatusCode::BAD_REQUEST,
+        "body: {}",
+        invalid_direction.body
+    );
+}

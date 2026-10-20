@@ -300,11 +300,11 @@ Known remaining divergences (do not claim parity):
 | Data-API auth | API keys only | API keys **and** access token/cookie | tighten before release |
 | Workspace bootstrap | `PENDING_CREATION` + `activateWorkspace` | atomic signup + immediate schema | document; add lifecycle |
 | Company filters | full `CompanyFilterInput` with relations | `id`/`name` only | extend as company relations land |
-| Company ordering | GraphQL `orderBy` + REST `order_by` | accepted but stable name order | implement whitelisted company sorts |
+| Company ordering | GraphQL `orderBy` + REST `order_by` | scalar fields applied in memory; nested relation ordering ignored | add relation ordering |
 | Opportunity filters | full scalar + relation filters | scalar `id`/`name`/`stage`/`closeDate`/`companyId`/`pointOfContactId`/`ownerId` | add relation filters |
-| Opportunity ordering | GraphQL `orderBy` + REST `order_by` | accepted but stable name order | implement whitelisted opportunity sorts |
+| Opportunity ordering | GraphQL `orderBy` + REST `order_by` | scalar fields applied in memory; nested relation ordering ignored | add relation ordering |
 | Task/Note targets | full polymorphic relations + REST | GraphQL nested/root queries + CRUD/batches + `totalCount`; REST CRUD; list filter/order ignored | implement target list filter/order |
-| Task/Note ordering | GraphQL `orderBy` + REST `order_by` | stable position order | implement whitelisted task/note sorts |
+| Task/Note ordering | GraphQL `orderBy` + REST `order_by` | scalar fields applied in memory; nested relation ordering ignored | add relation ordering |
 | Workspace prefill | sample people/companies on activation | none (new workspace has 0 people) | implement prefill |
 | Filter coverage | all person fields/relations | scalar person fields (`id`, name, email, jobTitle, timestamps); relation filters absent | expand as metadata lands |
 | REST sort/filter errors | `FIELD_NOT_FOUND` for unknown fields | `400 BadRequestException` text | align error code |

@@ -5,6 +5,7 @@ pub mod auth;
 pub mod current_user;
 pub mod graphql;
 pub mod rest;
+pub mod sorting;
 
 use std::sync::Arc;
 
