@@ -16,16 +16,16 @@ use squid_core::{
     CreatePersonInput, CreateTaskInput, CreateTaskTargetInput, CreateViewFieldGroupInput,
     CreateViewFieldInput, CreateViewFilterGroupInput, CreateViewFilterInput, CreateViewGroupInput,
     CreateViewInput, CreateViewSortInput, DateOp, Emails, FieldMetadata, FieldMetadataType,
-    FilterExpr, FullName, MetadataReadability, MetadataWritability, Note, NoteTarget,
-    ObjectMetadata, ObjectOpenRecordIn, ObjectSharingReach, Opportunity, OpportunityStage, Person,
-    Role, StringOp, Task, TaskStatus, TaskTarget, UpdateCompanyInput, UpdateFieldMetadataInput,
-    UpdateNoteInput, UpdateNoteTargetInput, UpdateObjectMetadataInput, UpdateOpportunityInput,
-    UpdatePersonInput, UpdateTaskInput, UpdateTaskTargetInput, UpdateViewFieldGroupInput,
-    UpdateViewFieldInput, UpdateViewFilterGroupInput, UpdateViewFilterInput, UpdateViewGroupInput,
-    UpdateViewInput, UpdateViewSortInput, User, UuidOp, View, ViewCalendarLayout, ViewField,
-    ViewFieldGroup, ViewFilter, ViewFilterGroup, ViewFilterGroupLogicalOperator, ViewFilterOperand,
-    ViewGroup, ViewKey, ViewOpenRecordIn, ViewSort, ViewSortDirection, ViewType, ViewVisibility,
-    Workspace,
+    FilterExpr, FullName, MaybeUndefined, MetadataReadability, MetadataWritability, Note,
+    NoteTarget, ObjectMetadata, ObjectOpenRecordIn, ObjectSharingReach, Opportunity,
+    OpportunityStage, Person, Role, StringOp, Task, TaskStatus, TaskTarget, UpdateCompanyInput,
+    UpdateFieldMetadataInput, UpdateNoteInput, UpdateNoteTargetInput, UpdateObjectMetadataInput,
+    UpdateOpportunityInput, UpdatePersonInput, UpdateTaskInput, UpdateTaskTargetInput,
+    UpdateViewFieldGroupInput, UpdateViewFieldInput, UpdateViewFilterGroupInput,
+    UpdateViewFilterInput, UpdateViewGroupInput, UpdateViewInput, UpdateViewSortInput, User,
+    UuidOp, View, ViewCalendarLayout, ViewField, ViewFieldGroup, ViewFilter, ViewFilterGroup,
+    ViewFilterGroupLogicalOperator, ViewFilterOperand, ViewGroup, ViewKey, ViewOpenRecordIn,
+    ViewSort, ViewSortDirection, ViewType, ViewVisibility, Workspace,
 };
 use uuid::Uuid;
 
@@ -1079,14 +1079,34 @@ impl Db {
             return Ok(None);
         };
 
-        let name = input.name.clone().unwrap_or(current.name);
-        let emails = input.emails.clone().unwrap_or(current.emails);
-        let job_title = input.job_title.clone().or(current.job_title);
-        let linkedin_link = input.linkedin_link.clone().unwrap_or(current.linkedin_link);
-        let phones = input.phones.clone().unwrap_or(current.phones);
-        let avatar_url = input.avatar_url.clone().unwrap_or(current.avatar_url);
-        let position = input.position.unwrap_or(current.position);
-        let company_id = input.company_id.or(current.company_id);
+        let name = input.name.value().cloned().unwrap_or(current.name);
+        let emails = input.emails.value().cloned().unwrap_or(current.emails);
+        let job_title = match &input.job_title {
+            MaybeUndefined::Value(value) => Some(value.clone()),
+            MaybeUndefined::Null => None,
+            MaybeUndefined::Undefined => current.job_title.clone(),
+        };
+        let linkedin_link = match &input.linkedin_link {
+            MaybeUndefined::Value(value) => value.clone(),
+            MaybeUndefined::Null => Default::default(),
+            MaybeUndefined::Undefined => current.linkedin_link.clone(),
+        };
+        let phones = match &input.phones {
+            MaybeUndefined::Value(value) => value.clone(),
+            MaybeUndefined::Null => Default::default(),
+            MaybeUndefined::Undefined => current.phones.clone(),
+        };
+        let avatar_url = match &input.avatar_url {
+            MaybeUndefined::Value(value) => value.clone(),
+            MaybeUndefined::Null => String::new(),
+            MaybeUndefined::Undefined => current.avatar_url.clone(),
+        };
+        let position = input.position.value().copied().unwrap_or(current.position);
+        let company_id = match input.company_id {
+            MaybeUndefined::Value(value) => Some(value),
+            MaybeUndefined::Null => None,
+            MaybeUndefined::Undefined => current.company_id,
+        };
         let search_vector = build_search_vector(
             &name.first_name,
             &name.last_name,

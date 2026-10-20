@@ -4510,3 +4510,131 @@ async fn merge_people_repoints_relations_and_honours_dry_run() {
         "BAD_USER_INPUT"
     );
 }
+
+#[tokio::test]
+async fn person_updates_clear_nullable_fields_but_keep_omitted_ones() {
+    let app = test_app().await;
+    let email = unique_email("null-clearing");
+    let (token, _workspace) = signup(&app, &email).await;
+
+    let company = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/companies",
+            &token,
+            Some(json!({ "name": "Clear Co" })),
+        ),
+    )
+    .await;
+    let company_id = company.body["data"]["createCompany"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let person = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/people",
+            &token,
+            Some(person_body("Null", "Clearing", "null.clearing@example.com")),
+        ),
+    )
+    .await;
+    let person_id = person.body["data"]["createPerson"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let assigned = send(
+        &app,
+        authorized(
+            "PATCH",
+            &format!("/rest/people/{person_id}"),
+            &token,
+            Some(json!({ "companyId": company_id })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        assigned.body["data"]["updatePerson"]["companyId"], company_id,
+        "body: {}",
+        assigned.body
+    );
+    assert_eq!(
+        assigned.body["data"]["updatePerson"]["jobTitle"],
+        "Engineer"
+    );
+
+    let cleared = send(
+        &app,
+        authorized(
+            "PATCH",
+            &format!("/rest/people/{person_id}"),
+            &token,
+            Some(json!({ "jobTitle": null, "companyId": null })),
+        ),
+    )
+    .await;
+    assert_eq!(cleared.status, StatusCode::OK, "body: {}", cleared.body);
+    assert!(
+        cleared.body["data"]["updatePerson"]["jobTitle"].is_null(),
+        "body: {}",
+        cleared.body
+    );
+    assert!(
+        cleared.body["data"]["updatePerson"]["companyId"].is_null(),
+        "body: {}",
+        cleared.body
+    );
+
+    let omitted_keeps = send(
+        &app,
+        authorized(
+            "PATCH",
+            &format!("/rest/people/{person_id}"),
+            &token,
+            Some(json!({ "position": 4.0 })),
+        ),
+    )
+    .await;
+    assert!(omitted_keeps.body["data"]["updatePerson"]["jobTitle"].is_null());
+    assert!(omitted_keeps.body["data"]["updatePerson"]["companyId"].is_null());
+
+    let set_again = send(
+        &app,
+        authorized(
+            "PATCH",
+            &format!("/rest/people/{person_id}"),
+            &token,
+            Some(json!({ "jobTitle": "Staff" })),
+        ),
+    )
+    .await;
+    assert_eq!(set_again.body["data"]["updatePerson"]["jobTitle"], "Staff");
+
+    let gql_cleared = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "mutation($id: UUID!, $data: PersonUpdateInput!) { updatePerson(id: $id, data: $data) { id jobTitle } }",
+                "variables": {
+                    "id": person_id,
+                    "data": { "jobTitle": null }
+                }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(
+        gql_cleared.status,
+        StatusCode::OK,
+        "body: {}",
+        gql_cleared.body
+    );
+    assert!(gql_cleared.body["data"]["updatePerson"]["jobTitle"].is_null());
+}

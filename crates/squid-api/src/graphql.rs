@@ -22,7 +22,7 @@ use squid_core::{
     CreatePersonInput, CreateTaskInput, CreateTaskTargetInput, CreateViewFieldGroupInput,
     CreateViewFieldInput, CreateViewFilterGroupInput, CreateViewFilterInput, CreateViewGroupInput,
     CreateViewInput, CreateViewSortInput, Currency, CursorPagingInput, DateOp, FieldConnection,
-    FieldFilterInput, FieldMetadata, FilterExpr, GqlJson, Links, Note, NoteTarget,
+    FieldFilterInput, FieldMetadata, FilterExpr, GqlJson, Links, MaybeUndefined, Note, NoteTarget,
     ObjectConnection, ObjectEdge, ObjectFilterInput, ObjectMetadata, Opportunity, OpportunityStage,
     PageInfo, Person, RichText, Role, StringOp, Task, TaskStatus, TaskTarget, UpdateCompanyInput,
     UpdateFieldMetadataInput, UpdateNoteInput, UpdateObjectMetadataInput, UpdateOpportunityInput,
@@ -205,34 +205,34 @@ impl From<PersonCreateInputGql> for CreatePersonInput {
 #[derive(Debug, InputObject)]
 #[graphql(name = "PersonUpdateInput")]
 pub struct PersonUpdateInputGql {
-    pub name: Option<FullNameCreateInput>,
-    pub emails: Option<EmailsCreateInput>,
-    pub job_title: Option<String>,
-    pub linkedin_link: Option<LinksCreateInput>,
-    pub phones: Option<PhonesCreateInput>,
-    pub avatar_url: Option<String>,
-    pub position: Option<f64>,
-    pub company_id: Option<uuid::Uuid>,
+    pub name: MaybeUndefined<FullNameCreateInput>,
+    pub emails: MaybeUndefined<EmailsCreateInput>,
+    pub job_title: MaybeUndefined<String>,
+    pub linkedin_link: MaybeUndefined<LinksCreateInput>,
+    pub phones: MaybeUndefined<PhonesCreateInput>,
+    pub avatar_url: MaybeUndefined<String>,
+    pub position: MaybeUndefined<f64>,
+    pub company_id: MaybeUndefined<uuid::Uuid>,
 }
 
 impl From<PersonUpdateInputGql> for UpdatePersonInput {
     fn from(input: PersonUpdateInputGql) -> Self {
         UpdatePersonInput {
-            name: input.name.map(|name| squid_core::FullName {
+            name: input.name.map_value(|name| squid_core::FullName {
                 first_name: name.first_name.unwrap_or_default(),
                 last_name: name.last_name.unwrap_or_default(),
             }),
-            emails: input.emails.map(|emails| squid_core::Emails {
+            emails: input.emails.map_value(|emails| squid_core::Emails {
                 primary_email: emails.primary_email.unwrap_or_default(),
                 additional_emails: emails.additional_emails.unwrap_or_default(),
             }),
             job_title: input.job_title,
-            linkedin_link: input.linkedin_link.map(|links| squid_core::Links {
+            linkedin_link: input.linkedin_link.map_value(|links| squid_core::Links {
                 primary_link_label: links.primary_link_label.unwrap_or_default(),
                 primary_link_url: links.primary_link_url.unwrap_or_default(),
                 secondary_links: links.secondary_links.unwrap_or_default(),
             }),
-            phones: input.phones.map(|phones| squid_core::Phones {
+            phones: input.phones.map_value(|phones| squid_core::Phones {
                 primary_phone_number: phones.primary_phone_number.unwrap_or_default(),
                 primary_phone_country_code: phones.primary_phone_country_code.unwrap_or_default(),
                 primary_phone_calling_code: phones.primary_phone_calling_code.unwrap_or_default(),

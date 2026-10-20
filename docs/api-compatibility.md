@@ -288,7 +288,7 @@ Alignment completed and covered by tests:
 | REST sorting | `order_by=field[Direction],...` | aligned for whitelisted person columns |
 | `additionalEmails` / `additionalPhones` | `[]`, never `null` | aligned |
 | Person fields | phones, links, avatar, position, actors, deletedAt, searchVector, companyId | aligned (see actor/searchVector notes) |
-| REST/GraphQL update | `PATCH /rest/people/{id}`, `updatePerson` | aligned; `None` fields unchanged (no explicit null clearing yet) |
+| REST/GraphQL update | `PATCH /rest/people/{id}`, `updatePerson` | aligned; explicit `null` clears nullable person fields, omitted fields stay unchanged |
 | Delete semantics | default hard delete, `soft_delete=true` soft, restore endpoint | aligned |
 | GraphQL lifecycle | `deletePerson`, `destroyPerson`, `restorePerson` | aligned |
 | GraphQL `people` | `PersonConnection` with `edges`/`pageInfo` | aligned |

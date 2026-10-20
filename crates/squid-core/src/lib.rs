@@ -3,6 +3,7 @@
 //! The error envelope mirrors the audited upstream REST contract:
 //! `{ "statusCode": u16, "error": String, "messages": [String], "code": Option<String> }`.
 
+pub use async_graphql::MaybeUndefined;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -275,21 +276,21 @@ pub struct PageInfo {
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct UpdatePersonInput {
     #[serde(default)]
-    pub name: Option<FullName>,
+    pub name: MaybeUndefined<FullName>,
     #[serde(default)]
-    pub emails: Option<Emails>,
+    pub emails: MaybeUndefined<Emails>,
     #[serde(rename = "jobTitle", default)]
-    pub job_title: Option<String>,
+    pub job_title: MaybeUndefined<String>,
     #[serde(rename = "linkedinLink", default)]
-    pub linkedin_link: Option<Links>,
+    pub linkedin_link: MaybeUndefined<Links>,
     #[serde(default)]
-    pub phones: Option<Phones>,
+    pub phones: MaybeUndefined<Phones>,
     #[serde(rename = "avatarUrl", default)]
-    pub avatar_url: Option<String>,
+    pub avatar_url: MaybeUndefined<String>,
     #[serde(default)]
-    pub position: Option<f64>,
+    pub position: MaybeUndefined<f64>,
     #[serde(rename = "companyId", default)]
-    pub company_id: Option<Uuid>,
+    pub company_id: MaybeUndefined<Uuid>,
 }
 
 /// Backend-neutral filter AST. REST/GraphQL parsers produce this; the DB layer
