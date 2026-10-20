@@ -17,14 +17,14 @@ use chrono::{DateTime, Utc};
 use squid_auth::AuthToken;
 use squid_auth::{hash_password, hash_token, verify_password, AuthContext};
 use squid_core::{
-    Address, ApiKey, AppError, AppResult, Company, CreateCompanyInput, CreateNoteInput,
-    CreateNoteTargetInput, CreateOpportunityInput, CreatePersonInput, CreateTaskInput,
-    CreateTaskTargetInput, Currency, CursorPagingInput, DateOp, FieldConnection, FieldFilterInput,
-    FieldMetadata, FilterExpr, GqlJson, Links, Note, NoteTarget, ObjectConnection, ObjectEdge,
-    ObjectFilterInput, ObjectMetadata, Opportunity, OpportunityStage, PageInfo, Person, RichText,
-    Role, StringOp, Task, TaskStatus, TaskTarget, UpdateCompanyInput, UpdateNoteInput,
-    UpdateOpportunityInput, UpdatePersonInput, UpdateTaskInput, User as CoreUser, UuidOp, View,
-    ViewType,
+    Address, ApiKey, AppError, AppResult, Company, CreateCompanyInput, CreateFieldMetadataInput,
+    CreateNoteInput, CreateNoteTargetInput, CreateObjectMetadataInput, CreateOpportunityInput,
+    CreatePersonInput, CreateTaskInput, CreateTaskTargetInput, Currency, CursorPagingInput, DateOp,
+    FieldConnection, FieldFilterInput, FieldMetadata, FilterExpr, GqlJson, Links, Note, NoteTarget,
+    ObjectConnection, ObjectEdge, ObjectFilterInput, ObjectMetadata, Opportunity, OpportunityStage,
+    PageInfo, Person, RichText, Role, StringOp, Task, TaskStatus, TaskTarget, UpdateCompanyInput,
+    UpdateFieldMetadataInput, UpdateNoteInput, UpdateObjectMetadataInput, UpdateOpportunityInput,
+    UpdatePersonInput, UpdateTaskInput, User as CoreUser, UuidOp, View, ViewType,
 };
 use squid_db::{OrderTerm, PersonColumn};
 use uuid::Uuid;
@@ -2803,8 +2803,200 @@ impl QueryRoot {
     }
 }
 
+#[derive(Debug, InputObject)]
+pub struct CreateOneObjectInput {
+    pub object: CreateObjectMetadataInput,
+}
+
+#[derive(Debug, InputObject)]
+pub struct UpdateOneObjectInput {
+    pub id: Uuid,
+    pub update: UpdateObjectMetadataInput,
+}
+
+#[derive(Debug, InputObject)]
+pub struct DeleteOneObjectInput {
+    pub id: Uuid,
+}
+
+#[derive(Debug, InputObject)]
+pub struct CreateOneFieldMetadataInput {
+    pub field: CreateFieldMetadataInput,
+}
+
+#[derive(Debug, InputObject)]
+pub struct UpdateOneFieldMetadataInput {
+    pub id: Uuid,
+    pub update: UpdateFieldMetadataInput,
+}
+
+#[derive(Debug, InputObject)]
+pub struct DeleteOneFieldInput {
+    pub id: Uuid,
+}
+
 #[Object]
 impl MutationRoot {
+    async fn create_one_object(
+        &self,
+        ctx: &Context<'_>,
+        input: CreateOneObjectInput,
+    ) -> async_graphql::Result<ObjectMetadata> {
+        let auth = require_auth(ctx)?;
+        let state = state(ctx);
+        let object = input.object;
+        if object.name_singular.trim().is_empty() || object.name_plural.trim().is_empty() {
+            return Err(gql_err(AppError::BadRequest(
+                "Object names cannot be empty".to_string(),
+            )));
+        }
+        let existing = state
+            .db
+            .list_objects(auth.workspace_id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        if existing.iter().any(|candidate| {
+            candidate.name_singular == object.name_singular
+                || candidate.name_plural == object.name_plural
+        }) {
+            return Err(gql_err(AppError::BadRequest(
+                "An object with this name already exists".to_string(),
+            )));
+        }
+        state
+            .db
+            .create_metadata_object(auth.workspace_id, &object)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))
+    }
+
+    async fn update_one_object(
+        &self,
+        ctx: &Context<'_>,
+        input: UpdateOneObjectInput,
+    ) -> async_graphql::Result<ObjectMetadata> {
+        let auth = require_auth(ctx)?;
+        state(ctx)
+            .db
+            .update_metadata_object(auth.workspace_id, input.id, &input.update)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Object not found".to_string())))
+    }
+
+    async fn delete_one_object(
+        &self,
+        ctx: &Context<'_>,
+        input: DeleteOneObjectInput,
+    ) -> async_graphql::Result<ObjectMetadata> {
+        let auth = require_auth(ctx)?;
+        let state = state(ctx);
+        let object = state
+            .db
+            .get_object(auth.workspace_id, input.id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Object not found".to_string())))?;
+        if object.is_system {
+            return Err(gql_err(AppError::BadRequest(
+                "Standard objects cannot be deleted".to_string(),
+            )));
+        }
+        state
+            .db
+            .delete_metadata_object(auth.workspace_id, input.id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        Ok(object)
+    }
+
+    async fn create_one_field(
+        &self,
+        ctx: &Context<'_>,
+        input: CreateOneFieldMetadataInput,
+    ) -> async_graphql::Result<FieldMetadata> {
+        let auth = require_auth(ctx)?;
+        let state = state(ctx);
+        let field = input.field;
+        if field.name.trim().is_empty() {
+            return Err(gql_err(AppError::BadRequest(
+                "Field name cannot be empty".to_string(),
+            )));
+        }
+        if matches!(
+            field.field_type,
+            squid_core::FieldMetadataType::Relation | squid_core::FieldMetadataType::MorphRelation
+        ) {
+            return Err(gql_err(AppError::BadRequest(
+                "Relation field creation is not supported yet".to_string(),
+            )));
+        }
+        state
+            .db
+            .get_object(auth.workspace_id, field.object_metadata_id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Object not found".to_string())))?;
+        let existing = state
+            .db
+            .list_fields(auth.workspace_id, Some(field.object_metadata_id))
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        if existing
+            .iter()
+            .any(|candidate| candidate.name == field.name)
+        {
+            return Err(gql_err(AppError::BadRequest(
+                "A field with this name already exists".to_string(),
+            )));
+        }
+        state
+            .db
+            .create_metadata_field(auth.workspace_id, &field)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))
+    }
+
+    async fn update_one_field(
+        &self,
+        ctx: &Context<'_>,
+        input: UpdateOneFieldMetadataInput,
+    ) -> async_graphql::Result<FieldMetadata> {
+        let auth = require_auth(ctx)?;
+        state(ctx)
+            .db
+            .update_metadata_field(auth.workspace_id, input.id, &input.update)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Field not found".to_string())))
+    }
+
+    async fn delete_one_field(
+        &self,
+        ctx: &Context<'_>,
+        input: DeleteOneFieldInput,
+    ) -> async_graphql::Result<FieldMetadata> {
+        let auth = require_auth(ctx)?;
+        let state = state(ctx);
+        let field = state
+            .db
+            .get_field(auth.workspace_id, input.id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Field not found".to_string())))?;
+        if field.is_system {
+            return Err(gql_err(AppError::BadRequest(
+                "System fields cannot be deleted".to_string(),
+            )));
+        }
+        state
+            .db
+            .delete_metadata_field(auth.workspace_id, input.id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        Ok(field)
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn sign_up(
         &self,

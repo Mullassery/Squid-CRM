@@ -11,14 +11,16 @@ use serde::de::DeserializeOwned;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
 use squid_core::{
-    Actor, AggregateOperations, ApiKey, Company, CreateCompanyInput, CreateNoteInput,
-    CreateNoteTargetInput, CreateOpportunityInput, CreatePersonInput, CreateTaskInput,
-    CreateTaskTargetInput, DateOp, Emails, FieldMetadata, FieldMetadataType, FilterExpr, FullName,
-    MetadataReadability, MetadataWritability, Note, NoteTarget, ObjectMetadata, ObjectOpenRecordIn,
-    ObjectSharingReach, Opportunity, OpportunityStage, Person, Role, StringOp, Task, TaskStatus,
-    TaskTarget, UpdateCompanyInput, UpdateNoteInput, UpdateNoteTargetInput, UpdateOpportunityInput,
-    UpdatePersonInput, UpdateTaskInput, UpdateTaskTargetInput, User, UuidOp, View,
-    ViewCalendarLayout, ViewField, ViewKey, ViewOpenRecordIn, ViewType, ViewVisibility, Workspace,
+    Actor, AggregateOperations, ApiKey, Company, CreateCompanyInput, CreateFieldMetadataInput,
+    CreateNoteInput, CreateNoteTargetInput, CreateObjectMetadataInput, CreateOpportunityInput,
+    CreatePersonInput, CreateTaskInput, CreateTaskTargetInput, DateOp, Emails, FieldMetadata,
+    FieldMetadataType, FilterExpr, FullName, MetadataReadability, MetadataWritability, Note,
+    NoteTarget, ObjectMetadata, ObjectOpenRecordIn, ObjectSharingReach, Opportunity,
+    OpportunityStage, Person, Role, StringOp, Task, TaskStatus, TaskTarget, UpdateCompanyInput,
+    UpdateFieldMetadataInput, UpdateNoteInput, UpdateNoteTargetInput, UpdateObjectMetadataInput,
+    UpdateOpportunityInput, UpdatePersonInput, UpdateTaskInput, UpdateTaskTargetInput, User,
+    UuidOp, View, ViewCalendarLayout, ViewField, ViewKey, ViewOpenRecordIn, ViewType,
+    ViewVisibility, Workspace,
 };
 use uuid::Uuid;
 
@@ -2888,6 +2890,289 @@ impl Db {
         .fetch_optional(&self.pool)
         .await?;
         row.as_ref().map(row_to_field).transpose()
+    }
+
+    pub async fn create_metadata_object(
+        &self,
+        workspace_id: Uuid,
+        input: &CreateObjectMetadataInput,
+    ) -> anyhow::Result<ObjectMetadata> {
+        let row = sqlx::query(
+            "INSERT INTO core.object_metadata
+                (workspace_id, name_singular, name_plural, label_singular, label_plural,
+                 description, icon, color, shortcut, is_remote, is_active, is_system,
+                 is_ui_editable, is_ui_creatable, is_searchable, open_record_in,
+                 readability, sharing_reach, writability, is_label_synced_with_name)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true, false, true, true,
+                     false, 'USER_CHOICE', 'OPEN', 'ROLE_ACCESS', 'OPEN', $11)
+             RETURNING id",
+        )
+        .bind(workspace_id)
+        .bind(&input.name_singular)
+        .bind(&input.name_plural)
+        .bind(&input.label_singular)
+        .bind(&input.label_plural)
+        .bind(&input.description)
+        .bind(&input.icon)
+        .bind(&input.color)
+        .bind(&input.shortcut)
+        .bind(input.is_remote)
+        .bind(input.is_label_synced_with_name)
+        .fetch_one(&self.pool)
+        .await?;
+        let object_id: Uuid = row.get("id");
+
+        if !input.skip_name_field {
+            let field = CreateFieldMetadataInput {
+                field_type: FieldMetadataType::Text,
+                name: "name".to_string(),
+                label: "Name".to_string(),
+                description: None,
+                icon: None,
+                is_active: Some(true),
+                is_system: Some(false),
+                is_ui_editable: Some(true),
+                is_ui_read_only: None,
+                is_nullable: Some(true),
+                is_unique: Some(false),
+                is_searchable: Some(false),
+                is_audit_logged: Some(true),
+                default_value: None,
+                options: None,
+                settings: None,
+                object_metadata_id: object_id,
+                is_label_synced_with_name: Some(false),
+                is_remote_creation: None,
+                relation_creation_payload: None,
+                morph_relations_creation_payload: None,
+            };
+            let name_field = self.create_metadata_field(workspace_id, &field).await?;
+            sqlx::query(
+                "UPDATE core.object_metadata
+                 SET label_identifier_field_metadata_id = $3, updated_at = now()
+                 WHERE workspace_id = $1 AND id = $2",
+            )
+            .bind(workspace_id)
+            .bind(object_id)
+            .bind(name_field.id)
+            .execute(&self.pool)
+            .await?;
+        }
+
+        self.get_object(workspace_id, object_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("created object not found"))
+    }
+
+    pub async fn update_metadata_object(
+        &self,
+        workspace_id: Uuid,
+        id: Uuid,
+        input: &UpdateObjectMetadataInput,
+    ) -> anyhow::Result<Option<ObjectMetadata>> {
+        let result = sqlx::query(
+            "UPDATE core.object_metadata SET
+                label_singular = COALESCE($3, label_singular),
+                label_plural = COALESCE($4, label_plural),
+                name_singular = COALESCE($5, name_singular),
+                name_plural = COALESCE($6, name_plural),
+                description = COALESCE($7, description),
+                icon = COALESCE($8, icon),
+                shortcut = COALESCE($9, shortcut),
+                color = COALESCE($10, color),
+                is_active = COALESCE($11, is_active),
+                label_identifier_field_metadata_id =
+                    COALESCE($12, label_identifier_field_metadata_id),
+                image_identifier_field_metadata_id =
+                    COALESCE($13, image_identifier_field_metadata_id),
+                is_label_synced_with_name =
+                    COALESCE($14, is_label_synced_with_name),
+                is_searchable = COALESCE($15, is_searchable),
+                open_record_in = COALESCE($16, open_record_in),
+                readability = COALESCE($17, readability),
+                sharing_reach = COALESCE($18, sharing_reach),
+                updated_at = now()
+             WHERE workspace_id = $1 AND id = $2",
+        )
+        .bind(workspace_id)
+        .bind(id)
+        .bind(&input.label_singular)
+        .bind(&input.label_plural)
+        .bind(&input.name_singular)
+        .bind(&input.name_plural)
+        .bind(&input.description)
+        .bind(&input.icon)
+        .bind(&input.shortcut)
+        .bind(&input.color)
+        .bind(input.is_active)
+        .bind(input.label_identifier_field_metadata_id)
+        .bind(input.image_identifier_field_metadata_id)
+        .bind(input.is_label_synced_with_name)
+        .bind(input.is_searchable)
+        .bind(input.open_record_in.map(|value| value.as_str()))
+        .bind(input.readability.map(|value| value.as_str()))
+        .bind(input.sharing_reach.map(|value| value.as_str()))
+        .execute(&self.pool)
+        .await?;
+        if result.rows_affected() == 0 {
+            return Ok(None);
+        }
+        self.get_object(workspace_id, id).await
+    }
+
+    pub async fn delete_metadata_object(
+        &self,
+        workspace_id: Uuid,
+        id: Uuid,
+    ) -> anyhow::Result<bool> {
+        let result =
+            sqlx::query("DELETE FROM core.object_metadata WHERE workspace_id = $1 AND id = $2")
+                .bind(workspace_id)
+                .bind(id)
+                .execute(&self.pool)
+                .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    pub async fn create_metadata_field(
+        &self,
+        workspace_id: Uuid,
+        input: &CreateFieldMetadataInput,
+    ) -> anyhow::Result<FieldMetadata> {
+        let default_value = input.default_value.as_ref().map(|value| value.0.clone());
+        let options = input.options.as_ref().map(|value| value.0.clone());
+        let settings = input.settings.as_ref().map(|value| value.0.clone());
+        let row = sqlx::query(
+            "INSERT INTO core.field_metadata
+                (workspace_id, object_metadata_id, type, name, label, description, icon,
+                 is_active, is_system, is_ui_editable, writability, is_nullable, is_unique,
+                 is_searchable, is_audit_logged, default_value, options, settings,
+                 is_label_synced_with_name)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'OPEN', $11, $12, $13, $14,
+                     $15, $16, $17, $18)
+             RETURNING id",
+        )
+        .bind(workspace_id)
+        .bind(input.object_metadata_id)
+        .bind(input.field_type.as_str())
+        .bind(&input.name)
+        .bind(&input.label)
+        .bind(&input.description)
+        .bind(&input.icon)
+        .bind(input.is_active.unwrap_or(true))
+        .bind(input.is_system.unwrap_or(false))
+        .bind(input.is_ui_editable.unwrap_or(true))
+        .bind(input.is_nullable.unwrap_or(true))
+        .bind(input.is_unique.unwrap_or(false))
+        .bind(input.is_searchable.unwrap_or(false))
+        .bind(input.is_audit_logged.unwrap_or(true))
+        .bind(default_value)
+        .bind(options)
+        .bind(settings)
+        .bind(input.is_label_synced_with_name.unwrap_or(false))
+        .fetch_one(&self.pool)
+        .await?;
+        let field_id: Uuid = row.get("id");
+        self.get_field(workspace_id, field_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("created field not found"))
+    }
+
+    pub async fn update_metadata_field(
+        &self,
+        workspace_id: Uuid,
+        id: Uuid,
+        input: &UpdateFieldMetadataInput,
+    ) -> anyhow::Result<Option<FieldMetadata>> {
+        let universal_identifier = input
+            .universal_identifier
+            .as_deref()
+            .map(Uuid::parse_str)
+            .transpose()?;
+        let default_value = input.default_value.as_ref().map(|value| value.0.clone());
+        let options = input.options.as_ref().map(|value| value.0.clone());
+        let settings = input.settings.as_ref().map(|value| value.0.clone());
+        let result = sqlx::query(
+            "UPDATE core.field_metadata SET
+                universal_identifier = COALESCE($3, universal_identifier),
+                name = COALESCE($4, name),
+                label = COALESCE($5, label),
+                description = COALESCE($6, description),
+                icon = COALESCE($7, icon),
+                is_active = COALESCE($8, is_active),
+                is_system = COALESCE($9, is_system),
+                is_ui_editable = COALESCE($10, is_ui_editable),
+                is_nullable = COALESCE($11, is_nullable),
+                is_unique = COALESCE($12, is_unique),
+                is_searchable = COALESCE($13, is_searchable),
+                is_audit_logged = COALESCE($14, is_audit_logged),
+                default_value = COALESCE($15, default_value),
+                options = COALESCE($16, options),
+                settings = COALESCE($17, settings),
+                object_metadata_id = COALESCE($18, object_metadata_id),
+                is_label_synced_with_name = COALESCE($19, is_label_synced_with_name),
+                updated_at = now()
+             WHERE workspace_id = $1 AND id = $2",
+        )
+        .bind(workspace_id)
+        .bind(id)
+        .bind(universal_identifier)
+        .bind(&input.name)
+        .bind(&input.label)
+        .bind(&input.description)
+        .bind(&input.icon)
+        .bind(input.is_active)
+        .bind(input.is_system)
+        .bind(input.is_ui_editable)
+        .bind(input.is_nullable)
+        .bind(input.is_unique)
+        .bind(input.is_searchable)
+        .bind(input.is_audit_logged)
+        .bind(default_value)
+        .bind(options)
+        .bind(settings)
+        .bind(input.object_metadata_id)
+        .bind(input.is_label_synced_with_name)
+        .execute(&self.pool)
+        .await?;
+        if result.rows_affected() == 0 {
+            return Ok(None);
+        }
+        self.get_field(workspace_id, id).await
+    }
+
+    pub async fn delete_metadata_field(
+        &self,
+        workspace_id: Uuid,
+        id: Uuid,
+    ) -> anyhow::Result<bool> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            "UPDATE core.object_metadata
+             SET label_identifier_field_metadata_id = NULL
+             WHERE workspace_id = $1 AND label_identifier_field_metadata_id = $2",
+        )
+        .bind(workspace_id)
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "UPDATE core.object_metadata
+             SET image_identifier_field_metadata_id = NULL
+             WHERE workspace_id = $1 AND image_identifier_field_metadata_id = $2",
+        )
+        .bind(workspace_id)
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+        let result =
+            sqlx::query("DELETE FROM core.field_metadata WHERE workspace_id = $1 AND id = $2")
+                .bind(workspace_id)
+                .bind(id)
+                .execute(&mut *tx)
+                .await?;
+        tx.commit().await?;
+        Ok(result.rows_affected() > 0)
     }
 }
 

@@ -6,10 +6,12 @@
 //! expose empty lists.
 
 use async_graphql::{ComplexObject, Enum, InputObject, Json, SimpleObject};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Enum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Enum, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 #[graphql(name = "FieldMetadataType")]
 pub enum FieldMetadataType {
     Actor,
@@ -102,7 +104,8 @@ impl FieldMetadataType {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Enum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Enum, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 #[graphql(name = "MetadataWritability")]
 pub enum MetadataWritability {
     Open,
@@ -129,7 +132,8 @@ impl MetadataWritability {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Enum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Enum, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 #[graphql(name = "MetadataReadability")]
 pub enum MetadataReadability {
     Open,
@@ -162,7 +166,8 @@ impl MetadataReadability {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Enum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Enum, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 #[graphql(name = "ObjectSharingReach")]
 pub enum ObjectSharingReach {
     RoleAccess,
@@ -186,7 +191,8 @@ impl ObjectSharingReach {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Enum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Enum, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 #[graphql(name = "ObjectOpenRecordIn")]
 pub enum ObjectOpenRecordIn {
     SidePanel,
@@ -213,7 +219,8 @@ impl ObjectOpenRecordIn {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Enum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Enum, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 #[graphql(name = "IndexType")]
 pub enum IndexType {
     Btree,
@@ -504,4 +511,163 @@ pub fn object_fields_connection(
         end_cursor: edges.last().map(|edge| edge.cursor.clone()),
     };
     ObjectFieldsConnection { page_info, edges }
+}
+
+#[derive(Debug, Clone, Deserialize, InputObject)]
+#[serde(rename_all = "camelCase")]
+#[graphql(name = "CreateObjectInput")]
+pub struct CreateObjectMetadataInput {
+    pub name_singular: String,
+    pub name_plural: String,
+    pub label_singular: String,
+    pub label_plural: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub icon: Option<String>,
+    #[serde(default)]
+    pub shortcut: Option<String>,
+    #[serde(default)]
+    pub color: Option<String>,
+    #[serde(default)]
+    #[graphql(default)]
+    pub skip_name_field: bool,
+    #[serde(default)]
+    #[graphql(default)]
+    pub is_remote: bool,
+    #[serde(default)]
+    #[graphql(default)]
+    pub is_label_synced_with_name: bool,
+    #[serde(default)]
+    pub primary_key_column_type: Option<String>,
+    #[serde(default)]
+    pub primary_key_field_metadata_settings: Option<Json<Value>>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, InputObject)]
+#[serde(rename_all = "camelCase")]
+#[graphql(name = "UpdateObjectPayload")]
+pub struct UpdateObjectMetadataInput {
+    #[serde(default)]
+    pub label_singular: Option<String>,
+    #[serde(default)]
+    pub label_plural: Option<String>,
+    #[serde(default)]
+    pub name_singular: Option<String>,
+    #[serde(default)]
+    pub name_plural: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub icon: Option<String>,
+    #[serde(default)]
+    pub shortcut: Option<String>,
+    #[serde(default)]
+    pub color: Option<String>,
+    #[serde(default)]
+    pub is_active: Option<bool>,
+    #[serde(default)]
+    pub label_identifier_field_metadata_id: Option<Uuid>,
+    #[serde(default)]
+    pub image_identifier_field_metadata_id: Option<Uuid>,
+    #[serde(default)]
+    pub is_label_synced_with_name: Option<bool>,
+    #[serde(default)]
+    pub is_searchable: Option<bool>,
+    #[serde(default)]
+    pub open_record_in: Option<ObjectOpenRecordIn>,
+    #[serde(default)]
+    pub readability: Option<MetadataReadability>,
+    #[serde(default)]
+    pub sharing_reach: Option<ObjectSharingReach>,
+}
+
+#[derive(Debug, Clone, Deserialize, InputObject)]
+#[serde(rename_all = "camelCase")]
+#[graphql(name = "CreateFieldInput")]
+pub struct CreateFieldMetadataInput {
+    #[serde(rename = "type")]
+    #[graphql(name = "type")]
+    pub field_type: FieldMetadataType,
+    pub name: String,
+    pub label: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub icon: Option<String>,
+    #[serde(default)]
+    pub is_active: Option<bool>,
+    #[serde(default)]
+    pub is_system: Option<bool>,
+    #[serde(default)]
+    pub is_ui_editable: Option<bool>,
+    #[serde(default)]
+    pub is_ui_read_only: Option<bool>,
+    #[serde(default)]
+    pub is_nullable: Option<bool>,
+    #[serde(default)]
+    pub is_unique: Option<bool>,
+    #[serde(default)]
+    pub is_searchable: Option<bool>,
+    #[serde(default)]
+    pub is_audit_logged: Option<bool>,
+    #[serde(default)]
+    pub default_value: Option<Json<Value>>,
+    #[serde(default)]
+    pub options: Option<Json<Value>>,
+    #[serde(default)]
+    pub settings: Option<Json<Value>>,
+    pub object_metadata_id: Uuid,
+    #[serde(default)]
+    pub is_label_synced_with_name: Option<bool>,
+    #[serde(default)]
+    pub is_remote_creation: Option<bool>,
+    #[serde(default)]
+    pub relation_creation_payload: Option<Json<Value>>,
+    #[serde(default)]
+    pub morph_relations_creation_payload: Option<Vec<Json<Value>>>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, InputObject)]
+#[serde(rename_all = "camelCase")]
+#[graphql(name = "UpdateFieldInput")]
+pub struct UpdateFieldMetadataInput {
+    #[serde(default)]
+    pub universal_identifier: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub icon: Option<String>,
+    #[serde(default)]
+    pub is_active: Option<bool>,
+    #[serde(default)]
+    pub is_system: Option<bool>,
+    #[serde(default)]
+    pub is_ui_editable: Option<bool>,
+    #[serde(default)]
+    pub is_ui_read_only: Option<bool>,
+    #[serde(default)]
+    pub is_nullable: Option<bool>,
+    #[serde(default)]
+    pub is_unique: Option<bool>,
+    #[serde(default)]
+    pub is_searchable: Option<bool>,
+    #[serde(default)]
+    pub is_audit_logged: Option<bool>,
+    #[serde(default)]
+    pub default_value: Option<Json<Value>>,
+    #[serde(default)]
+    pub options: Option<Json<Value>>,
+    #[serde(default)]
+    pub settings: Option<Json<Value>>,
+    #[serde(default)]
+    pub object_metadata_id: Option<Uuid>,
+    #[serde(default)]
+    pub is_label_synced_with_name: Option<bool>,
+    #[serde(default)]
+    pub morph_relations_update_payload: Option<Vec<Json<Value>>>,
 }

@@ -3123,3 +3123,315 @@ async fn rest_filter_grammar_for_companies_and_tasks() {
         invalid.body
     );
 }
+
+#[tokio::test]
+async fn metadata_object_and_field_writes() {
+    let app = test_app().await;
+    let email = unique_email("metadata-writes");
+    let (token, _workspace) = signup(&app, &email).await;
+
+    let objects = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({ "query": "{ objects { edges { node { id nameSingular fieldsList { id name isSystem } } } } }" }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(objects.status, StatusCode::OK, "body: {}", objects.body);
+    assert_eq!(
+        objects.body["data"]["objects"]["edges"]
+            .as_array()
+            .unwrap()
+            .len(),
+        5,
+        "body: {}",
+        objects.body
+    );
+    let person = objects.body["data"]["objects"]["edges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|edge| edge["node"]["nameSingular"] == "person")
+        .expect("person object");
+    let person_object_id = person["node"]["id"].as_str().unwrap().to_string();
+    let person_name_field_id = person["node"]["fieldsList"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|field| field["name"] == "name")
+        .and_then(|field| field["id"].as_str())
+        .expect("person name field")
+        .to_string();
+
+    let created = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "mutation($input: CreateOneObjectInput!) { createOneObject(input: $input) { id nameSingular namePlural labelSingular isSystem labelIdentifierFieldMetadataId fieldsList { id name label type isSystem } } }",
+                "variables": {
+                    "input": {
+                        "object": {
+                            "nameSingular": "project",
+                            "namePlural": "projects",
+                            "labelSingular": "Project",
+                            "labelPlural": "Projects",
+                            "description": "Custom project object",
+                            "icon": "IconBriefcase"
+                        }
+                    }
+                }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(created.status, StatusCode::OK, "body: {}", created.body);
+    let object = &created.body["data"]["createOneObject"];
+    assert_eq!(object["nameSingular"], "project", "body: {}", created.body);
+    assert_eq!(object["isSystem"], false);
+    let object_id = object["id"].as_str().expect("object id").to_string();
+    let name_field = object["fieldsList"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|field| field["name"] == "name")
+        .expect("default name field");
+    assert_eq!(name_field["type"], "TEXT");
+    assert_eq!(name_field["isSystem"], false);
+
+    let field = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "mutation($input: CreateOneFieldMetadataInput!) { createOneField(input: $input) { id name label type isNullable objectMetadataId } }",
+                "variables": {
+                    "input": {
+                        "field": {
+                            "type": "TEXT",
+                            "name": "description",
+                            "label": "Description",
+                            "objectMetadataId": object_id
+                        }
+                    }
+                }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(field.status, StatusCode::OK, "body: {}", field.body);
+    let field_id = field.body["data"]["createOneField"]["id"]
+        .as_str()
+        .unwrap_or_else(|| panic!("field id: {}", field.body))
+        .to_string();
+    assert_eq!(field.body["data"]["createOneField"]["type"], "TEXT");
+
+    let updated_field = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "mutation($input: UpdateOneFieldMetadataInput!) { updateOneField(input: $input) { id label } }",
+                "variables": {
+                    "input": {
+                        "id": field_id,
+                        "update": { "label": "Project description" }
+                    }
+                }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(
+        updated_field.status,
+        StatusCode::OK,
+        "body: {}",
+        updated_field.body
+    );
+    assert_eq!(
+        updated_field.body["data"]["updateOneField"]["label"],
+        "Project description"
+    );
+
+    let updated_object = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "mutation($input: UpdateOneObjectInput!) { updateOneObject(input: $input) { id labelSingular description } }",
+                "variables": {
+                    "input": {
+                        "id": object_id,
+                        "update": {
+                            "labelSingular": "Initiative",
+                            "description": "Renamed object"
+                        }
+                    }
+                }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(
+        updated_object.status,
+        StatusCode::OK,
+        "body: {}",
+        updated_object.body
+    );
+    assert_eq!(
+        updated_object.body["data"]["updateOneObject"]["labelSingular"],
+        "Initiative"
+    );
+
+    let duplicate = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "mutation($input: CreateOneObjectInput!) { createOneObject(input: $input) { id } }",
+                "variables": {
+                    "input": {
+                        "object": {
+                            "nameSingular": "project",
+                            "namePlural": "projects",
+                            "labelSingular": "Project",
+                            "labelPlural": "Projects"
+                        }
+                    }
+                }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(duplicate.status, StatusCode::OK);
+    assert!(
+        !duplicate.body["errors"].is_null(),
+        "body: {}",
+        duplicate.body
+    );
+
+    let system_object = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "mutation($input: DeleteOneObjectInput!) { deleteOneObject(input: $input) { id } }",
+                "variables": { "input": { "id": person_object_id } }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(system_object.status, StatusCode::OK);
+    assert!(
+        !system_object.body["errors"].is_null(),
+        "body: {}",
+        system_object.body
+    );
+
+    let system_delete = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "mutation($input: DeleteOneFieldInput!) { deleteOneField(input: $input) { id } }",
+                "variables": {
+                    "input": {
+                        "id": person_name_field_id
+                    }
+                }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(system_delete.status, StatusCode::OK);
+    assert!(
+        !system_delete.body["errors"].is_null(),
+        "body: {}",
+        system_delete.body
+    );
+
+    let deleted_field = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "mutation($input: DeleteOneFieldInput!) { deleteOneField(input: $input) { id name } }",
+                "variables": { "input": { "id": field_id } }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(
+        deleted_field.status,
+        StatusCode::OK,
+        "body: {}",
+        deleted_field.body
+    );
+    assert_eq!(
+        deleted_field.body["data"]["deleteOneField"]["name"],
+        "description"
+    );
+
+    let deleted_object = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "mutation($input: DeleteOneObjectInput!) { deleteOneObject(input: $input) { id nameSingular } }",
+                "variables": { "input": { "id": object_id } }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(
+        deleted_object.status,
+        StatusCode::OK,
+        "body: {}",
+        deleted_object.body
+    );
+    assert_eq!(
+        deleted_object.body["data"]["deleteOneObject"]["nameSingular"],
+        "project"
+    );
+
+    let after = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({ "query": "{ objects { edges { node { id } } } }" }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(
+        after.body["data"]["objects"]["edges"]
+            .as_array()
+            .unwrap()
+            .len(),
+        5,
+        "body: {}",
+        after.body
+    );
+}

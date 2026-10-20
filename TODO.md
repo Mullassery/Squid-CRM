@@ -67,8 +67,13 @@
       `taskTargets`/`noteTargets` connections with `totalCount`, root queries,
       create/update/delete/destroy/restore single and batch mutations, nested
       target records, and REST `/rest/taskTargets` + `/rest/noteTargets` CRUD.
-- [ ] Metadata writes, view writes/filters/sorts/groups, roles, indexes/relations,
-      remaining standard objects, and metadata-driven dynamic schema generation.
+- [x] Metadata object/field writes (`createOneObject`/`updateOneObject`/
+      `deleteOneObject`, `createOneField`/`updateOneField`/`deleteOneField`) with
+      system guards; seeded default `name` field for custom objects.
+- [ ] View writes/filters/sorts/groups, roles, indexes/relations, remaining
+      standard objects, and metadata-driven dynamic schema generation.
+- [ ] Custom-object physical tables and dynamic GraphQL/REST schema/relation
+      field creation (metadata writes currently persist metadata only).
 - [x] `currentUser`/`currentWorkspace` full frontend boot fragment (ADR 0005;
       enterprise surfaces are explicit empty/static defaults).
 - [ ] Role/permission engine, billing/SSO data, feature flags, and
@@ -91,7 +96,9 @@
 - [ ] Release docs and known-limitations file.
 
 ## Known limitations (current)
-- Static person schema; not metadata-driven.
+- Static schema for the five standard objects; metadata writes persist rows but
+  do not generate physical tables or dynamic GraphQL/REST types for custom
+  objects (relation field creation is rejected).
 - Cursor pagination, `order_by`, and scalar/composite filters implemented for
   whitelisted person columns; relation filters and view-based paging are not.
 - Company GraphQL filters are limited to `id`/`name`; REST filters cover scalar
