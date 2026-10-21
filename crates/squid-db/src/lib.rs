@@ -143,6 +143,7 @@ fn compile_expr(expr: &FilterExpr, binds: &mut Vec<Bind>, start: usize) -> Strin
         FilterExpr::LastName(op) => compile_string("name_last", op, binds, start),
         FilterExpr::PrimaryEmail(op) => compile_string("primary_email", op, binds, start),
         FilterExpr::JobTitle(op) => compile_string("job_title", op, binds, start),
+        FilterExpr::CompanyId(op) => compile_uuid("company_id", op, binds, start),
         FilterExpr::And(exprs) => compile_join("AND", exprs, "TRUE", binds, start),
         FilterExpr::Or(exprs) => compile_join("OR", exprs, "FALSE", binds, start),
         FilterExpr::Not(expr) => format!("NOT ({})", compile_expr(expr, binds, start)),

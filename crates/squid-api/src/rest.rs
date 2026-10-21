@@ -2221,6 +2221,17 @@ fn build_filter_leaf(field: &str, operator: &str, values: &[String]) -> AppResul
         ("jobTitle", "is") => Ok(FilterExpr::JobTitle(StringOp::IsNull(
             is_null.expect("is operator"),
         ))),
+        ("companyId", "eq") => Ok(FilterExpr::CompanyId(UuidOp::Eq(parse_uuid(&value)?))),
+        ("companyId", "neq") => Ok(FilterExpr::CompanyId(UuidOp::Neq(parse_uuid(&value)?))),
+        ("companyId", "in") => Ok(FilterExpr::CompanyId(UuidOp::In(
+            values
+                .iter()
+                .map(|value| parse_uuid(value))
+                .collect::<AppResult<_>>()?,
+        ))),
+        ("companyId", "is") => Ok(FilterExpr::CompanyId(UuidOp::IsNull(
+            is_null.expect("is operator"),
+        ))),
         _ => Err(AppError::BadRequest(format!(
             "Unsupported filter: {field}[{operator}]"
         ))),
@@ -2312,6 +2323,14 @@ mod tests {
             parse_filter("not(id[is]:NULL)").unwrap(),
             FilterExpr::Not(_)
         ));
+        assert!(matches!(
+            parse_filter("companyId[eq]:6c774d80-730f-4e23-b707-39053977cbff").unwrap(),
+            FilterExpr::CompanyId(UuidOp::Eq(_))
+        ));
+        assert_eq!(
+            parse_filter("companyId[is]:NULL").unwrap(),
+            FilterExpr::CompanyId(UuidOp::IsNull(true))
+        );
         assert!(parse_filter("jobTitle[is]:MAYBE").is_err());
         assert!(parse_filter("bogus[eq]:x").is_err());
         assert!(parse_filter("name.firstName[eq]").is_err());

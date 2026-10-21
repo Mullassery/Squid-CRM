@@ -9,7 +9,7 @@
 - [x] GraphQL login flow + person query/mutations.
 - [x] REST people list/get/create/delete with upstream envelope + error contract.
 - [x] Tenant isolation enforced and tested against real PostgreSQL.
-- [x] 56 tests passing (13 API unit, 36 integration, 5 auth, 2 DB); clippy clean; live smoke test.
+- [x] 57 tests passing (13 API unit, 37 integration, 5 auth, 2 DB); clippy clean; live smoke test.
 - [x] Dockerfile, docker-compose, CI workflow, Makefile, smoke script.
 
 ## Phase 2 (contracts)
@@ -36,7 +36,8 @@
 - [x] `order_by=field[DescNullsLast],...` grammar (REST + GraphQL); `-createdAt`
       rejected.
 - [x] Serve auth mutations on `/metadata` and add API-key lifecycle for the data API.
-- [x] Person filter grammar (`and`/`or`/`not`, scalar/composite fields) for REST and GraphQL.
+- [x] Person filter grammar (`and`/`or`/`not`, scalar/composite fields,
+      `companyId` scalar filter) for REST and GraphQL.
 - [x] GraphQL pagination (`first`/`last`/`offset`/`before`/`after`) and
       `pageInfo` for connections.
 - [x] REST `fields`/`depth` projection and validation for people, companies,
@@ -138,7 +139,8 @@
   do not generate physical tables or dynamic GraphQL/REST types for custom
   objects (relation field creation is rejected).
 - Cursor pagination, `order_by`, and scalar/composite filters implemented for
-  whitelisted person columns; relation filters and view-based paging are not.
+  whitelisted person columns including `companyId`; nested relation filters and
+  view-based paging are not.
 - `WorkspaceMember` queries expose the core profile fields; position/calendar
   and date/time/number-format filters and connection aggregates are absent.
 - Company GraphQL filters are limited to `id`/`name`; REST filters cover scalar

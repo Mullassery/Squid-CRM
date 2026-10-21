@@ -421,6 +421,7 @@ pub struct PersonFilterInput {
     pub name: Option<FullNameFilterInput>,
     pub emails: Option<EmailsFilterInput>,
     pub job_title: Option<StringFilter>,
+    pub company_id: Option<UuidFilter>,
     pub and: Option<Vec<PersonFilterInput>>,
     pub or: Option<Vec<PersonFilterInput>>,
     pub not: Option<Box<PersonFilterInput>>,
@@ -558,6 +559,9 @@ impl PersonFilterInput {
         }
         if let Some(job_title) = &self.job_title {
             items.extend(string_ops(job_title).into_iter().map(FilterExpr::JobTitle));
+        }
+        if let Some(company_id) = &self.company_id {
+            items.extend(uuid_ops(company_id).into_iter().map(FilterExpr::CompanyId));
         }
         if let Some(and) = &self.and {
             let exprs: Vec<FilterExpr> =

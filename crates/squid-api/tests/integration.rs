@@ -3437,6 +3437,113 @@ async fn scalar_ordering_rest_and_graphql() {
 }
 
 #[tokio::test]
+async fn person_company_filter_matches_scalar_contract() {
+    let app = test_app().await;
+    let email = unique_email("person-company-filter");
+    let (token, _workspace) = signup(&app, &email).await;
+
+    let company = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/companies",
+            &token,
+            Some(json!({ "name": "Filter Corp" })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        company.status,
+        StatusCode::CREATED,
+        "body: {}",
+        company.body
+    );
+    let company_id = company.body["data"]["createCompany"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let mut attached = person_body("Ada", "Lovelace", "ada@example.com");
+    attached["companyId"] = json!(company_id);
+    let person = send(
+        &app,
+        authorized("POST", "/rest/people", &token, Some(attached)),
+    )
+    .await;
+    assert_eq!(person.status, StatusCode::CREATED, "body: {}", person.body);
+
+    let unattached = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/people",
+            &token,
+            Some(person_body("Alan", "Turing", "alan@example.com")),
+        ),
+    )
+    .await;
+    assert_eq!(
+        unattached.status,
+        StatusCode::CREATED,
+        "body: {}",
+        unattached.body
+    );
+
+    let filtered = send(
+        &app,
+        authorized(
+            "GET",
+            &format!("/rest/people?filter=companyId%5Beq%5D:{company_id}"),
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(filtered.status, StatusCode::OK, "body: {}", filtered.body);
+    assert_eq!(filtered.body["totalCount"], 1);
+    assert_eq!(
+        filtered.body["data"]["people"][0]["name"]["firstName"],
+        "Ada"
+    );
+
+    let empty = send(
+        &app,
+        authorized(
+            "GET",
+            "/rest/people?filter=companyId%5Bis%5D:NULL",
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(empty.status, StatusCode::OK, "body: {}", empty.body);
+    assert_eq!(empty.body["totalCount"], 1);
+    assert_eq!(empty.body["data"]["people"][0]["name"]["firstName"], "Alan");
+
+    let gql = send(
+        &app,
+        authorized(
+            "POST",
+            "/graphql",
+            &token,
+            Some(json!({
+                "query": format!(
+                    "{{ people(filter: {{ companyId: {{ eq: \"{company_id}\" }} }}) {{ totalCount edges {{ node {{ name {{ firstName }} }} }} }} }}"
+                )
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(gql.status, StatusCode::OK, "body: {}", gql.body);
+    assert!(gql.body["errors"].is_null(), "errors: {}", gql.body);
+    assert_eq!(gql.body["data"]["people"]["totalCount"], 1);
+    assert_eq!(
+        gql.body["data"]["people"]["edges"][0]["node"]["name"]["firstName"],
+        "Ada"
+    );
+}
+
+#[tokio::test]
 async fn rest_filter_grammar_for_companies_and_tasks() {
     let app = test_app().await;
     let email = unique_email("rest-filters");

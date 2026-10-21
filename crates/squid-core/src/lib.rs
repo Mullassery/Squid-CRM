@@ -370,6 +370,7 @@ pub enum FilterExpr {
     LastName(StringOp),
     PrimaryEmail(StringOp),
     JobTitle(StringOp),
+    CompanyId(UuidOp),
     And(Vec<FilterExpr>),
     Or(Vec<FilterExpr>),
     Not(Box<FilterExpr>),
