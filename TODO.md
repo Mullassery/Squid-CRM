@@ -9,7 +9,7 @@
 - [x] GraphQL login flow + person query/mutations.
 - [x] REST people list/get/create/delete with upstream envelope + error contract.
 - [x] Tenant isolation enforced and tested against real PostgreSQL.
-- [x] 15 unit + 19 integration tests passing; clippy clean; live smoke test.
+- [x] 56 tests passing (13 API unit, 36 integration, 5 auth, 2 DB); clippy clean; live smoke test.
 - [x] Dockerfile, docker-compose, CI workflow, Makefile, smoke script.
 
 ## Phase 2 (contracts)
@@ -17,9 +17,11 @@
       OpenAPI and REST/GraphQL examples into `contracts/v2.49.0/`.
 - [x] Diff captured contracts against `docs/api-compatibility.md` (divergence
       table §8).
-- [ ] Re-capture at `v2.50.0` (no image published at capture time) or build the
-      pinned source and capture from it.
-- [ ] Map every frontend operation in `twenty-front/src/generated/graphql.ts`.
+- [x] Build the pinned source (`--target twenty-server`), capture v2.50.0 SDL,
+      OpenAPI and examples into `contracts/v2.50.0/`, and diff against v2.49.0.
+- [x] Map every frontend operation in `twenty-front/src/generated/graphql.ts`
+      and `generated-metadata/graphql.ts` (`docs/frontend-operation-map.md`).
+- [x] Map every captured REST/OpenAPI route (`docs/rest-route-map.md`).
 
 ## Phase 4 follow-ups (contract alignment — from captured fixtures)
 - [x] REST create returns `data.createPerson`; delete returns
@@ -37,19 +39,34 @@
 - [x] Person filter grammar (`and`/`or`/`not`, scalar/composite fields) for REST and GraphQL.
 - [x] GraphQL pagination (`first`/`last`/`offset`/`before`/`after`) and
       `pageInfo` for connections.
-- [ ] REST/GraphQL `fields`, `depth`, `viewId` with upstream semantics.
-- [ ] Tighten the data API to API keys only (access tokens work today).
-- [ ] Refresh-token rotation and access-token revocation.
-- [ ] CSRF protection decision for cookie auth.
-- [ ] Rate limiting on auth endpoints.
-- [x] Person fields: phones, linkedinLink, avatarFile (JSON), companyId, actors.
+- [x] REST `fields`/`depth` projection and validation for people, companies,
+      opportunities, tasks and notes.
+- [x] REST `groupBy` for people/companies/opportunities/tasks/notes and
+      task/note targets: raw-array response, `group_by`, `aggregate`,
+      `include_records_sample`, `order_by_for_records`, `limit` (0 = all) and
+      `viewId` filters (camelCase, ANDed with explicit `filter`).
+- [x] Tighten the data API to API keys (or the session cookie); user access
+      tokens are rejected on `/graphql` and `/rest`.
+- [x] Opaque refresh-token rotation, replay rejection, and access-token
+      revocation via the session `sid` on signout.
+- [x] CSRF decision: SameSite=Lax HttpOnly cookie + Origin check on unsafe
+      cookie-authenticated requests; bearer/API-key requests are exempt.
+- [x] In-process burst limiting on signup/signin (10 attempts / 15 minutes per
+      account), with a clear extension point for edge/multi-replica limits.
+- [x] Person fields: phones, linkedinLink, avatar file, companyId, actors.
 - [x] Person update (`PATCH /rest/people/{id}`, GraphQL `updatePerson`).
 - [x] Person batch mutations (`createPeople`, `updatePeople`, `deletePeople`, `destroyPeople`, `restorePeople`).
 - [x] Soft/hard delete + restore (`soft_delete`, `restorePerson`, `destroyPerson`).
 - [x] `mergePeople` with conflict priority, dry run, relation re-pointing and soft delete.
 - [x] Null-clearing updates for person, company, opportunity, task, note and
       task/note targets (REST + GraphQL); omitted fields stay unchanged.
-- [ ] `Person.avatarFile` as `FileObject`, null-clearing for views, full metadata fields.
+- [x] `Person.avatarFile` typed as `[FileObject]`.
+- [x] Null-clearing for view settings and view child records.
+- [x] Metadata indexes (`createOneIndex`/`deleteOneIndex`,
+      `Object.indexMetadataList`), basic `getRoles`/`getRole`/
+      `getPermissionFlags` and `mostlyEmptyFieldMetadataIds`.
+- [ ] Full metadata field coverage: relation/morph metadata, search-field
+      metadata and dynamic schema generation.
 - [x] `client-config` endpoint.
 
 ## Phase 5 (module migration)
@@ -80,16 +97,16 @@
 - [x] View batch/group writes: `createManyViewFields`, `createManyViewGroups`,
       `updateManyViewGroups`, `createManyViewFieldGroups`, view field group CRUD,
       view filter group CRUD and `getViewFieldGroups`/`getViewFilterGroups`.
-- [ ] Roles, indexes/relations, remaining standard objects, and metadata-driven
-      dynamic schema generation.
+- [ ] Role/permission assignment engine, relation metadata, remaining standard
+      objects, and metadata-driven dynamic schema generation.
 - [ ] Custom-object physical tables and dynamic GraphQL/REST schema/relation
       field creation (metadata writes currently persist metadata only).
 - [x] `currentUser`/`currentWorkspace` full frontend boot fragment (ADR 0005;
       enterprise surfaces are explicit empty/static defaults).
 - [x] `workspaceMembers`/`workspaceMember` GraphQL queries with filters,
       ordering and pageInfo; boot `workspaceMembers` now lists every member.
-- [ ] Role/permission engine, billing/SSO data, feature flags, and
-      `ApiKey.role` as the upstream `Role` object.
+- [ ] Role/permission enforcement, billing/SSO data, feature flags, and
+      `ApiKey.role` as the upstream `Role` object (built-in role queries exist).
 - [x] REST target routes, target updates/batches, and nested target record resolution (`TaskTarget.targetCompany` etc.).
 - [x] Scalar ordering parity (`orderBy` + REST `order_by`) for company,
       opportunity, task, note and task/note targets; relation ordering pending.
@@ -97,7 +114,8 @@
       `like`/`ilike`/ranges/`is`, `and`/`or`/`not`) for company, opportunity,
       task, note and task/note targets.
 - [ ] Views parity: relation filters and view-based paging semantics.
-- [ ] Search, files, export/import.
+- [ ] Search, export/import; local file upload exists for attachments/avatars
+      but no object-storage backend.
 - [ ] Jobs/cron, webhooks, workflows, integrations.
 
 ## Phase 6-8
@@ -125,10 +143,17 @@
 - No OpenAPI document emitted yet.
 - Workspace activation lifecycle (`PENDING_CREATION` / `activateWorkspace`) and
   `signUpInNewWorkspace` are not implemented; `/auth/signup` activates directly.
-- Data API accepts access tokens in addition to API keys (upstream requires API
-  keys).
-- No refresh rotation, OAuth, 2FA; API keys implemented but data API still
-  accepts access tokens. API-key `roleId` is ignored until metadata roles land.
+- No OAuth, 2FA or app-token flows. API-key `roleId` is ignored until metadata
+  roles land; auth throttling is per-process only.
+- `groupBy` is evaluated in memory per object slice (up to the repository
+  fetch cap for non-person objects); date buckets support the captured
+  granularities, week starts on Monday.
+- Relation/morph field metadata, search-field metadata and dynamic schema
+  generation remain unimplemented; index metadata is stored but does not
+  create physical PostgreSQL indexes.
+- File uploads are stored in PostgreSQL (`core.files`) with an unauthenticated
+  signed-UUID upload/download URL; S3-compatible storage and stronger upload
+  authorization remain open.
 - Enterprise features excluded (licence).
 - No baseline performance numbers captured; no performance claims made.
 - `reference/twenty` is git-ignored; recreate with `scripts/clone-reference.sh`.

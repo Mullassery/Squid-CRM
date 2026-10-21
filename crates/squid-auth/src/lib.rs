@@ -24,7 +24,6 @@ pub struct TokenService {
     secret: String,
     login_ttl: Duration,
     access_ttl: Duration,
-    refresh_ttl: Duration,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,6 +48,9 @@ struct Claims {
     sub: Uuid,
     #[serde(skip_serializing_if = "Option::is_none")]
     workspace_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sid: Option<Uuid>,
+    jti: Uuid,
     typ: String,
     iss: String,
     iat: i64,
@@ -66,6 +68,7 @@ pub struct AuthToken {
 pub struct VerifiedToken {
     pub user_id: Uuid,
     pub workspace_id: Option<Uuid>,
+    pub session_id: Option<Uuid>,
 }
 
 /// The authenticated identity for a request.
@@ -92,17 +95,11 @@ impl AuthContext {
 }
 
 impl TokenService {
-    pub fn new(
-        secret: impl Into<String>,
-        login_ttl_secs: i64,
-        access_ttl_secs: i64,
-        refresh_ttl_secs: i64,
-    ) -> Self {
+    pub fn new(secret: impl Into<String>, login_ttl_secs: i64, access_ttl_secs: i64) -> Self {
         Self {
             secret: secret.into(),
             login_ttl: Duration::seconds(login_ttl_secs),
             access_ttl: Duration::seconds(access_ttl_secs),
-            refresh_ttl: Duration::seconds(refresh_ttl_secs),
         }
     }
 
@@ -110,6 +107,7 @@ impl TokenService {
         &self,
         user_id: Uuid,
         workspace_id: Option<Uuid>,
+        session_id: Option<Uuid>,
         kind: TokenKind,
         ttl: Duration,
     ) -> AppResult<AuthToken> {
@@ -118,6 +116,8 @@ impl TokenService {
         let claims = Claims {
             sub: user_id,
             workspace_id,
+            sid: session_id,
+            jti: Uuid::new_v4(),
             typ: kind.as_str().to_string(),
             iss: TOKEN_ISSUER.to_string(),
             iat: now.timestamp(),
@@ -133,20 +133,22 @@ impl TokenService {
     }
 
     pub fn issue_login(&self, user_id: Uuid) -> AppResult<AuthToken> {
-        self.issue(user_id, None, TokenKind::Login, self.login_ttl)
+        self.issue(user_id, None, None, TokenKind::Login, self.login_ttl)
     }
 
-    pub fn issue_access(&self, user_id: Uuid, workspace_id: Uuid) -> AppResult<AuthToken> {
+    pub fn issue_access(
+        &self,
+        user_id: Uuid,
+        workspace_id: Uuid,
+        session_id: Uuid,
+    ) -> AppResult<AuthToken> {
         self.issue(
             user_id,
             Some(workspace_id),
+            Some(session_id),
             TokenKind::Access,
             self.access_ttl,
         )
-    }
-
-    pub fn issue_refresh(&self, user_id: Uuid) -> AppResult<AuthToken> {
-        self.issue(user_id, None, TokenKind::Refresh, self.refresh_ttl)
     }
 
     pub fn verify(&self, token: &str, expected: TokenKind) -> AppResult<VerifiedToken> {
@@ -166,6 +168,7 @@ impl TokenService {
         Ok(VerifiedToken {
             user_id: data.claims.sub,
             workspace_id: data.claims.workspace_id,
+            session_id: data.claims.sid,
         })
     }
 }
@@ -208,7 +211,7 @@ mod tests {
     use super::*;
 
     fn service() -> TokenService {
-        TokenService::new("test-secret-that-is-long-enough-123456", 300, 3600, 86400)
+        TokenService::new("test-secret-that-is-long-enough-123456", 300, 3600)
     }
 
     #[test]
@@ -224,10 +227,12 @@ mod tests {
         let svc = service();
         let user = Uuid::new_v4();
         let workspace = Uuid::new_v4();
-        let token = svc.issue_access(user, workspace).unwrap();
+        let session = Uuid::new_v4();
+        let token = svc.issue_access(user, workspace, session).unwrap();
         let verified = svc.verify(&token.token, TokenKind::Access).unwrap();
         assert_eq!(verified.user_id, user);
         assert_eq!(verified.workspace_id, Some(workspace));
+        assert_eq!(verified.session_id, Some(session));
     }
 
     #[test]

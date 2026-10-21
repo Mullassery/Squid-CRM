@@ -1,53 +1,56 @@
 # Migration Matrix
 
-Status legend: `not-started` · `in-progress` · `parity` · `excluded (licence)` · `deferred`
+Status legend: `not-started` · `partial` · `parity` · `excluded (licence)` · `deferred`
 
-Reference pin: `twentyhq/twenty@08a0e5f1ee2e7db7c1e6ef3aeec9bcef731f4e98` (server `2.50.0`).
+Reference pin: `twentyhq/twenty@08a0e5f1ee2e7db7c1e6ef3aeec9bcef731f4e98`
+(server `2.50.0`). Golden contracts: `contracts/v2.50.0/`.
+Operation coverage: `docs/frontend-operation-map.md`, `docs/rest-route-map.md`.
 
-| Upstream area | Upstream path | Rust crate (planned) | Status | Parity evidence (planned) | Notes |
+| Upstream area | Upstream path | Rust crate | Status | Parity evidence | Notes |
 | --- | --- | --- | --- | --- | --- |
-| Core config / boot | `src/engine/core-modules/twenty-config` | `squid-core` | not-started | config tests | |
-| Logger / metrics / telemetry | `core-modules/logger`, `metrics`, `telemetry`, `sentry` | `squid-core` | not-started | smoke | |
-| Auth: sessions, JWT, api-key | `core-modules/auth`, `api-key`, `app-token`, `jwt`, `session-storage` | `squid-auth` | partial | `signup_signin_and_person_crud_over_rest`, `graphql_login_flow_and_people_query` | sessions + JWT + cookie done; api-key/app-token not started |
-| Auth: Google/Microsoft OAuth | `core-modules/auth/strategies/google*`, `microsoft*` | `squid-auth` | not-started | oauth callback tests | |
-| Auth: 2FA, captcha | `two-factor-authentication`, `captcha` | `squid-auth` | not-started | unit + integration | |
-| Auth: SAML/OIDC/SSO | `sso`, `auth/strategies/saml*`, `oidc*` | `squid-auth` | excluded (licence) | n/a | `@license Enterprise` |
-| User | `core-modules/user` | `squid-core` | partial | integration tests | email/password user only |
-| Workspace & members | `core-modules/workspace`, `workspace-invitation`, `workspace-member` | `squid-tenant` | partial | `tenant_isolation_blocks_cross_workspace_reads` | bootstrap + membership; invitations not started |
-| Roles & permissions (RBAC) | `metadata-modules/role*`, `object-permission`, `field-permission`, `permission-flag` | `squid-metadata` | partial | `AuthContext::require_admin` unit test | built-in roles only; object/field permissions not started |
-| Row-level permission predicates | `metadata-modules/row-level-permission-predicate*` | `squid-metadata` | not-started | authz tests | |
-| Object metadata (custom objects) | `metadata-modules/object-metadata` | `squid-metadata` | not-started | | |
-| Field metadata (custom fields) | `metadata-modules/field-metadata`, `search-field-metadata` | `squid-metadata` | not-started | | |
-| Views / filters / sorts / groups | `metadata-modules/view*` | `squid-metadata` | not-started | golden fixtures | exact semantics |
-| Dynamic GraphQL schema | `api/graphql/*` | `squid-graphql` | partial | `graphql_login_flow_and_people_query` | static slice schema; metadata-driven generation not started |
-| REST + OpenAPI | `api/rest/*`, `core-modules/open-api` | `squid-rest` | partial | REST envelope integration tests | people only; OpenAPI doc not generated |
-| MCP endpoint | `api/mcp` | `squid-rest` | deferred | | |
-| Workspace ORM / query builder | `engine/twenty-orm/*` | `squid-orm` | partial | unit schema-validation tests | validated dynamic SQL; filters/sorts/cursors not implemented |
-| People | `src/modules/person` | `squid-rest`/`squid-graphql` | partial | 4 integration tests + smoke | name/emails/jobTitle; relations not implemented |
-| Companies | `src/modules/company` | — | not-started | | |
-| Opportunities | `src/modules/opportunity` | — | not-started | | |
-| Tasks | `src/modules/task` | — | not-started | | |
-| Notes | `src/modules/note` | — | not-started | | |
+| Core config / boot | `src/engine/core-modules/twenty-config` | `squid-core` | partial | smoke boot, unit tests | env-driven config only |
+| Logger / metrics / telemetry | `core-modules/logger`, `metrics`, `telemetry`, `sentry` | `squid-core` | partial | `tracing` output | metrics/Sentry not implemented |
+| Auth: sessions, JWT, API keys | `core-modules/auth`, `api-key`, `app-token`, `jwt` | `squid-auth` | partial | `signup_signin_and_person_crud_over_rest`, `refresh_tokens_rotate_and_signout_revokes_the_session`, `graphql_renew_token_rotates_refresh_tokens`, `cookie_requests_reject_foreign_origins` | sessions/JWT/API keys, data-API key enforcement, refresh rotation/revocation, CSRF origin check and auth burst limiting done; app tokens and distributed rate limiting pending |
+| Auth: Google/Microsoft OAuth | `core-modules/auth/strategies/google*`, `microsoft*` | — | not-started | | |
+| Auth: 2FA, captcha | `two-factor-authentication`, `captcha` | — | not-started | | |
+| Auth: SAML/OIDC/SSO | `sso`, `auth/strategies/saml*`, `oidc*` | — | excluded (licence) | n/a | `@license Enterprise` |
+| User | `core-modules/user` | `squid-db`/`squid-api` | partial | boot integration test | email/password user only |
+| Workspace & members | `core-modules/workspace`, `workspace-invitation`, `workspace-member` | `squid-db`/`squid-api` | partial | tenant isolation, `workspace_members_query_and_boot_list` | bootstrap, members query, activation simplified; invitations pending |
+| Roles & permissions (RBAC) | `metadata-modules/role*`, object/field permissions | `squid-auth` | partial | built-in role tests | built-in roles only; object/field/row permissions pending |
+| Row-level permission predicates | `metadata-modules/row-level-permission-predicate*` | — | not-started | | |
+| Object metadata (custom objects) | `metadata-modules/object-metadata` | `squid-db`/`squid-api` | partial | metadata integration tests | read/write rows; no physical tables or dynamic schema |
+| Field metadata (custom fields) | `metadata-modules/field-metadata` | `squid-db`/`squid-api` | partial | metadata integration tests | read/write rows; relation fields rejected |
+| Views / filters / sorts / groups | `metadata-modules/view*` | `squid-db`/`squid-api` | partial | view write/batch integration tests | standard views; relation filters and view paging semantics pending |
+| Dynamic GraphQL schema | `api/graphql/*` | `squid-api` | partial | frontend operation map | static schema plus metadata queries; metadata-driven object schema pending |
+| REST + OpenAPI | `api/rest/*`, `core-modules/open-api` | `squid-api` | partial | REST route map, example fixtures | 42/535 core routes; OpenAPI not emitted |
+| MCP endpoint | `api/mcp` | — | deferred | | |
+| Workspace ORM / query builder | `engine/twenty-orm/*` | `squid-db` | partial | repository integration tests | hand-written SQL with validated schema names; no generic query builder |
+| People | `src/modules/person` | `squid-db`/`squid-api` | partial | person integration tests + smoke | core fields, batches, merge, null clearing; relation filters/order pending |
+| Companies | `src/modules/company` | `squid-db`/`squid-api` | partial | object integration tests | CRUD, filters, ordering; relation filters pending |
+| Opportunities | `src/modules/opportunity` | `squid-db`/`squid-api` | partial | object integration tests | CRUD, filters, ordering; relation filters pending |
+| Tasks | `src/modules/task` | `squid-db`/`squid-api` | partial | object integration tests | CRUD, targets, filters, ordering |
+| Notes | `src/modules/note` | `squid-db`/`squid-api` | partial | object integration tests | CRUD, targets, filters, ordering |
+| Task/Note targets | `src/modules/task-target`, `note-target` | `squid-db`/`squid-api` | partial | target integration tests | CRUD/nested resolution; REST batch routes pending |
 | Timeline activities | `src/modules/timeline`, `timeline-activity-type` | — | not-started | | |
-| Search | `core-modules/search` | `squid-search` | not-started | | |
-| Record CRUD / export / import | `core-modules/record-crud`, `record-export`, `record-position` | `squid-orm` | not-started | | |
-| Files & upload | `core-modules/file`, `file-storage`, `src/modules/attachment` | `squid-files` | not-started | upload controls | size/type limits |
-| Email (Gmail/Graph/IMAP/SMTP) | `core-modules/email`, `messaging`, `imap-smtp-caldav-connection` | `squid-integrations` | not-started | | |
-| Calendar | `core-modules/calendar`, `src/modules/calendar` | `squid-integrations` | not-started | | |
-| Connected accounts | `metadata-modules/connected-account`, `connection-provider` | `squid-integrations` | not-started | | |
-| Webhooks | `metadata-modules/webhook`, `workspace-event-emitter` | `squid-jobs` | not-started | delivery/retry tests | |
-| Background jobs / cron | `src/queue-worker`, `core-modules/message-queue`, `cron` | `squid-jobs` | not-started | job tests | Redis/BullMQ parity |
-| Workflows | `metadata-modules/workflow*`, `src/modules/workflow` | `squid-workflows` | not-started | | large area (789 files) |
-| Logic functions | `core-modules/logic-function`, `metadata-modules/logic-function*` | `squid-workflows` | not-started | | |
-| Route triggers | `core-modules/server-route-trigger` | `squid-workflows` | deferred | | |
-| Apps / extension platform | `core-modules/application`, `front-component`, `sdk-client`, `tool*` | `squid-apps` | deferred | | SDK is MIT |
-| File storage S3/local | `core-modules/file-storage`, `storage` | `squid-files` | not-started | | |
-| Secure HTTP client (SSRF) | `core-modules/secure-http-client` | `squid-core` | not-started | SSRF tests | |
-| Secret encryption / rotation | `core-modules/secret-encryption` | `squid-core` | not-started | | |
-| Throttler / rate limits | `core-modules/throttler` | `squid-http` | not-started | | |
-| Audit / event logs | `core-modules/event-logs` | `squid-core` | not-started | verify scope | |
-| Health | `core-modules/health` | `squid-http` | not-started | `/healthz` | |
+| Search | `core-modules/search` | — | not-started | | `searchVector` stored, no search query |
+| Record export / import | `core-modules/record-export`, `record-import` | — | not-started | | CRUD itself is covered per object |
+| Files & upload | `core-modules/file`, `file-storage`, `src/modules/attachment` | `squid-db`/`squid-api` | partial | file/avatar integration test | local PostgreSQL storage, upload handshake and `avatarFile` writes; S3/signed URLs pending |
+| Email (Gmail/Graph/IMAP/SMTP) | `core-modules/email`, `messaging` | — | not-started | | |
+| Calendar | `core-modules/calendar`, `src/modules/calendar` | — | not-started | | |
+| Connected accounts | `metadata-modules/connected-account`, `connection-provider` | — | not-started | | |
+| Webhooks | `metadata-modules/webhook`, `workspace-event-emitter` | — | not-started | | metadata REST route missing |
+| Background jobs / cron | `src/queue-worker`, `core-modules/message-queue`, `cron` | — | not-started | | Redis/BullMQ parity |
+| Workflows | `metadata-modules/workflow*`, `src/modules/workflow` | — | not-started | 36 static data documents MISSING | large area |
+| Logic functions | `core-modules/logic-function` | — | not-started | | |
+| Route triggers | `core-modules/server-route-trigger` | — | deferred | | |
+| Apps / extension platform | `core-modules/application`, `front-component`, `tool*` | — | deferred | | SDK is MIT |
+| File storage S3/local | `core-modules/file-storage`, `storage` | `squid-db` | partial | file round-trip test | local PostgreSQL bytes; no S3 backend |
+| Secure HTTP client (SSRF) | `core-modules/secure-http-client` | — | not-started | | |
+| Secret encryption / rotation | `core-modules/secret-encryption` | `squid-core` | not-started | | secrets from env only |
+| Throttler / rate limits | `core-modules/throttler` | `squid-api` | partial | auth limiter unit test | in-process auth burst limiter only |
+| Audit / event logs | `core-modules/event-logs` | — | not-started | | |
+| Health | `core-modules/health` | `squid-api` | parity | `/healthz` smoke | |
 | Billing | `core-modules/billing*` | — | excluded (licence) | n/a | Enterprise |
 | Admin panel | `core-modules/admin-panel` | — | excluded (licence) | | largely Enterprise |
-| AI providers / agents | `metadata-modules/ai`, `flat-agent`, `skill` | `squid-apps` | deferred | | |
+| AI providers / agents | `metadata-modules/ai`, `flat-agent`, `skill` | — | deferred | | |
 | Dashboards | `src/modules/dashboard` | — | not-started | | |

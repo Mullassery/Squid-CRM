@@ -208,6 +208,67 @@ impl Default for Actor {
     }
 }
 
+/// A stored file reference, matching the upstream `FileObject` shape.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, async_graphql::SimpleObject)]
+pub struct FileObject {
+    #[serde(rename = "fileId")]
+    #[graphql(name = "fileId")]
+    pub file_id: Uuid,
+    pub label: String,
+    pub extension: Option<String>,
+    pub url: String,
+}
+
+/// Input reference to an uploaded file (`FileItemInput` upstream).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, async_graphql::InputObject)]
+pub struct FileItemInput {
+    #[serde(rename = "fileId")]
+    pub file_id: Uuid,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, async_graphql::Enum)]
+#[graphql(rename_items = "PascalCase")]
+pub enum FileFolder {
+    RecordExport,
+    CorePicture,
+    AgentChat,
+    BuiltLogicFunction,
+    BuiltFrontComponent,
+    PublicAsset,
+    Source,
+    FilesField,
+    Dependencies,
+    Workflow,
+    EmailAttachment,
+    EmailImage,
+    AppTarball,
+    GeneratedSdkClient,
+    Dpa,
+}
+
+impl FileFolder {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::RecordExport => "RecordExport",
+            Self::CorePicture => "CorePicture",
+            Self::AgentChat => "AgentChat",
+            Self::BuiltLogicFunction => "BuiltLogicFunction",
+            Self::BuiltFrontComponent => "BuiltFrontComponent",
+            Self::PublicAsset => "PublicAsset",
+            Self::Source => "Source",
+            Self::FilesField => "FilesField",
+            Self::Dependencies => "Dependencies",
+            Self::Workflow => "Workflow",
+            Self::EmailAttachment => "EmailAttachment",
+            Self::EmailImage => "EmailImage",
+            Self::AppTarball => "AppTarball",
+            Self::GeneratedSdkClient => "GeneratedSdkClient",
+            Self::Dpa => "Dpa",
+        }
+    }
+}
+
 /// Phase 4 subset of the standard `person` object, aligned with the captured
 /// v2.49.0 REST/GraphQL field set.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, async_graphql::SimpleObject)]
@@ -229,7 +290,7 @@ pub struct Person {
     #[serde(rename = "avatarUrl")]
     pub avatar_url: String,
     #[serde(rename = "avatarFile")]
-    pub avatar_file: Option<async_graphql::Json<serde_json::Value>>,
+    pub avatar_file: Option<Vec<FileObject>>,
     pub position: f64,
     #[serde(rename = "createdBy")]
     pub created_by: Actor,
@@ -253,6 +314,8 @@ pub struct CreatePersonInput {
     pub phones: Option<Phones>,
     #[serde(rename = "avatarUrl", default)]
     pub avatar_url: Option<String>,
+    #[serde(rename = "avatarFile", default)]
+    pub avatar_file: Option<Vec<FileItemInput>>,
     #[serde(default)]
     pub position: Option<f64>,
     #[serde(rename = "companyId", default)]
@@ -288,6 +351,8 @@ pub struct UpdatePersonInput {
     pub phones: MaybeUndefined<Phones>,
     #[serde(rename = "avatarUrl", default)]
     pub avatar_url: MaybeUndefined<String>,
+    #[serde(rename = "avatarFile", default)]
+    pub avatar_file: MaybeUndefined<Vec<FileItemInput>>,
     #[serde(default)]
     pub position: MaybeUndefined<f64>,
     #[serde(rename = "companyId", default)]

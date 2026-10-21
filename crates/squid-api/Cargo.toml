@@ -23,6 +23,7 @@ base64.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 chrono.workspace = true
+chrono-tz.workspace = true
 http.workspace = true
 
 [dev-dependencies]
@@ -31,3 +32,4 @@ serde_json.workspace = true
 axum.workspace = true
 tokio.workspace = true
 chrono.workspace = true
+chrono-tz.workspace = true

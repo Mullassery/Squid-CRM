@@ -92,7 +92,7 @@ fn unique_email(tag: &str) -> String {
     format!("{tag}-{}@example.com", uuid::Uuid::new_v4().simple())
 }
 
-async fn signup(app: &Router, email: &str) -> (String, String) {
+async fn signup_with_access(app: &Router, email: &str) -> (String, String) {
     let response = send(
         app,
         json_request(
@@ -122,6 +122,57 @@ async fn signup(app: &Router, email: &str) -> (String, String) {
         .expect("workspace id")
         .to_string();
     (token, workspace_id)
+}
+
+/// Data APIs accept API keys, not user access tokens. Most tests therefore
+/// sign up and then mint an API key for subsequent REST/GraphQL calls.
+async fn signup(app: &Router, email: &str) -> (String, String) {
+    let (access_token, workspace_id) = signup_with_access(app, email).await;
+    let expires_at = "2035-01-01T00:00:00.000Z";
+    let created = send(
+        app,
+        authorized(
+            "POST",
+            "/metadata",
+            &access_token,
+            Some(json!({
+                "query": "mutation($input: CreateApiKeyInput!) { createApiKey(input:$input) { id } }",
+                "variables": {
+                    "input": {
+                        "name": "integration",
+                        "expiresAt": expires_at,
+                        "roleId": uuid::Uuid::new_v4().to_string()
+                    }
+                }
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(created.status, StatusCode::OK, "body: {}", created.body);
+    let api_key_id = created.body["data"]["createApiKey"]["id"]
+        .as_str()
+        .expect("api key id")
+        .to_string();
+
+    let generated = send(
+        app,
+        authorized(
+            "POST",
+            "/metadata",
+            &access_token,
+            Some(json!({
+                "query": "mutation($id: UUID!, $expiresAt: String!) { generateApiKeyToken(apiKeyId:$id, expiresAt:$expiresAt) { token } }",
+                "variables": { "id": api_key_id, "expiresAt": expires_at }
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(generated.status, StatusCode::OK, "body: {}", generated.body);
+    let api_key = generated.body["data"]["generateApiKeyToken"]["token"]
+        .as_str()
+        .expect("api key token")
+        .to_string();
+    (api_key, workspace_id)
 }
 
 fn person_body(first: &str, last: &str, email: &str) -> Value {
@@ -251,6 +302,309 @@ async fn unauthenticated_requests_get_contract_403() {
 }
 
 #[tokio::test]
+async fn refresh_tokens_rotate_and_signout_revokes_the_session() {
+    let app = test_app().await;
+    let email = unique_email("refresh");
+    let signup = send(
+        &app,
+        json_request(
+            "POST",
+            "/auth/signup",
+            json!({
+                "email": email,
+                "password": "super-secret-password",
+                "workspaceName": "Rotate Co"
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(signup.status, StatusCode::CREATED, "body: {}", signup.body);
+    let access = signup.body["tokens"]["accessOrWorkspaceAgnosticToken"]["token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let refresh = signup.body["tokens"]["refreshToken"]["token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let renewed = send(
+        &app,
+        json_request("POST", "/auth/refresh", json!({ "refreshToken": refresh })),
+    )
+    .await;
+    assert_eq!(renewed.status, StatusCode::OK, "body: {}", renewed.body);
+    let new_access = renewed.body["tokens"]["accessOrWorkspaceAgnosticToken"]["token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let new_refresh = renewed.body["tokens"]["refreshToken"]["token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_ne!(access, new_access);
+    assert_ne!(refresh, new_refresh);
+
+    // Rotation consumes the old token; replay is rejected.
+    let replay = send(
+        &app,
+        json_request("POST", "/auth/refresh", json!({ "refreshToken": refresh })),
+    )
+    .await;
+    assert_eq!(replay.status, StatusCode::UNAUTHORIZED);
+
+    // The new access token works on the metadata API.
+    let me = send(
+        &app,
+        json_request(
+            "POST",
+            "/metadata",
+            json!({ "query": "{ currentWorkspace { id } }" }),
+        )
+        .with_bearer(&new_access),
+    )
+    .await;
+    assert_eq!(me.status, StatusCode::OK, "body: {}", me.body);
+    assert!(me.body["data"]["currentWorkspace"]["id"].is_string());
+
+    // signOut(refreshToken:) revokes the session, invalidating access tokens
+    // that carry its `sid`.
+    let signed_out = send(
+        &app,
+        json_request(
+            "POST",
+            "/metadata",
+            json!({
+                "query": "mutation($r:String) { signOut(refreshToken:$r) }",
+                "variables": { "r": new_refresh }
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(
+        signed_out.status,
+        StatusCode::OK,
+        "body: {}",
+        signed_out.body
+    );
+
+    let revoked = send(
+        &app,
+        json_request(
+            "POST",
+            "/metadata",
+            json!({ "query": "{ currentWorkspace { id } }" }),
+        )
+        .with_bearer(&new_access),
+    )
+    .await;
+    assert_eq!(revoked.status, StatusCode::OK);
+    assert!(
+        revoked.body["data"]["currentWorkspace"].is_null(),
+        "revoked access token must not authenticate: {}",
+        revoked.body
+    );
+}
+
+#[tokio::test]
+async fn graphql_renew_token_rotates_refresh_tokens() {
+    let app = test_app().await;
+    let email = unique_email("renew");
+    let signup = send(
+        &app,
+        json_request(
+            "POST",
+            "/auth/signup",
+            json!({
+                "email": email,
+                "password": "super-secret-password",
+                "workspaceName": "Renew Co"
+            }),
+        ),
+    )
+    .await;
+    let refresh = signup.body["tokens"]["refreshToken"]["token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let renewed = send(
+        &app,
+        json_request(
+            "POST",
+            "/metadata",
+            json!({
+                "query": "mutation($t:String!) { renewToken(appToken:$t) { tokens { accessOrWorkspaceAgnosticToken { token } refreshToken { token } } } }",
+                "variables": { "t": refresh }
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(renewed.status, StatusCode::OK, "body: {}", renewed.body);
+    assert!(renewed.body["errors"].is_null(), "body: {}", renewed.body);
+    assert!(renewed.body["data"]["renewToken"]["tokens"]["refreshToken"]["token"].is_string());
+
+    let replay = send(
+        &app,
+        json_request(
+            "POST",
+            "/metadata",
+            json!({
+                "query": "mutation($t:String!) { renewToken(appToken:$t) { tokens { refreshToken { token } } } }",
+                "variables": { "t": refresh }
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(
+        replay.body["errors"][0]["extensions"]["code"], "UNAUTHENTICATED",
+        "body: {}",
+        replay.body
+    );
+}
+
+#[tokio::test]
+async fn cookie_requests_reject_foreign_origins() {
+    let app = test_app().await;
+    let email = unique_email("csrf");
+    let signup = send(
+        &app,
+        json_request(
+            "POST",
+            "/auth/signup",
+            json!({
+                "email": email,
+                "password": "super-secret-password",
+                "workspaceName": "CSRF Co"
+            }),
+        ),
+    )
+    .await;
+    let cookie = signup
+        .headers
+        .get(header::SET_COOKIE)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+    let request = json_request(
+        "POST",
+        "/graphql",
+        json!({ "query": "{ people { totalCount } }" }),
+    )
+    .with_cookie(&cookie);
+    let mut request = request;
+    request.headers_mut().insert(
+        header::ORIGIN,
+        axum::http::HeaderValue::from_static("https://evil.example"),
+    );
+    let blocked = send(&app, request).await;
+    assert_eq!(blocked.status, StatusCode::FORBIDDEN);
+
+    let mut allowed = json_request(
+        "POST",
+        "/graphql",
+        json!({ "query": "{ people { totalCount } }" }),
+    )
+    .with_cookie(&cookie);
+    allowed.headers_mut().insert(
+        header::ORIGIN,
+        axum::http::HeaderValue::from_static("http://localhost:3001"),
+    );
+    let response = send(&app, allowed).await;
+    assert_eq!(response.status, StatusCode::OK, "body: {}", response.body);
+    assert!(response.body["errors"].is_null());
+}
+
+#[tokio::test]
+async fn rest_fields_and_depth_match_upstream_validation() {
+    let app = test_app().await;
+    let email = unique_email("shape");
+    let (token, _workspace) = signup(&app, &email).await;
+
+    let created = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/people",
+            &token,
+            Some(person_body("Grace", "Hopper", "grace@example.com")),
+        ),
+    )
+    .await;
+    assert_eq!(created.status, StatusCode::CREATED);
+    let person_id = created.body["data"]["createPerson"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let selected = send(
+        &app,
+        authorized(
+            "GET",
+            &format!("/rest/people/{person_id}?fields=name,id"),
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(selected.status, StatusCode::OK, "body: {}", selected.body);
+    assert_eq!(
+        selected.body["data"]["person"],
+        json!({
+            "id": person_id,
+            "name": { "firstName": "Grace", "lastName": "Hopper" }
+        })
+    );
+
+    let unknown = send(
+        &app,
+        authorized(
+            "GET",
+            &format!("/rest/people/{person_id}?fields=name.firstName"),
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(unknown.status, StatusCode::BAD_REQUEST);
+    assert!(unknown.body["messages"][0]
+        .as_str()
+        .unwrap()
+        .contains("Unknown or unreadable fields on 'person': name.firstName"));
+
+    let bad_depth = send(
+        &app,
+        authorized(
+            "GET",
+            &format!("/rest/people/{person_id}?depth=2"),
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(bad_depth.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        bad_depth.body["messages"][0],
+        "'depth=2' parameter invalid. Allowed values are 0, 1"
+    );
+
+    let list = send(
+        &app,
+        authorized("GET", "/rest/people?fields=name", &token, None),
+    )
+    .await;
+    assert_eq!(list.status, StatusCode::OK, "body: {}", list.body);
+    let first = &list.body["data"]["people"][0];
+    assert!(first.get("jobTitle").is_none());
+    assert_eq!(first["name"]["firstName"], "Grace");
+    assert!(first["id"].is_string());
+}
+
+#[tokio::test]
 async fn tenant_isolation_blocks_cross_workspace_reads() {
     let app = test_app().await;
 
@@ -371,17 +725,41 @@ async fn graphql_login_flow_and_people_query() {
     )
     .await;
     assert_eq!(tokens.status, StatusCode::OK, "body: {}", tokens.body);
-    let access_token = tokens.body["data"]["getAuthTokensFromLoginToken"]["tokens"]
+    let _access_token = tokens.body["data"]["getAuthTokensFromLoginToken"]["tokens"]
         ["accessOrWorkspaceAgnosticToken"]["token"]
         .as_str()
         .expect("access token")
         .to_string();
-    assert!(
-        tokens.headers.get(header::SET_COOKIE).is_some(),
-        "session cookie should be set"
+    let session_cookie = tokens
+        .headers
+        .get(header::SET_COOKIE)
+        .expect("session cookie should be set")
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    // User access tokens are rejected by the data API.
+    let rejected = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({ "query": "{ people { totalCount } }" }),
+        )
+        .with_bearer(&_access_token),
+    )
+    .await;
+    assert_eq!(rejected.status, StatusCode::OK);
+    assert_eq!(
+        rejected.body["errors"][0]["extensions"]["code"], "UNAUTHENTICATED",
+        "access token must not authenticate the data API: {}",
+        rejected.body
     );
 
-    // Step 3: query people with the issued token.
+    // Step 3: query people with the session cookie issued alongside the token.
     let people = send(
         &app,
         json_request(
@@ -391,7 +769,7 @@ async fn graphql_login_flow_and_people_query() {
                 "query": "{ people { totalCount edges { node { id name { firstName lastName } emails { primaryEmail } } cursor } pageInfo { startCursor endCursor hasNextPage hasPreviousPage } } }"
             }),
         )
-        .with_bearer(&access_token),
+        .with_cookie(&session_cookie),
     )
     .await;
     assert_eq!(people.status, StatusCode::OK);
@@ -419,7 +797,7 @@ async fn graphql_login_flow_and_people_query() {
                 }
             }),
         )
-        .with_bearer(&access_token),
+        .with_cookie(&session_cookie),
     )
     .await;
     assert_eq!(
@@ -447,7 +825,7 @@ async fn graphql_login_flow_and_people_query() {
                 "variables": { "id": created_id, "data": { "jobTitle": "Computer" } }
             }),
         )
-        .with_bearer(&access_token),
+        .with_cookie(&session_cookie),
     )
     .await;
     assert_eq!(
@@ -473,7 +851,7 @@ async fn graphql_login_flow_and_people_query() {
                 "variables": { "id": first_id }
             }),
         )
-        .with_bearer(&access_token),
+        .with_cookie(&session_cookie),
     )
     .await;
     assert_eq!(by_filter.status, StatusCode::OK, "body: {}", by_filter.body);
@@ -799,7 +1177,7 @@ async fn metadata_mount_serves_auth_mutations() {
 async fn api_key_lifecycle_authenticates_data_api() {
     let app = test_app().await;
     let email = unique_email("api-key");
-    let (token, _workspace) = signup(&app, &email).await;
+    let (token, _workspace) = signup_with_access(&app, &email).await;
 
     let created = send(
         &app,
@@ -1064,6 +1442,7 @@ async fn graphql_soft_delete_restore_and_destroy() {
 
 trait WithBearer {
     fn with_bearer(self, token: &str) -> Request<Body>;
+    fn with_cookie(self, cookie: &str) -> Request<Body>;
 }
 
 impl WithBearer for Request<Body> {
@@ -1073,6 +1452,13 @@ impl WithBearer for Request<Body> {
             header::AUTHORIZATION,
             HeaderValue::from_str(&format!("Bearer {token}")).unwrap(),
         );
+        self
+    }
+
+    fn with_cookie(mut self, cookie: &str) -> Request<Body> {
+        use axum::http::HeaderValue;
+        self.headers_mut()
+            .insert(header::COOKIE, HeaderValue::from_str(cookie).unwrap());
         self
     }
 }
@@ -1593,7 +1979,7 @@ async fn metadata_default_view_matches_frontend_fragment() {
 async fn current_user_matches_frontend_boot_fragment() {
     let app = test_app().await;
     let email = unique_email("current-user");
-    let (token, _workspace) = signup(&app, &email).await;
+    let (token, _workspace) = signup_with_access(&app, &email).await;
 
     let query = r#"
         query GetCurrentUser {
@@ -3515,6 +3901,55 @@ async fn view_and_view_child_writes() {
     assert_eq!(updated.body["data"]["updateView"]["name"], "Renamed people");
     assert_eq!(updated.body["data"]["updateView"]["visibility"], "UNLISTED");
 
+    let cleared = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "mutation($id: String!, $input: UpdateViewInput!) { updateView(id: $id, input: $input) { id name anyFieldFilterValue calendarLayout } }",
+                "variables": {
+                    "id": view_id,
+                    "input": { "anyFieldFilterValue": "ada", "calendarLayout": "MONTH" }
+                }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(cleared.status, StatusCode::OK, "body: {}", cleared.body);
+    assert!(cleared.body["errors"].is_null(), "body: {}", cleared.body);
+    assert_eq!(
+        cleared.body["data"]["updateView"]["anyFieldFilterValue"],
+        "ada"
+    );
+    assert_eq!(
+        cleared.body["data"]["updateView"]["calendarLayout"],
+        "MONTH"
+    );
+
+    let cleared = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "mutation($id: String!, $input: UpdateViewInput!) { updateView(id: $id, input: $input) { id name anyFieldFilterValue calendarLayout } }",
+                "variables": {
+                    "id": view_id,
+                    "input": { "anyFieldFilterValue": null, "calendarLayout": null }
+                }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(cleared.status, StatusCode::OK, "body: {}", cleared.body);
+    assert!(cleared.body["errors"].is_null(), "body: {}", cleared.body);
+    assert!(cleared.body["data"]["updateView"]["anyFieldFilterValue"].is_null());
+    assert!(cleared.body["data"]["updateView"]["calendarLayout"].is_null());
+    assert_eq!(cleared.body["data"]["updateView"]["name"], "Renamed people");
+
     let view_field = send(
         &app,
         json_request(
@@ -4858,13 +5293,13 @@ async fn object_updates_clear_nullable_fields() {
 async fn workspace_members_query_and_boot_list() {
     let app = test_app().await;
     let email = unique_email("workspace-members");
-    let (token, _workspace) = signup(&app, &email).await;
+    let (token, _workspace) = signup_with_access(&app, &email).await;
 
     let response = send(
         &app,
         json_request(
             "POST",
-            "/graphql",
+            "/metadata",
             json!({
                 "query": "query($email: String!) { workspaceMember(filter: { userEmail: { eq: $email } }) { id name { firstName lastName } userEmail colorScheme locale } workspaceMembers { totalCount edges { node { id userEmail } } pageInfo { hasNextPage hasPreviousPage } } currentUser { workspaceMembers { id userEmail } } }",
                 "variables": { "email": email }
@@ -4915,4 +5350,381 @@ async fn workspace_members_query_and_boot_list() {
     .await;
     assert_eq!(missing.status, StatusCode::OK);
     assert!(missing.body["data"]["workspaceMember"].is_null());
+}
+
+#[tokio::test]
+async fn rest_group_by_matches_captured_contract() {
+    let app = test_app().await;
+    let email = unique_email("group-by");
+    let (token, _workspace) = signup(&app, &email).await;
+
+    for (first, job) in [("Ada", "Engineer"), ("Grace", "Engineer"), ("Linus", "")] {
+        let body = json!({
+            "name": { "firstName": first, "lastName": "Group" },
+            "emails": { "primaryEmail": format!("{first}@example.com") },
+            "jobTitle": job
+        });
+        let created = send(&app, authorized("POST", "/rest/people", &token, Some(body))).await;
+        assert_eq!(
+            created.status,
+            StatusCode::CREATED,
+            "body: {}",
+            created.body
+        );
+    }
+
+    let objects = send(
+        &app,
+        authorized(
+            "POST",
+            "/graphql",
+            &token,
+            Some(json!({
+                "query": "{ objects(paging:{first:20}) { edges { node { id nameSingular fieldsList { id name } } } } }"
+            })),
+        ),
+    )
+    .await;
+    let person = objects.body["data"]["objects"]["edges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|edge| edge["node"]["nameSingular"] == "person")
+        .expect("person metadata");
+    let object_id = person["node"]["id"].as_str().unwrap().to_string();
+    let name_field_id = person["node"]["fieldsList"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|field| field["name"] == "name")
+        .expect("name field")["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let view = send(
+        &app,
+        authorized(
+            "POST",
+            "/graphql",
+            &token,
+            Some(json!({
+                "query": "mutation($input: CreateViewInput!) { createView(input:$input) { id } }",
+                "variables": { "input": { "name": "Ada only", "objectMetadataId": object_id, "icon": "IconList" } }
+            })),
+        ),
+    )
+    .await;
+    assert!(view.body["errors"].is_null(), "view body: {}", view.body);
+    let view_id = view.body["data"]["createView"]["id"]
+        .as_str()
+        .expect("view id")
+        .to_string();
+    let filter = send(
+        &app,
+        authorized(
+            "POST",
+            "/graphql",
+            &token,
+            Some(json!({
+                "query": "mutation($input: CreateViewFilterInput!) { createViewFilter(input:$input) { id } }",
+                "variables": {
+                    "input": {
+                        "fieldMetadataId": name_field_id,
+                        "viewId": view_id,
+                        "operand": "CONTAINS",
+                        "value": "Ada",
+                        "subFieldName": "firstName"
+                    }
+                }
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(filter.status, StatusCode::OK, "body: {}", filter.body);
+    assert!(filter.body["errors"].is_null(), "errors: {}", filter.body);
+
+    let response = send(
+        &app,
+        authorized(
+            "GET",
+            "/rest/people/groupBy?group_by=%5B%7B%22jobTitle%22%3Atrue%7D%5D&aggregate=%5B%22countNotEmptyId%22%2C%22percentageNotEmptyId%22%5D&include_records_sample=true&order_by_for_records=createdAt%5BAscNullsLast%5D",
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(response.status, StatusCode::OK, "body: {}", response.body);
+    let groups = response
+        .body
+        .as_array()
+        .expect("groupBy returns a bare array");
+    assert_eq!(groups.len(), 2);
+    assert_eq!(groups[0]["groupByDimensionValues"], json!(["Engineer"]));
+    assert_eq!(groups[0]["countNotEmptyId"], "2");
+    assert_eq!(groups[0]["percentageNotEmptyId"], "1.00000000000000000000");
+    assert_eq!(groups[0]["records"].as_array().unwrap().len(), 2);
+    assert_eq!(groups[1]["groupByDimensionValues"], json!([null]));
+    assert_eq!(groups[1]["countNotEmptyId"], "1");
+
+    let filtered = send(
+        &app,
+        authorized(
+            "GET",
+            &format!(
+                "/rest/people/groupBy?group_by=%5B%7B%22jobTitle%22%3Atrue%7D%5D&viewId={view_id}"
+            ),
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(filtered.status, StatusCode::OK, "body: {}", filtered.body);
+    let filtered_groups = filtered.body.as_array().expect("view-filtered groups");
+    assert_eq!(filtered_groups.len(), 1);
+    assert_eq!(
+        filtered_groups[0]["groupByDimensionValues"],
+        json!(["Engineer"])
+    );
+
+    let invalid = send(
+        &app,
+        authorized(
+            "GET",
+            "/rest/people/groupBy?group_by=%5B%7B%22nope%22%3Atrue%7D%5D",
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(invalid.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        invalid.body["messages"][0],
+        "Unidentified field in groupBy: nope"
+    );
+}
+
+#[tokio::test]
+async fn file_upload_and_avatar_file_write_round_trip() {
+    let app = test_app().await;
+    let email = unique_email("avatar-file");
+    let (token, _workspace) = signup(&app, &email).await;
+
+    let upload = send(
+        &app,
+        authorized(
+            "POST",
+            "/graphql",
+            &token,
+            Some(json!({
+                "query": "mutation($filename: String!, $size: Float!, $folder: FileFolder!) { createFileUpload(filename:$filename, size:$size, fileFolder:$folder) { fileId uploadUrl contentType } }",
+                "variables": { "filename": "portrait.png", "size": 4.0, "folder": "CorePicture" }
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(upload.status, StatusCode::OK, "body: {}", upload.body);
+    assert!(upload.body["errors"].is_null(), "errors: {}", upload.body);
+    let file_id = upload.body["data"]["createFileUpload"]["fileId"]
+        .as_str()
+        .expect("file id")
+        .to_string();
+    let upload_url = upload.body["data"]["createFileUpload"]["uploadUrl"]
+        .as_str()
+        .expect("upload url")
+        .to_string();
+    assert_eq!(
+        upload.body["data"]["createFileUpload"]["contentType"],
+        "image/png"
+    );
+
+    let stored = send(
+        &app,
+        Request::builder()
+            .method("PUT")
+            .uri(&upload_url)
+            .header(header::CONTENT_TYPE, "image/png")
+            .body(Body::from(vec![0x89, b'P', b'N', b'G']))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        stored.status,
+        StatusCode::NO_CONTENT,
+        "body: {}",
+        stored.body
+    );
+
+    let completed = send(
+        &app,
+        authorized(
+            "POST",
+            "/graphql",
+            &token,
+            Some(json!({
+                "query": "mutation($id: String!) { completeFileUpload(fileId:$id) { id path size url } }",
+                "variables": { "id": file_id }
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(completed.status, StatusCode::OK, "body: {}", completed.body);
+    assert!(
+        completed.body["errors"].is_null(),
+        "errors: {}",
+        completed.body
+    );
+    assert_eq!(completed.body["data"]["completeFileUpload"]["size"], 4.0);
+
+    let created = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/people",
+            &token,
+            Some(json!({
+                "name": { "firstName": "Ada", "lastName": "File" },
+                "emails": { "primaryEmail": "ada-file@example.com" },
+                "avatarFile": [{ "fileId": file_id, "label": "Portrait" }]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        created.status,
+        StatusCode::CREATED,
+        "body: {}",
+        created.body
+    );
+    let avatar = &created.body["data"]["createPerson"]["avatarFile"][0];
+    assert_eq!(avatar["label"], "Portrait");
+    assert_eq!(avatar["extension"], "png");
+    assert_eq!(avatar["fileId"], file_id);
+
+    let missing_id = uuid::Uuid::new_v4();
+    let rejected = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/people",
+            &token,
+            Some(json!({
+                "name": { "firstName": "Missing", "lastName": "File" },
+                "emails": { "primaryEmail": "missing-file@example.com" },
+                "avatarFile": [{ "fileId": missing_id, "label": "Missing" }]
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(rejected.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        rejected.body["messages"][0],
+        format!("File not found: {missing_id}")
+    );
+}
+
+#[tokio::test]
+async fn metadata_index_roles_and_permission_flags() {
+    let app = test_app().await;
+    let email = unique_email("metadata-index");
+    let (token, _workspace) = signup(&app, &email).await;
+
+    let objects = send(
+        &app,
+        authorized(
+            "POST",
+            "/graphql",
+            &token,
+            Some(json!({
+                "query": "{ objects(paging:{first:20}) { edges { node { id nameSingular fieldsList { id name } } } } }"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(objects.status, StatusCode::OK, "body: {}", objects.body);
+    assert!(objects.body["errors"].is_null(), "errors: {}", objects.body);
+    let person = objects.body["data"]["objects"]["edges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|edge| edge["node"]["nameSingular"] == "person")
+        .expect("person metadata");
+    let object_id = person["node"]["id"].as_str().unwrap().to_string();
+    let field_id = person["node"]["fieldsList"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|field| field["name"] == "jobTitle")
+        .expect("jobTitle field")["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let created = send(
+        &app,
+        authorized(
+            "POST",
+            "/graphql",
+            &token,
+            Some(json!({
+                "query": "mutation($input: CreateOneIndexInput!) { createOneIndex(input:$input) { id name indexType indexFieldMetadataList { fieldMetadataId order } } }",
+                "variables": {
+                    "input": {
+                        "index": {
+                            "objectMetadataId": object_id,
+                            "fields": [{ "fieldMetadataId": field_id }]
+                        }
+                    }
+                }
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(created.status, StatusCode::OK, "body: {}", created.body);
+    assert!(created.body["errors"].is_null(), "errors: {}", created.body);
+    let index = &created.body["data"]["createOneIndex"];
+    assert_eq!(index["indexType"], "BTREE");
+    assert_eq!(index["indexFieldMetadataList"].as_array().unwrap().len(), 1);
+    let index_id = index["id"].as_str().unwrap().to_string();
+
+    let roles = send(
+        &app,
+        authorized(
+            "POST",
+            "/graphql",
+            &token,
+            Some(json!({
+                "query": "query($id: UUID!) { getRoles { id label } getPermissionFlags { key permissionType } mostlyEmptyFieldMetadataIds(objectMetadataId:$id) }",
+                "variables": { "id": object_id }
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(roles.status, StatusCode::OK, "body: {}", roles.body);
+    assert!(roles.body["errors"].is_null(), "errors: {}", roles.body);
+    assert_eq!(roles.body["data"]["getRoles"].as_array().unwrap().len(), 3);
+    assert_eq!(
+        roles.body["data"]["getPermissionFlags"]
+            .as_array()
+            .unwrap()
+            .len(),
+        26
+    );
+    assert_eq!(roles.body["data"]["mostlyEmptyFieldMetadataIds"], json!([]));
+
+    let deleted = send(
+        &app,
+        authorized(
+            "POST",
+            "/graphql",
+            &token,
+            Some(json!({
+                "query": "mutation($input: DeleteOneIndexInput!) { deleteOneIndex(input:$input) { id } }",
+                "variables": { "input": { "id": index_id } }
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(deleted.status, StatusCode::OK, "body: {}", deleted.body);
+    assert!(deleted.body["errors"].is_null(), "errors: {}", deleted.body);
+    assert_eq!(deleted.body["data"]["deleteOneIndex"]["id"], index_id);
 }

@@ -18,18 +18,19 @@ use squid_auth::AuthToken;
 use squid_auth::{hash_password, hash_token, verify_password, AuthContext};
 use squid_core::{
     Address, ApiKey, AppError, AppResult, Company, CreateCompanyInput, CreateFieldMetadataInput,
-    CreateNoteInput, CreateNoteTargetInput, CreateObjectMetadataInput, CreateOpportunityInput,
-    CreatePersonInput, CreateTaskInput, CreateTaskTargetInput, CreateViewFieldGroupInput,
-    CreateViewFieldInput, CreateViewFilterGroupInput, CreateViewFilterInput, CreateViewGroupInput,
-    CreateViewInput, CreateViewSortInput, Currency, CursorPagingInput, DateOp, FieldConnection,
-    FieldFilterInput, FieldMetadata, FilterExpr, GqlJson, Links, MaybeUndefined, Note, NoteTarget,
-    ObjectConnection, ObjectEdge, ObjectFilterInput, ObjectMetadata, Opportunity, OpportunityStage,
-    PageInfo, Person, RichText, Role, StringOp, Task, TaskStatus, TaskTarget, UpdateCompanyInput,
-    UpdateFieldMetadataInput, UpdateNoteInput, UpdateObjectMetadataInput, UpdateOpportunityInput,
-    UpdatePersonInput, UpdateTaskInput, UpdateViewFieldGroupInput, UpdateViewFieldInput,
-    UpdateViewFilterGroupInput, UpdateViewFilterInput, UpdateViewGroupInput, UpdateViewInput,
-    UpdateViewSortInput, User as CoreUser, UuidOp, View, ViewField, ViewFieldGroup, ViewFilter,
-    ViewFilterGroup, ViewGroup, ViewSort, ViewType,
+    CreateNoteInput, CreateNoteTargetInput, CreateObjectMetadataInput, CreateOneIndexInput,
+    CreateOpportunityInput, CreatePersonInput, CreateTaskInput, CreateTaskTargetInput,
+    CreateViewFieldGroupInput, CreateViewFieldInput, CreateViewFilterGroupInput,
+    CreateViewFilterInput, CreateViewGroupInput, CreateViewInput, CreateViewSortInput, Currency,
+    CursorPagingInput, DateOp, DeleteOneIndexInput, FieldConnection, FieldFilterInput,
+    FieldMetadata, FileFolder, FileItemInput, FilterExpr, GqlJson, Links, MaybeUndefined, Note,
+    NoteTarget, ObjectConnection, ObjectEdge, ObjectFilterInput, ObjectMetadata, Opportunity,
+    OpportunityStage, PageInfo, Person, RichText, Role, StringOp, Task, TaskStatus, TaskTarget,
+    UpdateCompanyInput, UpdateFieldMetadataInput, UpdateNoteInput, UpdateObjectMetadataInput,
+    UpdateOpportunityInput, UpdatePersonInput, UpdateTaskInput, UpdateViewFieldGroupInput,
+    UpdateViewFieldInput, UpdateViewFilterGroupInput, UpdateViewFilterInput, UpdateViewGroupInput,
+    UpdateViewInput, UpdateViewSortInput, User as CoreUser, UuidOp, View, ViewField,
+    ViewFieldGroup, ViewFilter, ViewFilterGroup, ViewGroup, ViewSort, ViewType,
 };
 use squid_db::{OrderTerm, PersonColumn};
 use uuid::Uuid;
@@ -37,7 +38,9 @@ use uuid::Uuid;
 use crate::auth::{normalize_email, unique_subdomain};
 use crate::current_user::{self, User, Workspace, WorkspaceMemberGql};
 use crate::sorting::{sort_records, SortTerm};
-use crate::{clear_session_cookie, resolve_auth, session_cookie, AppState, AuthTokenPair};
+use crate::{
+    clear_session_cookie, resolve_auth_with_policy, session_cookie, AppState, AuthTokenPair,
+};
 
 pub type SquidSchema = Schema<QueryRoot, MutationRoot, EmptySubscription>;
 
@@ -62,6 +65,11 @@ pub struct AuthPayload {
     pub tokens: AuthTokenPair,
     pub user: User,
     pub workspace: Workspace,
+}
+
+#[derive(Debug, SimpleObject)]
+pub struct AuthTokensPayload {
+    pub tokens: AuthTokenPair,
 }
 
 #[derive(Debug, SimpleObject)]
@@ -154,6 +162,83 @@ pub struct PhonesCreateInput {
 }
 
 #[derive(Debug, InputObject)]
+#[graphql(name = "FileItemInput")]
+pub struct FileItemInputGql {
+    pub file_id: Uuid,
+    pub label: String,
+}
+
+impl From<FileItemInputGql> for FileItemInput {
+    fn from(input: FileItemInputGql) -> Self {
+        Self {
+            file_id: input.file_id,
+            label: input.label,
+        }
+    }
+}
+
+#[derive(Debug, SimpleObject)]
+pub struct FileUploadTarget {
+    pub file_id: Uuid,
+    pub upload_url: String,
+    pub content_type: String,
+    pub expires_at: DateTime<Utc>,
+}
+
+#[derive(Debug, SimpleObject)]
+pub struct FileWithSignedUrl {
+    pub id: Uuid,
+    pub path: String,
+    pub size: f64,
+    pub created_at: DateTime<Utc>,
+    pub url: String,
+}
+
+#[derive(Debug, SimpleObject)]
+#[graphql(name = "PermissionFlag")]
+pub struct PermissionFlagGql {
+    pub id: Uuid,
+    pub universal_identifier: Uuid,
+    pub key: String,
+    pub label: String,
+    pub description: Option<String>,
+    pub icon: Option<String>,
+    pub permission_type: String,
+    pub application_id: Uuid,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+const PERMISSION_FLAGS: &[(&str, &str)] = &[
+    ("API_KEYS_AND_WEBHOOKS", "API keys and webhooks"),
+    ("WORKSPACE", "Workspace"),
+    ("WORKSPACE_MEMBERS", "Workspace members"),
+    ("ROLES", "Roles"),
+    ("DATA_MODEL", "Data model"),
+    ("SECURITY", "Security"),
+    ("WORKFLOWS", "Workflows"),
+    ("IMPERSONATE", "Impersonate"),
+    ("SSO_BYPASS", "SSO bypass"),
+    ("APPLICATIONS", "Applications"),
+    ("MARKETPLACE_APPS", "Marketplace apps"),
+    ("LAYOUTS", "Layouts"),
+    ("BILLING", "Billing"),
+    ("AI_SETTINGS", "AI settings"),
+    ("AI", "AI"),
+    ("VIEWS", "Views"),
+    ("UPLOAD_FILE", "Upload file"),
+    ("DOWNLOAD_FILE", "Download file"),
+    ("SEND_EMAIL_TOOL", "Send email tool"),
+    ("CREATE_CALENDAR_EVENT_TOOL", "Create calendar event tool"),
+    ("HTTP_REQUEST_TOOL", "HTTP request tool"),
+    ("CODE_INTERPRETER_TOOL", "Code interpreter tool"),
+    ("IMPORT_CSV", "Import CSV"),
+    ("EXPORT_CSV", "Export CSV"),
+    ("CONNECTED_ACCOUNTS", "Connected accounts"),
+    ("PROFILE_INFORMATION", "Profile information"),
+];
+
+#[derive(Debug, InputObject)]
 #[graphql(name = "PersonCreateInput")]
 pub struct PersonCreateInputGql {
     pub name: Option<FullNameCreateInput>,
@@ -162,6 +247,7 @@ pub struct PersonCreateInputGql {
     pub linkedin_link: Option<LinksCreateInput>,
     pub phones: Option<PhonesCreateInput>,
     pub avatar_url: Option<String>,
+    pub avatar_file: Option<Vec<FileItemInputGql>>,
     pub position: Option<f64>,
     pub company_id: Option<uuid::Uuid>,
 }
@@ -196,6 +282,9 @@ impl From<PersonCreateInputGql> for CreatePersonInput {
                 additional_phones: phones.additional_phones.unwrap_or_default(),
             }),
             avatar_url: input.avatar_url,
+            avatar_file: input
+                .avatar_file
+                .map(|items| items.into_iter().map(Into::into).collect()),
             position: input.position,
             company_id: input.company_id,
         }
@@ -211,6 +300,7 @@ pub struct PersonUpdateInputGql {
     pub linkedin_link: MaybeUndefined<LinksCreateInput>,
     pub phones: MaybeUndefined<PhonesCreateInput>,
     pub avatar_url: MaybeUndefined<String>,
+    pub avatar_file: MaybeUndefined<Vec<FileItemInputGql>>,
     pub position: MaybeUndefined<f64>,
     pub company_id: MaybeUndefined<uuid::Uuid>,
 }
@@ -239,6 +329,9 @@ impl From<PersonUpdateInputGql> for UpdatePersonInput {
                 additional_phones: phones.additional_phones.unwrap_or_default(),
             }),
             avatar_url: input.avatar_url,
+            avatar_file: input
+                .avatar_file
+                .map_value(|items| items.into_iter().map(Into::into).collect()),
             position: input.position,
             company_id: input.company_id,
         }
@@ -1421,6 +1514,25 @@ fn parse_expiry(raw: &str) -> AppResult<chrono::DateTime<chrono::Utc>> {
     )))
 }
 
+pub(crate) fn content_type_for(filename: &str) -> &'static str {
+    match filename
+        .rsplit_once('.')
+        .map(|(_, extension)| extension.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("png") => "image/png",
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("svg") => "image/svg+xml",
+        Some("pdf") => "application/pdf",
+        Some("csv") => "text/csv",
+        Some("json") => "application/json",
+        Some("txt") => "text/plain",
+        _ => "application/octet-stream",
+    }
+}
+
 fn schema() -> &'static SquidSchema {
     static SCHEMA: OnceLock<SquidSchema> = OnceLock::new();
     SCHEMA.get_or_init(|| Schema::build(QueryRoot, MutationRoot, EmptySubscription).finish())
@@ -2387,6 +2499,71 @@ impl QueryRoot {
             &state.config.frontend_url,
             count,
         )))
+    }
+
+    async fn get_roles(
+        &self,
+        ctx: &Context<'_>,
+    ) -> async_graphql::Result<Vec<current_user::RoleGql>> {
+        let auth = require_auth(ctx)?;
+        Ok([Role::Owner, Role::Admin, Role::Member]
+            .into_iter()
+            .map(|role| current_user::role_gql(auth.workspace_id, role))
+            .collect())
+    }
+
+    async fn get_role(
+        &self,
+        ctx: &Context<'_>,
+        id: Uuid,
+    ) -> async_graphql::Result<current_user::RoleGql> {
+        let auth = require_auth(ctx)?;
+        [Role::Owner, Role::Admin, Role::Member]
+            .into_iter()
+            .map(|role| current_user::role_gql(auth.workspace_id, role))
+            .find(|role| role.id == id)
+            .ok_or_else(|| gql_err(AppError::NotFound("Role not found".to_string())))
+    }
+
+    async fn get_permission_flags(
+        &self,
+        ctx: &Context<'_>,
+    ) -> async_graphql::Result<Vec<PermissionFlagGql>> {
+        let auth = require_auth(ctx)?;
+        let now = Utc::now();
+        Ok(PERMISSION_FLAGS
+            .iter()
+            .map(|(key, label)| {
+                let id = Uuid::new_v5(&auth.workspace_id, key.as_bytes());
+                PermissionFlagGql {
+                    id,
+                    universal_identifier: id,
+                    key: key.to_string(),
+                    label: label.to_string(),
+                    description: None,
+                    icon: None,
+                    permission_type: "WORKSPACE".to_string(),
+                    application_id: Uuid::nil(),
+                    created_at: now,
+                    updated_at: now,
+                }
+            })
+            .collect())
+    }
+
+    async fn mostly_empty_field_metadata_ids(
+        &self,
+        ctx: &Context<'_>,
+        object_metadata_id: Uuid,
+    ) -> async_graphql::Result<Vec<Uuid>> {
+        let auth = require_auth(ctx)?;
+        let _ = state(ctx)
+            .db
+            .get_object(auth.workspace_id, object_metadata_id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Object not found".to_string())))?;
+        Ok(Vec::new())
     }
 
     async fn objects(
@@ -3481,6 +3658,102 @@ pub struct DestroyViewFieldGroupInput {
 
 #[Object]
 impl MutationRoot {
+    async fn create_file_upload(
+        &self,
+        ctx: &Context<'_>,
+        filename: String,
+        _size: f64,
+        file_folder: FileFolder,
+        field_metadata_id: Option<String>,
+        _field_metadata_universal_identifier: Option<String>,
+    ) -> async_graphql::Result<FileUploadTarget> {
+        let auth = require_auth(ctx)?;
+        let field_metadata_id = field_metadata_id
+            .as_deref()
+            .map(Uuid::parse_str)
+            .transpose()
+            .map_err(|_| {
+                gql_err(AppError::BadRequest(
+                    "Invalid field metadata id".to_string(),
+                ))
+            })?;
+        let content_type = content_type_for(&filename);
+        let file = state(ctx)
+            .db
+            .create_file(
+                auth.workspace_id,
+                &filename,
+                0,
+                content_type,
+                file_folder,
+                field_metadata_id,
+            )
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        Ok(FileUploadTarget {
+            file_id: file.id,
+            upload_url: format!("/files/upload/{}", file.id),
+            content_type: content_type.to_string(),
+            expires_at: Utc::now() + chrono::Duration::hours(1),
+        })
+    }
+
+    async fn complete_file_upload(
+        &self,
+        ctx: &Context<'_>,
+        file_id: String,
+    ) -> async_graphql::Result<FileWithSignedUrl> {
+        let auth = require_auth(ctx)?;
+        let file_id = Uuid::parse_str(&file_id)
+            .map_err(|_| gql_err(AppError::BadRequest("Invalid file id".to_string())))?;
+        let file = state(ctx)
+            .db
+            .complete_file(auth.workspace_id, file_id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("File not found".to_string())))?;
+        let url = file.url();
+        Ok(FileWithSignedUrl {
+            id: file.id,
+            path: file.path,
+            size: file.size as f64,
+            created_at: file.created_at,
+            url,
+        })
+    }
+
+    async fn create_one_index(
+        &self,
+        ctx: &Context<'_>,
+        input: CreateOneIndexInput,
+    ) -> async_graphql::Result<squid_core::IndexMetadata> {
+        let auth = require_auth(ctx)?;
+        if input.index.fields.is_empty() {
+            return Err(gql_err(AppError::BadRequest(
+                "At least one field is required".to_string(),
+            )));
+        }
+        state(ctx)
+            .db
+            .create_index(auth.workspace_id, &input.index)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))
+    }
+
+    async fn delete_one_index(
+        &self,
+        ctx: &Context<'_>,
+        input: DeleteOneIndexInput,
+    ) -> async_graphql::Result<squid_core::IndexMetadata> {
+        let auth = require_auth(ctx)?;
+        state(ctx)
+            .db
+            .delete_index(auth.workspace_id, input.id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Index not found".to_string())))
+    }
+
     async fn create_view(
         &self,
         ctx: &Context<'_>,
@@ -4112,6 +4385,10 @@ impl MutationRoot {
     ) -> async_graphql::Result<AuthPayload> {
         let state = state(ctx);
         let email = normalize_email(&email).map_err(gql_err)?;
+        state
+            .auth_limiter
+            .check(&format!("signup:{email}"))
+            .map_err(gql_err)?;
         let password_hash = hash_password(&password).map_err(gql_err)?;
         let display_name = workspace_name
             .filter(|name| !name.trim().is_empty())
@@ -5433,10 +5710,29 @@ impl MutationRoot {
         Ok(destroyed)
     }
 
-    async fn sign_out(&self, ctx: &Context<'_>) -> async_graphql::Result<bool> {
-        if let Some(auth) = ctx_data(ctx).auth.as_ref() {
+    async fn renew_token(
+        &self,
+        ctx: &Context<'_>,
+        app_token: String,
+    ) -> async_graphql::Result<AuthTokensPayload> {
+        let tokens = state(ctx)
+            .renew_session(&app_token)
+            .await
+            .map_err(gql_err)?;
+        Ok(AuthTokensPayload { tokens })
+    }
+
+    async fn sign_out(
+        &self,
+        ctx: &Context<'_>,
+        refresh_token: Option<String>,
+    ) -> async_graphql::Result<bool> {
+        let state = state(ctx);
+        if let Some(refresh_token) = refresh_token {
+            let _ = state.revoke_refresh_token(&refresh_token).await;
+        } else if let Some(auth) = ctx_data(ctx).auth.as_ref() {
             if let Some(session_id) = auth.session_id {
-                let _ = state(ctx).db.delete_session(session_id).await;
+                let _ = state.db.delete_session(session_id).await;
             }
         }
         if let Ok(mut slot) = ctx_data(ctx).cookie.lock() {
@@ -5453,6 +5749,10 @@ async fn sign_in_impl(
 ) -> async_graphql::Result<AuthPayload> {
     let state = state(ctx);
     let email = normalize_email(email).map_err(gql_err)?;
+    state
+        .auth_limiter
+        .check(&format!("signin:{email}"))
+        .map_err(gql_err)?;
 
     let (user, password_hash) = state
         .db
@@ -5592,10 +5892,14 @@ fn set_cookie(ctx: &Context<'_>, token: String, expires_at: DateTime<Utc>) {
 
 pub async fn graphql_handler(
     State(state): State<AppState>,
+    uri: axum::http::Uri,
     headers: HeaderMap,
     request: GraphQLRequest,
 ) -> Response {
-    let auth = resolve_auth(&state, &headers).await;
+    // User access tokens are accepted by the metadata GraphQL API only. The
+    // data API requires an API key or the browser session cookie.
+    let allow_user_access = uri.path() == "/metadata";
+    let auth = resolve_auth_with_policy(&state, &headers, allow_user_access).await;
     let cookie_slot = Arc::new(Mutex::new(None));
 
     let mut request = request.into_inner();

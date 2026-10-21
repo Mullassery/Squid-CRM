@@ -9,23 +9,24 @@ use chrono::{DateTime, Utc};
 use regex::Regex;
 use serde::de::DeserializeOwned;
 use sqlx::postgres::PgPoolOptions;
-use sqlx::{PgPool, Row};
+use sqlx::{PgPool, Postgres, QueryBuilder, Row};
 use squid_core::{
     Actor, AggregateOperations, ApiKey, Company, CreateCompanyInput, CreateFieldMetadataInput,
-    CreateNoteInput, CreateNoteTargetInput, CreateObjectMetadataInput, CreateOpportunityInput,
-    CreatePersonInput, CreateTaskInput, CreateTaskTargetInput, CreateViewFieldGroupInput,
-    CreateViewFieldInput, CreateViewFilterGroupInput, CreateViewFilterInput, CreateViewGroupInput,
-    CreateViewInput, CreateViewSortInput, DateOp, Emails, FieldMetadata, FieldMetadataType,
-    FilterExpr, FullName, MaybeUndefined, MetadataReadability, MetadataWritability, Note,
-    NoteTarget, ObjectMetadata, ObjectOpenRecordIn, ObjectSharingReach, Opportunity,
-    OpportunityStage, Person, Role, StringOp, Task, TaskStatus, TaskTarget, UpdateCompanyInput,
-    UpdateFieldMetadataInput, UpdateNoteInput, UpdateNoteTargetInput, UpdateObjectMetadataInput,
-    UpdateOpportunityInput, UpdatePersonInput, UpdateTaskInput, UpdateTaskTargetInput,
-    UpdateViewFieldGroupInput, UpdateViewFieldInput, UpdateViewFilterGroupInput,
-    UpdateViewFilterInput, UpdateViewGroupInput, UpdateViewInput, UpdateViewSortInput, User,
-    UuidOp, View, ViewCalendarLayout, ViewField, ViewFieldGroup, ViewFilter, ViewFilterGroup,
-    ViewFilterGroupLogicalOperator, ViewFilterOperand, ViewGroup, ViewKey, ViewOpenRecordIn,
-    ViewSort, ViewSortDirection, ViewType, ViewVisibility, Workspace,
+    CreateIndexInput, CreateNoteInput, CreateNoteTargetInput, CreateObjectMetadataInput,
+    CreateOpportunityInput, CreatePersonInput, CreateTaskInput, CreateTaskTargetInput,
+    CreateViewFieldGroupInput, CreateViewFieldInput, CreateViewFilterGroupInput,
+    CreateViewFilterInput, CreateViewGroupInput, CreateViewInput, CreateViewSortInput, DateOp,
+    Emails, FieldMetadata, FieldMetadataType, FileFolder, FileItemInput, FileObject, FilterExpr,
+    FullName, IndexFieldMetadata, IndexMetadata, IndexType, MaybeUndefined, MetadataReadability,
+    MetadataWritability, Note, NoteTarget, ObjectMetadata, ObjectOpenRecordIn, ObjectSharingReach,
+    Opportunity, OpportunityStage, Person, Role, StringOp, Task, TaskStatus, TaskTarget,
+    UpdateCompanyInput, UpdateFieldMetadataInput, UpdateNoteInput, UpdateNoteTargetInput,
+    UpdateObjectMetadataInput, UpdateOpportunityInput, UpdatePersonInput, UpdateTaskInput,
+    UpdateTaskTargetInput, UpdateViewFieldGroupInput, UpdateViewFieldInput,
+    UpdateViewFilterGroupInput, UpdateViewFilterInput, UpdateViewGroupInput, UpdateViewInput,
+    UpdateViewSortInput, User, UuidOp, View, ViewCalendarLayout, ViewField, ViewFieldGroup,
+    ViewFilter, ViewFilterGroup, ViewFilterGroupLogicalOperator, ViewFilterOperand, ViewGroup,
+    ViewKey, ViewOpenRecordIn, ViewSort, ViewSortDirection, ViewType, ViewVisibility, Workspace,
 };
 use uuid::Uuid;
 
@@ -45,10 +46,40 @@ const WORKSPACE_NOTE_TARGET_SQL: &str =
 const CORE_API_KEYS_SQL: &str = include_str!("../migrations/core/0002_api_keys.sql");
 const CORE_METADATA_SQL: &str = include_str!("../migrations/core/0003_metadata.sql");
 const CORE_VIEWS_SQL: &str = include_str!("../migrations/core/0004_views.sql");
+const CORE_REFRESH_TOKENS_SQL: &str = include_str!("../migrations/core/0005_refresh_tokens.sql");
+const CORE_FILES_SQL: &str = include_str!("../migrations/core/0006_files.sql");
+const CORE_INDEXES_SQL: &str = include_str!("../migrations/core/0007_indexes.sql");
 
 #[derive(Clone)]
 pub struct Db {
     pub pool: PgPool,
+}
+
+#[derive(Debug, Clone)]
+pub struct FileRecord {
+    pub id: Uuid,
+    pub workspace_id: Uuid,
+    pub filename: String,
+    pub path: String,
+    pub size: i64,
+    pub content_type: String,
+    pub file_folder: String,
+    pub field_metadata_id: Option<Uuid>,
+    pub uploaded: bool,
+    pub created_at: DateTime<Utc>,
+}
+
+impl FileRecord {
+    pub fn extension(&self) -> Option<String> {
+        self.filename
+            .rsplit_once('.')
+            .map(|(_, extension)| extension.to_ascii_lowercase())
+            .filter(|extension| !extension.is_empty())
+    }
+
+    pub fn url(&self) -> String {
+        format!("/files/{}", self.id)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -64,6 +95,15 @@ pub struct SessionRow {
     pub id: Uuid,
     pub user_id: Uuid,
     pub workspace_id: Uuid,
+    pub expires_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RefreshTokenRow {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub workspace_id: Uuid,
+    pub session_id: Uuid,
     pub expires_at: DateTime<Utc>,
 }
 
@@ -323,6 +363,9 @@ impl Db {
             CORE_API_KEYS_SQL,
             CORE_METADATA_SQL,
             CORE_VIEWS_SQL,
+            CORE_REFRESH_TOKENS_SQL,
+            CORE_FILES_SQL,
+            CORE_INDEXES_SQL,
         ] {
             result = sqlx::raw_sql(ddl).execute(&mut *conn).await.map(|_| ());
             if result.is_err() {
@@ -682,6 +725,123 @@ impl Db {
             workspace_id: row.get("workspace_id"),
             expires_at: row.get("expires_at"),
         }))
+    }
+
+    pub async fn find_session_by_id(&self, session_id: Uuid) -> sqlx::Result<Option<SessionRow>> {
+        let row = sqlx::query(
+            "SELECT id, user_id, workspace_id, expires_at
+             FROM core.user_sessions
+             WHERE id = $1 AND expires_at > now()",
+        )
+        .bind(session_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|row| SessionRow {
+            id: row.get("id"),
+            user_id: row.get("user_id"),
+            workspace_id: row.get("workspace_id"),
+            expires_at: row.get("expires_at"),
+        }))
+    }
+
+    pub async fn create_refresh_token(
+        &self,
+        user_id: Uuid,
+        workspace_id: Uuid,
+        session_id: Uuid,
+        token_hash: &str,
+        expires_at: DateTime<Utc>,
+    ) -> sqlx::Result<Uuid> {
+        sqlx::query_scalar(
+            "INSERT INTO core.refresh_tokens
+                 (user_id, workspace_id, session_id, token_hash, expires_at)
+             VALUES ($1, $2, $3, $4, $5) RETURNING id",
+        )
+        .bind(user_id)
+        .bind(workspace_id)
+        .bind(session_id)
+        .bind(token_hash)
+        .bind(expires_at)
+        .fetch_one(&self.pool)
+        .await
+    }
+
+    pub async fn find_refresh_token_by_hash(
+        &self,
+        token_hash: &str,
+    ) -> sqlx::Result<Option<RefreshTokenRow>> {
+        let row = sqlx::query(
+            "SELECT id, user_id, workspace_id, session_id, expires_at
+             FROM core.refresh_tokens WHERE token_hash = $1",
+        )
+        .bind(token_hash)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|row| RefreshTokenRow {
+            id: row.get("id"),
+            user_id: row.get("user_id"),
+            workspace_id: row.get("workspace_id"),
+            session_id: row.get("session_id"),
+            expires_at: row.get("expires_at"),
+        }))
+    }
+
+    /// Atomically consume a refresh token if its session is still alive, then
+    /// store its replacement. Returns `None` for expired/revoked/replayed
+    /// tokens or dead sessions.
+    pub async fn rotate_refresh_token(
+        &self,
+        old_hash: &str,
+        new_hash: &str,
+        new_expires_at: DateTime<Utc>,
+    ) -> sqlx::Result<Option<RefreshTokenRow>> {
+        let mut tx = self.pool.begin().await?;
+        let row = sqlx::query(
+            "UPDATE core.refresh_tokens rt
+             SET revoked_at = now(), replaced_by_token_hash = $2
+             FROM core.user_sessions s
+             WHERE rt.token_hash = $1
+               AND rt.session_id = s.id
+               AND rt.revoked_at IS NULL
+               AND rt.expires_at > now()
+               AND s.expires_at > now()
+             RETURNING rt.id, rt.user_id, rt.workspace_id, rt.session_id, rt.expires_at",
+        )
+        .bind(old_hash)
+        .bind(new_hash)
+        .fetch_optional(&mut *tx)
+        .await?;
+
+        let Some(row) = row else {
+            tx.rollback().await?;
+            return Ok(None);
+        };
+
+        let rotated = RefreshTokenRow {
+            id: row.get("id"),
+            user_id: row.get("user_id"),
+            workspace_id: row.get("workspace_id"),
+            session_id: row.get("session_id"),
+            expires_at: row.get("expires_at"),
+        };
+
+        sqlx::query(
+            "INSERT INTO core.refresh_tokens
+                 (user_id, workspace_id, session_id, token_hash, expires_at)
+             VALUES ($1, $2, $3, $4, $5)",
+        )
+        .bind(rotated.user_id)
+        .bind(rotated.workspace_id)
+        .bind(rotated.session_id)
+        .bind(new_hash)
+        .bind(new_expires_at)
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+        Ok(Some(rotated))
     }
 
     pub async fn delete_session(&self, session_id: Uuid) -> sqlx::Result<()> {
@@ -1078,14 +1238,20 @@ impl Db {
             &input.emails.primary_email,
             input.job_title.as_deref(),
         );
+        let avatar_file = match &input.avatar_file {
+            Some(items) => Some(serde_json::to_string(
+                &self.resolve_file_items(workspace_id, items).await?,
+            )?),
+            None => None,
+        };
 
         let row = sqlx::query(&format!(
             "INSERT INTO {schema}.person
                 (name_first, name_last, primary_email, additional_emails, job_title,
-                 linkedin_link, phones, avatar_url, position, created_by, updated_by,
-                 search_vector, company_id)
-             VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9,
-                     $10::jsonb, $11::jsonb, $12, $13)
+                 linkedin_link, phones, avatar_url, avatar_file, position, created_by,
+                 updated_by, search_vector, company_id)
+             VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9::jsonb, $10,
+                     $11::jsonb, $12::jsonb, $13, $14)
              RETURNING {PERSON_SELECT}"
         ))
         .bind(&input.name.first_name)
@@ -1096,6 +1262,7 @@ impl Db {
         .bind(serde_json::to_string(&links)?)
         .bind(serde_json::to_string(&phones)?)
         .bind(input.avatar_url.clone().unwrap_or_default())
+        .bind(avatar_file)
         .bind(input.position.unwrap_or(0.0))
         .bind(serde_json::to_string(&actor)?)
         .bind(serde_json::to_string(&actor)?)
@@ -1142,6 +1309,17 @@ impl Db {
             MaybeUndefined::Null => String::new(),
             MaybeUndefined::Undefined => current.avatar_url.clone(),
         };
+        let avatar_file = match &input.avatar_file {
+            MaybeUndefined::Value(items) => Some(serde_json::to_string(
+                &self.resolve_file_items(workspace_id, items).await?,
+            )?),
+            MaybeUndefined::Null => None,
+            MaybeUndefined::Undefined => current
+                .avatar_file
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()?,
+        };
         let position = input.position.value().copied().unwrap_or(current.position);
         let company_id = match input.company_id {
             MaybeUndefined::Value(value) => Some(value),
@@ -1159,8 +1337,9 @@ impl Db {
             "UPDATE {schema}.person
              SET name_first = $2, name_last = $3, primary_email = $4,
                  additional_emails = $5, job_title = $6, linkedin_link = $7::jsonb,
-                 phones = $8::jsonb, avatar_url = $9, position = $10,
-                 search_vector = $11, company_id = $12, updated_at = now()
+                 phones = $8::jsonb, avatar_url = $9, avatar_file = $10::jsonb,
+                 position = $11, search_vector = $12, company_id = $13,
+                 updated_at = now()
              WHERE id = $1 AND deleted_at IS NULL
              RETURNING {PERSON_SELECT}"
         ))
@@ -1173,6 +1352,7 @@ impl Db {
         .bind(serde_json::to_string(&linkedin_link)?)
         .bind(serde_json::to_string(&phones)?)
         .bind(&avatar_url)
+        .bind(avatar_file)
         .bind(position)
         .bind(search_vector)
         .bind(company_id)
@@ -3184,6 +3364,7 @@ impl Db {
         for row in &rows {
             let mut object = row_to_object(row)?;
             object.fields = self.list_fields(workspace_id, Some(object.id)).await?;
+            object.index_metadata = self.list_indexes(workspace_id, Some(object.id)).await?;
             objects.push(object);
         }
         Ok(objects)
@@ -3208,6 +3389,7 @@ impl Db {
         };
         let mut object = row_to_object(&row)?;
         object.fields = self.list_fields(workspace_id, Some(object_id)).await?;
+        object.index_metadata = self.list_indexes(workspace_id, Some(object_id)).await?;
         Ok(Some(object))
     }
 
@@ -3242,6 +3424,244 @@ impl Db {
         .fetch_optional(&self.pool)
         .await?;
         row.as_ref().map(row_to_field).transpose()
+    }
+
+    // ----- indexes ------------------------------------------------------
+
+    pub async fn list_indexes(
+        &self,
+        workspace_id: Uuid,
+        object_metadata_id: Option<Uuid>,
+    ) -> anyhow::Result<Vec<IndexMetadata>> {
+        let rows = sqlx::query(
+            "SELECT * FROM core.index_metadata
+             WHERE workspace_id = $1
+               AND ($2::uuid IS NULL OR object_metadata_id = $2)
+             ORDER BY created_at ASC, name ASC",
+        )
+        .bind(workspace_id)
+        .bind(object_metadata_id)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut indexes = Vec::with_capacity(rows.len());
+        for row in rows {
+            let mut index = row_to_index(&row);
+            index.index_field_metadata_list = self.index_fields(workspace_id, index.id).await?;
+            indexes.push(index);
+        }
+        Ok(indexes)
+    }
+
+    async fn index_fields(
+        &self,
+        workspace_id: Uuid,
+        index_id: Uuid,
+    ) -> anyhow::Result<Vec<IndexFieldMetadata>> {
+        let rows = sqlx::query(
+            "SELECT * FROM core.index_field_metadata
+             WHERE workspace_id = $1 AND index_metadata_id = $2
+             ORDER BY position ASC",
+        )
+        .bind(workspace_id)
+        .bind(index_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.iter().map(row_to_index_field).collect())
+    }
+
+    pub async fn create_index(
+        &self,
+        workspace_id: Uuid,
+        input: &CreateIndexInput,
+    ) -> anyhow::Result<IndexMetadata> {
+        let object = self
+            .get_object(workspace_id, input.object_metadata_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("Object not found"))?;
+        let suffix = Uuid::new_v4().simple().to_string();
+        let name = format!(
+            "IDX_{}_{}_{}",
+            object.name_singular.to_uppercase(),
+            input.fields.len(),
+            &suffix[..12]
+        );
+        let mut tx = self.pool.begin().await?;
+        let row = sqlx::query(
+            "INSERT INTO core.index_metadata
+                (workspace_id, object_metadata_id, name, is_custom, is_unique, index_type)
+             VALUES ($1, $2, $3, TRUE, FALSE, $4)
+             RETURNING *",
+        )
+        .bind(workspace_id)
+        .bind(input.object_metadata_id)
+        .bind(&name)
+        .bind(input.index_type.as_str())
+        .fetch_one(&mut *tx)
+        .await?;
+        let index = row_to_index(&row);
+        for (position, field) in input.fields.iter().enumerate() {
+            self.get_field(workspace_id, field.field_metadata_id)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("Field not found"))?;
+            sqlx::query(
+                "INSERT INTO core.index_field_metadata
+                    (workspace_id, index_metadata_id, field_metadata_id, position,
+                     sub_field_name)
+                 VALUES ($1, $2, $3, $4, $5)",
+            )
+            .bind(workspace_id)
+            .bind(index.id)
+            .bind(field.field_metadata_id)
+            .bind(position as f64)
+            .bind(&field.sub_field_name)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        let mut index = index;
+        index.index_field_metadata_list = self.index_fields(workspace_id, index.id).await?;
+        Ok(index)
+    }
+
+    pub async fn delete_index(
+        &self,
+        workspace_id: Uuid,
+        index_id: Uuid,
+    ) -> anyhow::Result<Option<IndexMetadata>> {
+        let mut index = self
+            .list_indexes(workspace_id, None)
+            .await?
+            .into_iter()
+            .find(|index| index.id == index_id);
+        let Some(current) = index.as_mut() else {
+            return Ok(None);
+        };
+        current.index_field_metadata_list = self.index_fields(workspace_id, index_id).await?;
+        let result =
+            sqlx::query("DELETE FROM core.index_metadata WHERE workspace_id = $1 AND id = $2")
+                .bind(workspace_id)
+                .bind(index_id)
+                .execute(&self.pool)
+                .await?;
+        if result.rows_affected() == 0 {
+            return Ok(None);
+        }
+        Ok(index)
+    }
+
+    // ----- files --------------------------------------------------------
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_file(
+        &self,
+        workspace_id: Uuid,
+        filename: &str,
+        size: i64,
+        content_type: &str,
+        file_folder: FileFolder,
+        field_metadata_id: Option<Uuid>,
+    ) -> anyhow::Result<FileRecord> {
+        let id = Uuid::new_v4();
+        let folder = file_folder.as_str();
+        let path = format!("{folder}/{id}/{filename}");
+        let row = sqlx::query(
+            "INSERT INTO core.files
+                (id, workspace_id, filename, path, size, content_type, file_folder,
+                 field_metadata_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             RETURNING *",
+        )
+        .bind(id)
+        .bind(workspace_id)
+        .bind(filename)
+        .bind(&path)
+        .bind(size)
+        .bind(content_type)
+        .bind(folder)
+        .bind(field_metadata_id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row_to_file(&row))
+    }
+
+    pub async fn get_file(
+        &self,
+        workspace_id: Uuid,
+        file_id: Uuid,
+    ) -> anyhow::Result<Option<FileRecord>> {
+        let row = sqlx::query("SELECT * FROM core.files WHERE workspace_id = $1 AND id = $2")
+            .bind(workspace_id)
+            .bind(file_id)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.as_ref().map(row_to_file))
+    }
+
+    pub async fn store_file_content(&self, file_id: Uuid, content: &[u8]) -> anyhow::Result<bool> {
+        let result = sqlx::query(
+            "UPDATE core.files
+             SET content = $2, size = $3, uploaded = TRUE, updated_at = now()
+             WHERE id = $1",
+        )
+        .bind(file_id)
+        .bind(content)
+        .bind(content.len() as i64)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    pub async fn complete_file(
+        &self,
+        workspace_id: Uuid,
+        file_id: Uuid,
+    ) -> anyhow::Result<Option<FileRecord>> {
+        let row = sqlx::query(
+            "UPDATE core.files
+             SET uploaded = TRUE, updated_at = now()
+             WHERE workspace_id = $1 AND id = $2
+             RETURNING *",
+        )
+        .bind(workspace_id)
+        .bind(file_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.as_ref().map(row_to_file))
+    }
+
+    pub async fn file_content(
+        &self,
+        file_id: Uuid,
+    ) -> anyhow::Result<Option<(FileRecord, Vec<u8>)>> {
+        let row = sqlx::query("SELECT * FROM core.files WHERE id = $1")
+            .bind(file_id)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.map(|row| {
+            let content: Option<Vec<u8>> = row.get("content");
+            (row_to_file(&row), content.unwrap_or_default())
+        }))
+    }
+
+    pub async fn resolve_file_items(
+        &self,
+        workspace_id: Uuid,
+        items: &[FileItemInput],
+    ) -> anyhow::Result<Vec<FileObject>> {
+        let mut objects = Vec::with_capacity(items.len());
+        for item in items {
+            let file = self
+                .get_file(workspace_id, item.file_id)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("File not found: {}", item.file_id))?;
+            objects.push(FileObject {
+                file_id: file.id,
+                label: item.label.clone(),
+                extension: file.extension(),
+                url: file.url(),
+            });
+        }
+        Ok(objects)
     }
 
     pub async fn create_metadata_object(
@@ -3710,51 +4130,115 @@ impl Db {
         id: Uuid,
         input: &UpdateViewInput,
     ) -> anyhow::Result<Option<View>> {
-        let result = sqlx::query(
-            "UPDATE core.views SET
-                name = COALESCE($3, name),
-                type = COALESCE($4, type),
-                icon = COALESCE($5, icon),
-                position = COALESCE($6, position),
-                is_compact = COALESCE($7, is_compact),
-                open_record_in = COALESCE($8, open_record_in),
-                kanban_aggregate_operation = COALESCE($9, kanban_aggregate_operation),
-                kanban_aggregate_operation_field_metadata_id =
-                    COALESCE($10, kanban_aggregate_operation_field_metadata_id),
-                any_field_filter_value = COALESCE($11, any_field_filter_value),
-                calendar_layout = COALESCE($12, calendar_layout),
-                calendar_field_metadata_id = COALESCE($13, calendar_field_metadata_id),
-                calendar_end_field_metadata_id = COALESCE($14, calendar_end_field_metadata_id),
-                visibility = COALESCE($15, visibility),
-                main_group_by_field_metadata_id =
-                    COALESCE($16, main_group_by_field_metadata_id),
-                should_hide_empty_groups = COALESCE($17, should_hide_empty_groups),
-                kanban_column_width = COALESCE($18, kanban_column_width),
-                group_load_limit = COALESCE($19, group_load_limit),
-                updated_at = now()
-             WHERE workspace_id = $1 AND id = $2 AND deleted_at IS NULL",
-        )
-        .bind(workspace_id)
-        .bind(id)
-        .bind(&input.name)
-        .bind(input.view_type.map(|value| value.as_str()))
-        .bind(&input.icon)
-        .bind(input.position)
-        .bind(input.is_compact)
-        .bind(input.open_record_in.map(|value| value.as_str()))
-        .bind(input.kanban_aggregate_operation.map(|value| value.as_str()))
-        .bind(input.kanban_aggregate_operation_field_metadata_id)
-        .bind(&input.any_field_filter_value)
-        .bind(input.calendar_layout.map(|value| value.as_str()))
-        .bind(input.calendar_field_metadata_id)
-        .bind(input.calendar_end_field_metadata_id)
-        .bind(input.visibility.map(|value| value.as_str()))
-        .bind(input.main_group_by_field_metadata_id)
-        .bind(input.should_hide_empty_groups)
-        .bind(input.kanban_column_width)
-        .bind(input.group_load_limit)
-        .execute(&self.pool)
-        .await?;
+        fn defined<T>(value: &MaybeUndefined<T>) -> bool {
+            !matches!(value, MaybeUndefined::Undefined)
+        }
+        fn value<T: Clone>(value: &MaybeUndefined<T>) -> Option<T> {
+            match value {
+                MaybeUndefined::Value(value) => Some(value.clone()),
+                MaybeUndefined::Undefined | MaybeUndefined::Null => None,
+            }
+        }
+
+        let mut query = QueryBuilder::<Postgres>::new("UPDATE core.views SET ");
+        let mut first = true;
+        macro_rules! set {
+            ($column:literal, $defined:expr, $value:expr) => {
+                if $defined {
+                    if !first {
+                        query.push(", ");
+                    }
+                    query.push(concat!($column, " = ")).push_bind($value);
+                    first = false;
+                }
+            };
+        }
+
+        set!("name", defined(&input.name), value(&input.name));
+        set!(
+            "type",
+            defined(&input.view_type),
+            value(&input.view_type).map(|value| value.as_str().to_string())
+        );
+        set!("icon", defined(&input.icon), value(&input.icon));
+        set!("position", defined(&input.position), value(&input.position));
+        set!(
+            "is_compact",
+            defined(&input.is_compact),
+            value(&input.is_compact)
+        );
+        set!(
+            "open_record_in",
+            defined(&input.open_record_in),
+            value(&input.open_record_in).map(|value| value.as_str().to_string())
+        );
+        set!(
+            "kanban_aggregate_operation",
+            defined(&input.kanban_aggregate_operation),
+            value(&input.kanban_aggregate_operation).map(|value| value.as_str().to_string())
+        );
+        set!(
+            "kanban_aggregate_operation_field_metadata_id",
+            defined(&input.kanban_aggregate_operation_field_metadata_id),
+            value(&input.kanban_aggregate_operation_field_metadata_id)
+        );
+        set!(
+            "any_field_filter_value",
+            defined(&input.any_field_filter_value),
+            value(&input.any_field_filter_value)
+        );
+        set!(
+            "calendar_layout",
+            defined(&input.calendar_layout),
+            value(&input.calendar_layout).map(|value| value.as_str().to_string())
+        );
+        set!(
+            "calendar_field_metadata_id",
+            defined(&input.calendar_field_metadata_id),
+            value(&input.calendar_field_metadata_id)
+        );
+        set!(
+            "calendar_end_field_metadata_id",
+            defined(&input.calendar_end_field_metadata_id),
+            value(&input.calendar_end_field_metadata_id)
+        );
+        set!(
+            "visibility",
+            defined(&input.visibility),
+            value(&input.visibility).map(|value| value.as_str().to_string())
+        );
+        set!(
+            "main_group_by_field_metadata_id",
+            defined(&input.main_group_by_field_metadata_id),
+            value(&input.main_group_by_field_metadata_id)
+        );
+        set!(
+            "should_hide_empty_groups",
+            defined(&input.should_hide_empty_groups),
+            value(&input.should_hide_empty_groups)
+        );
+        set!(
+            "kanban_column_width",
+            defined(&input.kanban_column_width),
+            value(&input.kanban_column_width)
+        );
+        set!(
+            "group_load_limit",
+            defined(&input.group_load_limit),
+            value(&input.group_load_limit)
+        );
+
+        if first {
+            return self.get_view(workspace_id, id).await;
+        }
+
+        query.push(", updated_at = now() WHERE workspace_id = ");
+        query.push_bind(workspace_id);
+        query.push(" AND id = ");
+        query.push_bind(id);
+        query.push(" AND deleted_at IS NULL");
+
+        let result = query.build().execute(&self.pool).await?;
         if result.rows_affected() == 0 {
             return Ok(None);
         }
@@ -5582,6 +6066,47 @@ fn build_search_vector(
     }
 }
 
+fn row_to_index(row: &sqlx::postgres::PgRow) -> IndexMetadata {
+    let index_type: String = row.get("index_type");
+    IndexMetadata {
+        id: row.get("id"),
+        name: row.get("name"),
+        is_custom: row.get("is_custom"),
+        is_unique: row.get("is_unique"),
+        index_where_clause: row.get("index_where_clause"),
+        index_type: IndexType::parse(&index_type).unwrap_or(IndexType::Btree),
+        index_field_metadata_list: Vec::new(),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+    }
+}
+
+fn row_to_index_field(row: &sqlx::postgres::PgRow) -> IndexFieldMetadata {
+    IndexFieldMetadata {
+        id: row.get("id"),
+        field_metadata_id: row.get("field_metadata_id"),
+        order: row.get("position"),
+        sub_field_name: row.get("sub_field_name"),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+    }
+}
+
+fn row_to_file(row: &sqlx::postgres::PgRow) -> FileRecord {
+    FileRecord {
+        id: row.get("id"),
+        workspace_id: row.get("workspace_id"),
+        filename: row.get("filename"),
+        path: row.get("path"),
+        size: row.get("size"),
+        content_type: row.get("content_type"),
+        file_folder: row.get("file_folder"),
+        field_metadata_id: row.get("field_metadata_id"),
+        uploaded: row.get("uploaded"),
+        created_at: row.get("created_at"),
+    }
+}
+
 fn row_to_person(row: &sqlx::postgres::PgRow) -> Person {
     let additional: Vec<String> = row.get("additional_emails");
     let avatar_file: Option<String> = row.get("avatar_file");
@@ -5602,7 +6127,8 @@ fn row_to_person(row: &sqlx::postgres::PgRow) -> Person {
         job_title: row.get("job_title"),
         phones: parse_json(row.get("phones")),
         avatar_url: row.get("avatar_url"),
-        avatar_file: avatar_file.map(|raw| squid_core::GqlJson(parse_value(&raw))),
+        avatar_file: avatar_file
+            .and_then(|raw| serde_json::from_str::<Vec<squid_core::FileObject>>(&raw).ok()),
         position: row.get("position"),
         created_by: parse_json_option(row.get("created_by")),
         updated_by: parse_json_option(row.get("updated_by")),
@@ -5613,10 +6139,6 @@ fn row_to_person(row: &sqlx::postgres::PgRow) -> Person {
 
 fn parse_json<T: DeserializeOwned + Default>(raw: String) -> T {
     serde_json::from_str(&raw).unwrap_or_default()
-}
-
-fn parse_value(raw: &str) -> serde_json::Value {
-    serde_json::from_str(raw).unwrap_or(serde_json::Value::Null)
 }
 
 fn assert_valid_schema(schema: &str) -> anyhow::Result<()> {

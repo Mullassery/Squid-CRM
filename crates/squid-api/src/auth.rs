@@ -26,6 +26,17 @@ pub struct SigninInput {
     pub password: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct RefreshInput {
+    #[serde(rename = "refreshToken")]
+    pub refresh_token: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TokensResponse {
+    pub tokens: AuthTokenPair,
+}
+
 #[derive(Debug, Serialize)]
 pub struct AuthResponse {
     pub tokens: AuthTokenPair,
@@ -38,6 +49,7 @@ pub async fn signup(
     Json(input): Json<SignupInput>,
 ) -> AppResult<Response> {
     let email = normalize_email(&input.email)?;
+    state.auth_limiter.check(&format!("signup:{email}"))?;
     let password_hash = hash_password(&input.password)?;
 
     let display_name = input
@@ -80,6 +92,7 @@ pub async fn signin(
     Json(input): Json<SigninInput>,
 ) -> AppResult<Response> {
     let email = normalize_email(&input.email)?;
+    state.auth_limiter.check(&format!("signin:{email}"))?;
     let (user, password_hash) = state
         .db
         .find_user_by_email(&email)
@@ -113,8 +126,22 @@ pub async fn signin(
         .into_response())
 }
 
-pub async fn signout(State(state): State<AppState>, headers: HeaderMap) -> AppResult<Response> {
-    if let Some(context) = resolve_auth(&state, &headers).await {
+pub async fn refresh(
+    State(state): State<AppState>,
+    Json(input): Json<RefreshInput>,
+) -> AppResult<Json<TokensResponse>> {
+    let tokens = state.renew_session(&input.refresh_token).await?;
+    Ok(Json(TokensResponse { tokens }))
+}
+
+pub async fn signout(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Option<Json<RefreshInput>>,
+) -> AppResult<Response> {
+    if let Some(Json(input)) = body {
+        let _ = state.revoke_refresh_token(&input.refresh_token).await;
+    } else if let Some(context) = resolve_auth(&state, &headers).await {
         if let Some(session_id) = context.session_id {
             let _ = state.db.delete_session(session_id).await;
         }

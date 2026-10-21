@@ -1,0 +1,3030 @@
+{
+  "generatedBy": "scripts/map-rest-routes.py",
+  "specs": {
+    "core": {
+      "source": "openapi-core.json",
+      "routes": 535,
+      "counts": {
+        "IMPLEMENTED": 42,
+        "MISSING": 493
+      },
+      "operations": [
+        {
+          "path": "/agentChatThreadParticipants",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentChatThreadParticipants",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentChatThreadParticipants",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentChatThreadParticipants",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentChatThreadParticipants/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentChatThreadParticipants/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentChatThreadParticipants/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentChatThreadParticipants/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentChatThreadParticipants/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentChatThreadParticipants/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentChatThreadParticipants/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentChatThreadParticipants/{id}/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentChatThreadTargets",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentChatThreadTargets",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentChatThreadTargets",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentChatThreadTargets",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentChatThreadTargets/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentChatThreadTargets/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentChatThreadTargets/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentChatThreadTargets/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentChatThreadTargets/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentChatThreadTargets/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentChatThreadTargets/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentChatThreadTargets/{id}/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentChatThreads",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentChatThreads",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentChatThreads",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentChatThreads",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentChatThreads/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentChatThreads/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentChatThreads/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentChatThreads/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentChatThreads/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentChatThreads/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentChatThreads/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentChatThreads/{id}/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentMessageParts",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentMessageParts",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentMessageParts",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentMessageParts",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentMessageParts/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentMessageParts/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentMessageParts/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentMessageParts/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentMessageParts/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentMessageParts/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentMessageParts/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentMessageParts/{id}/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentMessageReactions",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentMessageReactions",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentMessageReactions",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentMessageReactions",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentMessageReactions/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentMessageReactions/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentMessageReactions/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentMessageReactions/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentMessageReactions/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentMessageReactions/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentMessageReactions/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentMessageReactions/{id}/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentMessages",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentMessages",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentMessages",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentMessages",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentMessages/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentMessages/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentMessages/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentMessages/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentMessages/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentMessages/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentMessages/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentMessages/{id}/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentTurns",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentTurns",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentTurns",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentTurns",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentTurns/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentTurns/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentTurns/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentTurns/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentTurns/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentTurns/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentTurns/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/agentTurns/{id}/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/attachments",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/attachments",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/attachments",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/attachments",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/attachments/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/attachments/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/attachments/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/attachments/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/attachments/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/attachments/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/attachments/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/attachments/{id}/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/agentChatThreadParticipants",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/agentChatThreadTargets",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/agentChatThreads",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/agentMessageParts",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/agentMessageReactions",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/agentMessages",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/agentTurns",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/attachments",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/blocklists",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/calendarChannelEventAssociations",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/calendarEventParticipants",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/calendarEventTargets",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/calendarEvents",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/callRecordings",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/campaignDeliveries",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/companies",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/dashboards",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/messageCampaigns",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/messageChannelMessageAssociationMessageFolders",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/messageChannelMessageAssociations",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/messageListMembers",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/messageLists",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/messageParticipants",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/messageSuppressions",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/messageThreadTargets",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/messageThreads",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/messages",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/noteTargets",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/notes",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/opportunities",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/people",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/recordShares",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/shortLinks",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/taskTargets",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/tasks",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/timelineActivities",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/workflowAutomatedTriggers",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/workflowRuns",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/workflowVersions",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/workflows",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/batch/workspaceMembers",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/blocklists",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/blocklists",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/blocklists",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/blocklists",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/blocklists/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/blocklists/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/blocklists/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/blocklists/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/blocklists/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/blocklists/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/blocklists/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/blocklists/{id}/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarChannelEventAssociations",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarChannelEventAssociations",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarChannelEventAssociations",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarChannelEventAssociations",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarChannelEventAssociations/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarChannelEventAssociations/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarChannelEventAssociations/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarChannelEventAssociations/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarChannelEventAssociations/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarChannelEventAssociations/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarChannelEventAssociations/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarChannelEventAssociations/{id}/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarEventParticipants",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarEventParticipants",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarEventParticipants",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarEventParticipants",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarEventParticipants/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarEventParticipants/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarEventParticipants/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarEventParticipants/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarEventParticipants/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarEventParticipants/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarEventParticipants/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarEventParticipants/{id}/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarEventTargets",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarEventTargets",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarEventTargets",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarEventTargets",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarEventTargets/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarEventTargets/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarEventTargets/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarEventTargets/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarEventTargets/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarEventTargets/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarEventTargets/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarEventTargets/{id}/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarEvents",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarEvents",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarEvents",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarEvents",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarEvents/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarEvents/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarEvents/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarEvents/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarEvents/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarEvents/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarEvents/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/calendarEvents/{id}/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/callRecordings",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/callRecordings",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/callRecordings",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/callRecordings",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/callRecordings/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/callRecordings/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/callRecordings/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/callRecordings/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/callRecordings/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/callRecordings/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/callRecordings/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/callRecordings/{id}/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/campaignDeliveries",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/campaignDeliveries",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/campaignDeliveries",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/campaignDeliveries",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/campaignDeliveries/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/campaignDeliveries/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/campaignDeliveries/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/campaignDeliveries/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/campaignDeliveries/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/campaignDeliveries/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/campaignDeliveries/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/campaignDeliveries/{id}/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/companies",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/companies",
+          "method": "get",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/companies",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/companies",
+          "method": "post",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/companies/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/companies/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/companies/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/companies/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/companies/{id}",
+          "method": "delete",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/companies/{id}",
+          "method": "get",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/companies/{id}",
+          "method": "patch",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/companies/{id}/restore",
+          "method": "patch",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/dashboards",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/dashboards",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/dashboards",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/dashboards",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/dashboards/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/dashboards/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/dashboards/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/dashboards/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/dashboards/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/dashboards/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/dashboards/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/dashboards/{id}/duplicate",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/dashboards/{id}/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageCampaigns",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageCampaigns",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageCampaigns",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageCampaigns",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageCampaigns/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageCampaigns/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageCampaigns/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageCampaigns/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageCampaigns/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageCampaigns/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageCampaigns/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageCampaigns/{id}/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageChannelMessageAssociationMessageFolders",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageChannelMessageAssociationMessageFolders",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageChannelMessageAssociationMessageFolders",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageChannelMessageAssociationMessageFolders",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageChannelMessageAssociationMessageFolders/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageChannelMessageAssociationMessageFolders/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageChannelMessageAssociationMessageFolders/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageChannelMessageAssociationMessageFolders/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageChannelMessageAssociationMessageFolders/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageChannelMessageAssociationMessageFolders/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageChannelMessageAssociationMessageFolders/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageChannelMessageAssociationMessageFolders/{id}/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageChannelMessageAssociations",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageChannelMessageAssociations",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageChannelMessageAssociations",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageChannelMessageAssociations",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageChannelMessageAssociations/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageChannelMessageAssociations/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageChannelMessageAssociations/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageChannelMessageAssociations/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageChannelMessageAssociations/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageChannelMessageAssociations/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageChannelMessageAssociations/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageChannelMessageAssociations/{id}/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageListMembers",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageListMembers",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageListMembers",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageListMembers",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageListMembers/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageListMembers/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageListMembers/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageListMembers/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageListMembers/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageListMembers/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageListMembers/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageListMembers/{id}/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageLists",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageLists",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageLists",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageLists",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageLists/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageLists/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageLists/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageLists/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageLists/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageLists/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageLists/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageLists/{id}/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageParticipants",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageParticipants",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageParticipants",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageParticipants",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageParticipants/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageParticipants/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageParticipants/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageParticipants/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageParticipants/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageParticipants/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageParticipants/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageParticipants/{id}/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageSuppressions",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageSuppressions",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageSuppressions",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageSuppressions",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageSuppressions/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageSuppressions/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageSuppressions/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageSuppressions/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageSuppressions/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageSuppressions/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageSuppressions/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageSuppressions/{id}/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageThreadTargets",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageThreadTargets",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageThreadTargets",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageThreadTargets",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageThreadTargets/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageThreadTargets/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageThreadTargets/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageThreadTargets/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageThreadTargets/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageThreadTargets/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageThreadTargets/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageThreadTargets/{id}/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageThreads",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageThreads",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageThreads",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageThreads",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageThreads/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageThreads/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageThreads/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageThreads/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageThreads/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageThreads/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageThreads/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messageThreads/{id}/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messages",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messages",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messages",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messages",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messages/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messages/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messages/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messages/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messages/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messages/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messages/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/messages/{id}/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/noteTargets",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/noteTargets",
+          "method": "get",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/noteTargets",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/noteTargets",
+          "method": "post",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/noteTargets/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/noteTargets/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/noteTargets/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/noteTargets/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/noteTargets/{id}",
+          "method": "delete",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/noteTargets/{id}",
+          "method": "get",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/noteTargets/{id}",
+          "method": "patch",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/noteTargets/{id}/restore",
+          "method": "patch",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/notes",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/notes",
+          "method": "get",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/notes",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/notes",
+          "method": "post",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/notes/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/notes/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/notes/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/notes/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/notes/{id}",
+          "method": "delete",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/notes/{id}",
+          "method": "get",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/notes/{id}",
+          "method": "patch",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/notes/{id}/restore",
+          "method": "patch",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/open-api/core",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/opportunities",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/opportunities",
+          "method": "get",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/opportunities",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/opportunities",
+          "method": "post",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/opportunities/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/opportunities/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/opportunities/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/opportunities/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/opportunities/{id}",
+          "method": "delete",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/opportunities/{id}",
+          "method": "get",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/opportunities/{id}",
+          "method": "patch",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/opportunities/{id}/restore",
+          "method": "patch",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/people",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/people",
+          "method": "get",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/people",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/people",
+          "method": "post",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/people/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/people/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/people/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/people/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/people/{id}",
+          "method": "delete",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/people/{id}",
+          "method": "get",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/people/{id}",
+          "method": "patch",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/people/{id}/restore",
+          "method": "patch",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/recordShares",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/recordShares",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/recordShares",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/recordShares",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/recordShares/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/recordShares/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/recordShares/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/recordShares/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/recordShares/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/recordShares/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/recordShares/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/recordShares/{id}/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/shortLinks",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/shortLinks",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/shortLinks",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/shortLinks",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/shortLinks/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/shortLinks/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/shortLinks/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/shortLinks/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/shortLinks/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/shortLinks/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/shortLinks/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/shortLinks/{id}/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/taskTargets",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/taskTargets",
+          "method": "get",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/taskTargets",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/taskTargets",
+          "method": "post",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/taskTargets/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/taskTargets/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/taskTargets/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/taskTargets/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/taskTargets/{id}",
+          "method": "delete",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/taskTargets/{id}",
+          "method": "get",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/taskTargets/{id}",
+          "method": "patch",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/taskTargets/{id}/restore",
+          "method": "patch",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/tasks",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/tasks",
+          "method": "get",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/tasks",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/tasks",
+          "method": "post",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/tasks/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/tasks/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/tasks/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/tasks/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/tasks/{id}",
+          "method": "delete",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/tasks/{id}",
+          "method": "get",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/tasks/{id}",
+          "method": "patch",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/tasks/{id}/restore",
+          "method": "patch",
+          "status": "IMPLEMENTED"
+        },
+        {
+          "path": "/timelineActivities",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/timelineActivities",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/timelineActivities",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/timelineActivities",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/timelineActivities/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/timelineActivities/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/timelineActivities/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/timelineActivities/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/timelineActivities/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/timelineActivities/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/timelineActivities/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/timelineActivities/{id}/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflowAutomatedTriggers",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflowAutomatedTriggers",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflowAutomatedTriggers",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflowAutomatedTriggers",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflowAutomatedTriggers/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflowAutomatedTriggers/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflowAutomatedTriggers/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflowAutomatedTriggers/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflowAutomatedTriggers/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflowAutomatedTriggers/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflowAutomatedTriggers/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflowAutomatedTriggers/{id}/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflowRuns",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflowRuns",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflowRuns",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflowRuns",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflowRuns/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflowRuns/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflowRuns/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflowRuns/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflowRuns/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflowRuns/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflowRuns/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflowRuns/{id}/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflowVersions",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflowVersions",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflowVersions",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflowVersions",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflowVersions/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflowVersions/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflowVersions/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflowVersions/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflowVersions/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflowVersions/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflowVersions/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflowVersions/{id}/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflows",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflows",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflows",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflows",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflows/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflows/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflows/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflows/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflows/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflows/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflows/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workflows/{id}/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workspaceMembers",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workspaceMembers",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workspaceMembers",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workspaceMembers",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workspaceMembers/duplicates",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workspaceMembers/groupBy",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workspaceMembers/merge",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workspaceMembers/restore",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workspaceMembers/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workspaceMembers/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workspaceMembers/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/workspaceMembers/{id}/restore",
+          "method": "patch",
+          "status": "MISSING"
+        }
+      ]
+    },
+    "metadata": {
+      "source": "openapi-metadata.json",
+      "routes": 66,
+      "counts": {
+        "IMPLEMENTED": 0,
+        "MISSING": 66
+      },
+      "operations": [
+        {
+          "path": "/apiKeys",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/apiKeys",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/apiKeys/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/apiKeys/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/apiKeys/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/fields",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/fields",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/fields/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/fields/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/fields/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/objects",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/objects",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/objects/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/objects/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/objects/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/open-api/metadata",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/pageLayoutTabs",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/pageLayoutTabs",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/pageLayoutTabs/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/pageLayoutTabs/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/pageLayoutTabs/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/pageLayoutWidgets",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/pageLayoutWidgets",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/pageLayoutWidgets/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/pageLayoutWidgets/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/pageLayoutWidgets/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/pageLayouts",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/pageLayouts",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/pageLayouts/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/pageLayouts/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/pageLayouts/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/viewFields",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/viewFields",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/viewFields/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/viewFields/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/viewFields/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/viewFilterGroups",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/viewFilterGroups",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/viewFilterGroups/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/viewFilterGroups/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/viewFilterGroups/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/viewFilters",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/viewFilters",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/viewFilters/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/viewFilters/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/viewFilters/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/viewGroups",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/viewGroups",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/viewGroups/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/viewGroups/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/viewGroups/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/viewSorts",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/viewSorts",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/viewSorts/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/viewSorts/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/viewSorts/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/views",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/views",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/views/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/views/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/views/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        },
+        {
+          "path": "/webhooks",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/webhooks",
+          "method": "post",
+          "status": "MISSING"
+        },
+        {
+          "path": "/webhooks/{id}",
+          "method": "delete",
+          "status": "MISSING"
+        },
+        {
+          "path": "/webhooks/{id}",
+          "method": "get",
+          "status": "MISSING"
+        },
+        {
+          "path": "/webhooks/{id}",
+          "method": "patch",
+          "status": "MISSING"
+        }
+      ]
+    }
+  }
+}

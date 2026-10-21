@@ -156,6 +156,12 @@ def main():
             "accessOrWorkspaceAgnosticToken"
         ]["token"]
 
+        gql(
+            f"{base}/metadata",
+            "mutation { activateWorkspace(data: {}) { id } }",
+            token=access,
+        )
+
     summary = {
         "tag": args.tag,
         "baseUrl": base,

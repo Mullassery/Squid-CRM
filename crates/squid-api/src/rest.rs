@@ -17,7 +17,7 @@ use serde_json::json;
 use squid_core::{
     AppError, AppResult, Company, CreateCompanyInput, CreateNoteInput, CreateNoteTargetInput,
     CreateOpportunityInput, CreatePersonInput, CreateTaskInput, CreateTaskTargetInput, DateOp,
-    FilterExpr, FindManyResponse, Note, NoteTarget, Opportunity, PageInfo, Person, StringOp, Task,
+    FilterExpr, FindManyResponse, Note, NoteTarget, Opportunity, PageInfo, StringOp, Task,
     TaskTarget, UpdateCompanyInput, UpdateNoteInput, UpdateNoteTargetInput, UpdateOpportunityInput,
     UpdatePersonInput, UpdateTaskInput, UpdateTaskTargetInput, UuidOp,
 };
@@ -33,7 +33,150 @@ use crate::sorting::{
     company_value, note_target_value, note_value, opportunity_value, task_target_value, task_value,
     SortTerm,
 };
-use crate::{resolve_auth, AppState};
+use crate::{resolve_auth_with_policy, AppState};
+
+#[derive(Debug, Default, Deserialize)]
+pub struct ResponseShape {
+    pub depth: Option<i32>,
+    pub fields: Option<String>,
+}
+
+impl ResponseShape {
+    fn validate(&self) -> AppResult<()> {
+        if !matches!(self.depth, None | Some(0) | Some(1)) {
+            return Err(AppError::BadRequest(format!(
+                "'depth={}' parameter invalid. Allowed values are 0, 1",
+                self.depth.unwrap_or_default()
+            )));
+        }
+        Ok(())
+    }
+
+    fn project(
+        &self,
+        value: &mut serde_json::Value,
+        object_name: &str,
+        allowed: &[&str],
+    ) -> AppResult<()> {
+        let Some(fields) = self.fields.as_deref() else {
+            return Ok(());
+        };
+        let requested: Vec<&str> = fields
+            .split(',')
+            .map(str::trim)
+            .filter(|field| !field.is_empty())
+            .collect();
+        let unknown: Vec<&str> = requested
+            .iter()
+            .copied()
+            .filter(|field| !allowed.contains(field))
+            .collect();
+        if !unknown.is_empty() {
+            return Err(AppError::BadRequest(format!(
+                "'fields' parameter invalid. Unknown or unreadable fields on '{object_name}': {}",
+                unknown.join(", ")
+            )));
+        }
+        let Some(object) = value.as_object_mut() else {
+            return Ok(());
+        };
+        object.retain(|key, _| key == "id" || requested.contains(&key.as_str()));
+        Ok(())
+    }
+
+    fn project_array(
+        &self,
+        value: &mut serde_json::Value,
+        object_name: &str,
+        allowed: &[&str],
+    ) -> AppResult<()> {
+        if let Some(items) = value.as_array_mut() {
+            for item in items {
+                self.project(item, object_name, allowed)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+const PERSON_FIELDS: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "name",
+    "emails",
+    "linkedinLink",
+    "jobTitle",
+    "phones",
+    "avatarUrl",
+    "avatarFile",
+    "position",
+    "createdBy",
+    "updatedBy",
+    "searchVector",
+    "companyId",
+];
+const COMPANY_FIELDS: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "name",
+    "domainName",
+    "address",
+    "linkedinLink",
+    "annualRevenue",
+    "position",
+    "createdBy",
+    "updatedBy",
+    "searchVector",
+    "accountOwnerId",
+];
+const OPPORTUNITY_FIELDS: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "name",
+    "amount",
+    "closeDate",
+    "stage",
+    "position",
+    "createdBy",
+    "updatedBy",
+    "searchVector",
+    "companyId",
+    "pointOfContactId",
+    "ownerId",
+];
+const TASK_FIELDS: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "position",
+    "title",
+    "bodyV2",
+    "dueAt",
+    "status",
+    "createdBy",
+    "updatedBy",
+    "searchVector",
+    "assigneeId",
+];
+const NOTE_FIELDS: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "position",
+    "title",
+    "bodyV2",
+    "createdBy",
+    "updatedBy",
+    "searchVector",
+];
 
 #[derive(Debug, Deserialize)]
 pub struct ListPeopleParams {
@@ -43,6 +186,8 @@ pub struct ListPeopleParams {
     pub ending_before: Option<String>,
     pub order_by: Option<String>,
     pub filter: Option<String>,
+    #[serde(flatten)]
+    pub shape: ResponseShape,
 }
 
 #[derive(Debug, Deserialize)]
@@ -126,12 +271,66 @@ pub async fn healthz() -> &'static str {
     "ok"
 }
 
+fn map_person_error(error: anyhow::Error) -> AppError {
+    let message = error.to_string();
+    if message.starts_with("File not found:") {
+        AppError::BadRequest(message)
+    } else {
+        AppError::Internal(error)
+    }
+}
+
+pub async fn upload_file(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    body: axum::body::Bytes,
+) -> AppResult<axum::http::StatusCode> {
+    let stored = state
+        .db
+        .store_file_content(id, &body)
+        .await
+        .map_err(AppError::Internal)?;
+    if stored {
+        Ok(axum::http::StatusCode::NO_CONTENT)
+    } else {
+        Err(AppError::NotFound("File not found".to_string()))
+    }
+}
+
+pub async fn download_file(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> AppResult<axum::response::Response> {
+    use axum::response::IntoResponse;
+
+    let Some((file, content)) = state
+        .db
+        .file_content(id)
+        .await
+        .map_err(AppError::Internal)?
+    else {
+        return Err(AppError::NotFound("File not found".to_string()));
+    };
+    Ok((
+        [
+            (axum::http::header::CONTENT_TYPE, file.content_type.clone()),
+            (
+                axum::http::header::CONTENT_DISPOSITION,
+                format!("inline; filename=\"{}\"", file.filename),
+            ),
+        ],
+        content,
+    )
+        .into_response())
+}
+
 pub async fn list_people(
     State(state): State<AppState>,
     headers: HeaderMap,
     Query(params): Query<ListPeopleParams>,
-) -> AppResult<Json<FindManyResponse<Person>>> {
+) -> AppResult<Json<serde_json::Value>> {
     let auth = require(&state, &headers).await?;
+    params.shape.validate()?;
 
     let limit = params
         .limit
@@ -171,7 +370,7 @@ pub async fn list_people(
     let mut data = BTreeMap::new();
     data.insert("people".to_string(), page.persons);
 
-    Ok(Json(FindManyResponse {
+    let mut body = serde_json::to_value(FindManyResponse {
         data,
         total_count: page.total.max(0) as u64,
         page_info: PageInfo {
@@ -180,15 +379,22 @@ pub async fn list_people(
             start_cursor,
             end_cursor,
         },
-    }))
+    })
+    .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
+    params
+        .shape
+        .project_array(&mut body["data"]["people"], "person", PERSON_FIELDS)?;
+    Ok(Json(body))
 }
 
 pub async fn get_person(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<Uuid>,
+    Query(shape): Query<ResponseShape>,
 ) -> AppResult<Json<serde_json::Value>> {
     let auth = require(&state, &headers).await?;
+    shape.validate()?;
 
     let person = state
         .db
@@ -197,45 +403,52 @@ pub async fn get_person(
         .map_err(AppError::Internal)?
         .ok_or_else(|| AppError::NotFound("Record not found".to_string()))?;
 
-    Ok(Json(json!({ "data": { "person": person } })))
+    let mut body = json!({ "data": { "person": person } });
+    shape.project(&mut body["data"]["person"], "person", PERSON_FIELDS)?;
+    Ok(Json(body))
 }
 
 pub async fn create_person(
     State(state): State<AppState>,
     headers: HeaderMap,
+    Query(shape): Query<ResponseShape>,
     Json(input): Json<CreatePersonInput>,
 ) -> AppResult<(axum::http::StatusCode, Json<serde_json::Value>)> {
     let auth = require(&state, &headers).await?;
+    shape.validate()?;
     validate_person(&input)?;
 
     let person = state
         .db
         .create_person(auth.workspace_id, &input)
         .await
-        .map_err(AppError::Internal)?;
+        .map_err(map_person_error)?;
 
-    Ok((
-        axum::http::StatusCode::CREATED,
-        Json(json!({ "data": { "createPerson": person } })),
-    ))
+    let mut body = json!({ "data": { "createPerson": person } });
+    shape.project(&mut body["data"]["createPerson"], "person", PERSON_FIELDS)?;
+    Ok((axum::http::StatusCode::CREATED, Json(body)))
 }
 
 pub async fn update_person(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<Uuid>,
+    Query(shape): Query<ResponseShape>,
     Json(input): Json<UpdatePersonInput>,
 ) -> AppResult<Json<serde_json::Value>> {
     let auth = require(&state, &headers).await?;
+    shape.validate()?;
 
     let person = state
         .db
         .update_person(auth.workspace_id, id, &input)
         .await
-        .map_err(AppError::Internal)?
+        .map_err(map_person_error)?
         .ok_or_else(|| AppError::NotFound("Record not found".to_string()))?;
 
-    Ok(Json(json!({ "data": { "updatePerson": person } })))
+    let mut body = json!({ "data": { "updatePerson": person } });
+    shape.project(&mut body["data"]["updatePerson"], "person", PERSON_FIELDS)?;
+    Ok(Json(body))
 }
 
 pub async fn delete_person(
@@ -271,8 +484,10 @@ pub async fn restore_person(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<Uuid>,
+    Query(shape): Query<ResponseShape>,
 ) -> AppResult<Json<serde_json::Value>> {
     let auth = require(&state, &headers).await?;
+    shape.validate()?;
 
     let person = state
         .db
@@ -281,7 +496,9 @@ pub async fn restore_person(
         .map_err(AppError::Internal)?
         .ok_or_else(|| AppError::NotFound("Record not found".to_string()))?;
 
-    Ok(Json(json!({ "data": { "restorePerson": person } })))
+    let mut body = json!({ "data": { "restorePerson": person } });
+    shape.project(&mut body["data"]["restorePerson"], "person", PERSON_FIELDS)?;
+    Ok(Json(body))
 }
 
 #[derive(Debug, Deserialize)]
@@ -292,14 +509,17 @@ pub struct ListCompaniesParams {
     pub ending_before: Option<String>,
     pub order_by: Option<String>,
     pub filter: Option<String>,
+    #[serde(flatten)]
+    pub shape: ResponseShape,
 }
 
 pub async fn list_companies(
     State(state): State<AppState>,
     headers: HeaderMap,
     Query(params): Query<ListCompaniesParams>,
-) -> AppResult<Json<FindManyResponse<Company>>> {
+) -> AppResult<Json<serde_json::Value>> {
     let auth = require(&state, &headers).await?;
+    params.shape.validate()?;
     let filter = params
         .filter
         .as_deref()
@@ -388,7 +608,7 @@ pub async fn list_companies(
     let mut data = BTreeMap::new();
     data.insert("companies".to_string(), page);
 
-    Ok(Json(FindManyResponse {
+    let mut body = serde_json::to_value(FindManyResponse {
         data,
         total_count: total.max(0) as u64,
         page_info: PageInfo {
@@ -397,55 +617,79 @@ pub async fn list_companies(
             start_cursor,
             end_cursor,
         },
-    }))
+    })
+    .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
+    params.shape.project_array(
+        &mut body["data"]["companies"],
+        "<class 'object'>",
+        COMPANY_FIELDS,
+    )?;
+    Ok(Json(body))
 }
 
 pub async fn get_company(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<Uuid>,
+    Query(shape): Query<ResponseShape>,
 ) -> AppResult<Json<serde_json::Value>> {
     let auth = require(&state, &headers).await?;
+    shape.validate()?;
     let company = state
         .db
         .get_company(auth.workspace_id, id)
         .await
         .map_err(AppError::Internal)?
         .ok_or_else(|| AppError::NotFound("Record not found".to_string()))?;
-    Ok(Json(json!({ "data": { "company": company } })))
+    let mut body = json!({ "data": { "company": company } });
+    shape.project(&mut body["data"]["company"], "company", COMPANY_FIELDS)?;
+    Ok(Json(body))
 }
 
 pub async fn create_company(
     State(state): State<AppState>,
     headers: HeaderMap,
+    Query(shape): Query<ResponseShape>,
     Json(input): Json<CreateCompanyInput>,
 ) -> AppResult<(axum::http::StatusCode, Json<serde_json::Value>)> {
     let auth = require(&state, &headers).await?;
+    shape.validate()?;
     let company = state
         .db
         .create_company(auth.workspace_id, &input)
         .await
         .map_err(AppError::Internal)?;
-    Ok((
-        axum::http::StatusCode::CREATED,
-        Json(json!({ "data": { "createCompany": company } })),
-    ))
+    let mut body = json!({ "data": { "createCompany": company } });
+    shape.project(
+        &mut body["data"]["createCompany"],
+        "company",
+        COMPANY_FIELDS,
+    )?;
+    Ok((axum::http::StatusCode::CREATED, Json(body)))
 }
 
 pub async fn update_company(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<Uuid>,
+    Query(shape): Query<ResponseShape>,
     Json(input): Json<UpdateCompanyInput>,
 ) -> AppResult<Json<serde_json::Value>> {
     let auth = require(&state, &headers).await?;
+    shape.validate()?;
     let company = state
         .db
         .update_company(auth.workspace_id, id, &input)
         .await
         .map_err(AppError::Internal)?
         .ok_or_else(|| AppError::NotFound("Record not found".to_string()))?;
-    Ok(Json(json!({ "data": { "updateCompany": company } })))
+    let mut body = json!({ "data": { "updateCompany": company } });
+    shape.project(
+        &mut body["data"]["updateCompany"],
+        "company",
+        COMPANY_FIELDS,
+    )?;
+    Ok(Json(body))
 }
 
 pub async fn delete_company(
@@ -478,15 +722,23 @@ pub async fn restore_company(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<Uuid>,
+    Query(shape): Query<ResponseShape>,
 ) -> AppResult<Json<serde_json::Value>> {
     let auth = require(&state, &headers).await?;
+    shape.validate()?;
     let company = state
         .db
         .restore_company(auth.workspace_id, id)
         .await
         .map_err(AppError::Internal)?
         .ok_or_else(|| AppError::NotFound("Record not found".to_string()))?;
-    Ok(Json(json!({ "data": { "restoreCompany": company } })))
+    let mut body = json!({ "data": { "restoreCompany": company } });
+    shape.project(
+        &mut body["data"]["restoreCompany"],
+        "company",
+        COMPANY_FIELDS,
+    )?;
+    Ok(Json(body))
 }
 
 #[derive(Debug, Deserialize)]
@@ -497,14 +749,17 @@ pub struct ListOpportunitiesParams {
     pub ending_before: Option<String>,
     pub order_by: Option<String>,
     pub filter: Option<String>,
+    #[serde(flatten)]
+    pub shape: ResponseShape,
 }
 
 pub async fn list_opportunities(
     State(state): State<AppState>,
     headers: HeaderMap,
     Query(params): Query<ListOpportunitiesParams>,
-) -> AppResult<Json<FindManyResponse<Opportunity>>> {
+) -> AppResult<Json<serde_json::Value>> {
     let auth = require(&state, &headers).await?;
+    params.shape.validate()?;
     let filter = params
         .filter
         .as_deref()
@@ -602,7 +857,7 @@ pub async fn list_opportunities(
     let mut data = BTreeMap::new();
     data.insert("opportunities".to_string(), page);
 
-    Ok(Json(FindManyResponse {
+    let mut body = serde_json::to_value(FindManyResponse {
         data,
         total_count: total.max(0) as u64,
         page_info: PageInfo {
@@ -611,57 +866,83 @@ pub async fn list_opportunities(
             start_cursor,
             end_cursor,
         },
-    }))
+    })
+    .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
+    params.shape.project_array(
+        &mut body["data"]["opportunities"],
+        "<class 'object'>",
+        OPPORTUNITY_FIELDS,
+    )?;
+    Ok(Json(body))
 }
 
 pub async fn get_opportunity(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<Uuid>,
+    Query(shape): Query<ResponseShape>,
 ) -> AppResult<Json<serde_json::Value>> {
     let auth = require(&state, &headers).await?;
+    shape.validate()?;
     let opportunity = state
         .db
         .get_opportunity(auth.workspace_id, id)
         .await
         .map_err(AppError::Internal)?
         .ok_or_else(|| AppError::NotFound("Record not found".to_string()))?;
-    Ok(Json(json!({ "data": { "opportunity": opportunity } })))
+    let mut body = json!({ "data": { "opportunity": opportunity } });
+    shape.project(
+        &mut body["data"]["opportunity"],
+        "opportunity",
+        OPPORTUNITY_FIELDS,
+    )?;
+    Ok(Json(body))
 }
 
 pub async fn create_opportunity(
     State(state): State<AppState>,
     headers: HeaderMap,
+    Query(shape): Query<ResponseShape>,
     Json(input): Json<CreateOpportunityInput>,
 ) -> AppResult<(axum::http::StatusCode, Json<serde_json::Value>)> {
     let auth = require(&state, &headers).await?;
+    shape.validate()?;
     let opportunity = state
         .db
         .create_opportunity(auth.workspace_id, &input)
         .await
         .map_err(AppError::Internal)?;
-    Ok((
-        axum::http::StatusCode::CREATED,
-        Json(json!({ "data": { "createOpportunity": opportunity } })),
-    ))
+    let mut body = json!({ "data": { "createOpportunity": opportunity } });
+    shape.project(
+        &mut body["data"]["createOpportunity"],
+        "opportunity",
+        OPPORTUNITY_FIELDS,
+    )?;
+    Ok((axum::http::StatusCode::CREATED, Json(body)))
 }
 
 pub async fn update_opportunity(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<Uuid>,
+    Query(shape): Query<ResponseShape>,
     Json(input): Json<UpdateOpportunityInput>,
 ) -> AppResult<Json<serde_json::Value>> {
     let auth = require(&state, &headers).await?;
+    shape.validate()?;
     let opportunity = state
         .db
         .update_opportunity(auth.workspace_id, id, &input)
         .await
         .map_err(AppError::Internal)?
         .ok_or_else(|| AppError::NotFound("Record not found".to_string()))?;
-    Ok(Json(
-        json!({ "data": { "updateOpportunity": opportunity } }),
-    ))
+    let mut body = json!({ "data": { "updateOpportunity": opportunity } });
+    shape.project(
+        &mut body["data"]["updateOpportunity"],
+        "opportunity",
+        OPPORTUNITY_FIELDS,
+    )?;
+    Ok(Json(body))
 }
 
 pub async fn delete_opportunity(
@@ -696,25 +977,32 @@ pub async fn restore_opportunity(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<Uuid>,
+    Query(shape): Query<ResponseShape>,
 ) -> AppResult<Json<serde_json::Value>> {
     let auth = require(&state, &headers).await?;
+    shape.validate()?;
     let opportunity = state
         .db
         .restore_opportunity(auth.workspace_id, id)
         .await
         .map_err(AppError::Internal)?
         .ok_or_else(|| AppError::NotFound("Record not found".to_string()))?;
-    Ok(Json(
-        json!({ "data": { "restoreOpportunity": opportunity } }),
-    ))
+    let mut body = json!({ "data": { "restoreOpportunity": opportunity } });
+    shape.project(
+        &mut body["data"]["restoreOpportunity"],
+        "opportunity",
+        OPPORTUNITY_FIELDS,
+    )?;
+    Ok(Json(body))
 }
 
 pub async fn list_tasks(
     State(state): State<AppState>,
     headers: HeaderMap,
     Query(params): Query<ListOpportunitiesParams>,
-) -> AppResult<Json<FindManyResponse<Task>>> {
+) -> AppResult<Json<serde_json::Value>> {
     let auth = require(&state, &headers).await?;
+    params.shape.validate()?;
     let filter = params
         .filter
         .as_deref()
@@ -799,7 +1087,7 @@ pub async fn list_tasks(
 
     let mut data = BTreeMap::new();
     data.insert("tasks".to_string(), page);
-    Ok(Json(FindManyResponse {
+    let mut body = serde_json::to_value(FindManyResponse {
         data,
         total_count: total.max(0) as u64,
         page_info: PageInfo {
@@ -808,55 +1096,69 @@ pub async fn list_tasks(
             start_cursor,
             end_cursor,
         },
-    }))
+    })
+    .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
+    params
+        .shape
+        .project_array(&mut body["data"]["tasks"], "task", TASK_FIELDS)?;
+    Ok(Json(body))
 }
 
 pub async fn get_task(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<Uuid>,
+    Query(shape): Query<ResponseShape>,
 ) -> AppResult<Json<serde_json::Value>> {
     let auth = require(&state, &headers).await?;
+    shape.validate()?;
     let task = state
         .db
         .get_task(auth.workspace_id, id)
         .await
         .map_err(AppError::Internal)?
         .ok_or_else(|| AppError::NotFound("Record not found".to_string()))?;
-    Ok(Json(json!({ "data": { "task": task } })))
+    let mut body = json!({ "data": { "task": task } });
+    shape.project(&mut body["data"]["task"], "task", TASK_FIELDS)?;
+    Ok(Json(body))
 }
 
 pub async fn create_task(
     State(state): State<AppState>,
     headers: HeaderMap,
+    Query(shape): Query<ResponseShape>,
     Json(input): Json<CreateTaskInput>,
 ) -> AppResult<(axum::http::StatusCode, Json<serde_json::Value>)> {
     let auth = require(&state, &headers).await?;
+    shape.validate()?;
     let task = state
         .db
         .create_task(auth.workspace_id, &input)
         .await
         .map_err(AppError::Internal)?;
-    Ok((
-        axum::http::StatusCode::CREATED,
-        Json(json!({ "data": { "createTask": task } })),
-    ))
+    let mut body = json!({ "data": { "createTask": task } });
+    shape.project(&mut body["data"]["createTask"], "task", TASK_FIELDS)?;
+    Ok((axum::http::StatusCode::CREATED, Json(body)))
 }
 
 pub async fn update_task(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<Uuid>,
+    Query(shape): Query<ResponseShape>,
     Json(input): Json<UpdateTaskInput>,
 ) -> AppResult<Json<serde_json::Value>> {
     let auth = require(&state, &headers).await?;
+    shape.validate()?;
     let task = state
         .db
         .update_task(auth.workspace_id, id, &input)
         .await
         .map_err(AppError::Internal)?
         .ok_or_else(|| AppError::NotFound("Record not found".to_string()))?;
-    Ok(Json(json!({ "data": { "updateTask": task } })))
+    let mut body = json!({ "data": { "updateTask": task } });
+    shape.project(&mut body["data"]["updateTask"], "task", TASK_FIELDS)?;
+    Ok(Json(body))
 }
 
 pub async fn delete_task(
@@ -889,23 +1191,28 @@ pub async fn restore_task(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<Uuid>,
+    Query(shape): Query<ResponseShape>,
 ) -> AppResult<Json<serde_json::Value>> {
     let auth = require(&state, &headers).await?;
+    shape.validate()?;
     let task = state
         .db
         .restore_task(auth.workspace_id, id)
         .await
         .map_err(AppError::Internal)?
         .ok_or_else(|| AppError::NotFound("Record not found".to_string()))?;
-    Ok(Json(json!({ "data": { "restoreTask": task } })))
+    let mut body = json!({ "data": { "restoreTask": task } });
+    shape.project(&mut body["data"]["restoreTask"], "task", TASK_FIELDS)?;
+    Ok(Json(body))
 }
 
 pub async fn list_notes(
     State(state): State<AppState>,
     headers: HeaderMap,
     Query(params): Query<ListOpportunitiesParams>,
-) -> AppResult<Json<FindManyResponse<Note>>> {
+) -> AppResult<Json<serde_json::Value>> {
     let auth = require(&state, &headers).await?;
+    params.shape.validate()?;
     let filter = params
         .filter
         .as_deref()
@@ -984,7 +1291,7 @@ pub async fn list_notes(
 
     let mut data = BTreeMap::new();
     data.insert("notes".to_string(), page);
-    Ok(Json(FindManyResponse {
+    let mut body = serde_json::to_value(FindManyResponse {
         data,
         total_count: total.max(0) as u64,
         page_info: PageInfo {
@@ -993,55 +1300,69 @@ pub async fn list_notes(
             start_cursor,
             end_cursor,
         },
-    }))
+    })
+    .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
+    params
+        .shape
+        .project_array(&mut body["data"]["notes"], "note", NOTE_FIELDS)?;
+    Ok(Json(body))
 }
 
 pub async fn get_note(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<Uuid>,
+    Query(shape): Query<ResponseShape>,
 ) -> AppResult<Json<serde_json::Value>> {
     let auth = require(&state, &headers).await?;
+    shape.validate()?;
     let note = state
         .db
         .get_note(auth.workspace_id, id)
         .await
         .map_err(AppError::Internal)?
         .ok_or_else(|| AppError::NotFound("Record not found".to_string()))?;
-    Ok(Json(json!({ "data": { "note": note } })))
+    let mut body = json!({ "data": { "note": note } });
+    shape.project(&mut body["data"]["note"], "note", NOTE_FIELDS)?;
+    Ok(Json(body))
 }
 
 pub async fn create_note(
     State(state): State<AppState>,
     headers: HeaderMap,
+    Query(shape): Query<ResponseShape>,
     Json(input): Json<CreateNoteInput>,
 ) -> AppResult<(axum::http::StatusCode, Json<serde_json::Value>)> {
     let auth = require(&state, &headers).await?;
+    shape.validate()?;
     let note = state
         .db
         .create_note(auth.workspace_id, &input)
         .await
         .map_err(AppError::Internal)?;
-    Ok((
-        axum::http::StatusCode::CREATED,
-        Json(json!({ "data": { "createNote": note } })),
-    ))
+    let mut body = json!({ "data": { "createNote": note } });
+    shape.project(&mut body["data"]["createNote"], "note", NOTE_FIELDS)?;
+    Ok((axum::http::StatusCode::CREATED, Json(body)))
 }
 
 pub async fn update_note(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<Uuid>,
+    Query(shape): Query<ResponseShape>,
     Json(input): Json<UpdateNoteInput>,
 ) -> AppResult<Json<serde_json::Value>> {
     let auth = require(&state, &headers).await?;
+    shape.validate()?;
     let note = state
         .db
         .update_note(auth.workspace_id, id, &input)
         .await
         .map_err(AppError::Internal)?
         .ok_or_else(|| AppError::NotFound("Record not found".to_string()))?;
-    Ok(Json(json!({ "data": { "updateNote": note } })))
+    let mut body = json!({ "data": { "updateNote": note } });
+    shape.project(&mut body["data"]["updateNote"], "note", NOTE_FIELDS)?;
+    Ok(Json(body))
 }
 
 pub async fn delete_note(
@@ -1074,15 +1395,19 @@ pub async fn restore_note(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<Uuid>,
+    Query(shape): Query<ResponseShape>,
 ) -> AppResult<Json<serde_json::Value>> {
     let auth = require(&state, &headers).await?;
+    shape.validate()?;
     let note = state
         .db
         .restore_note(auth.workspace_id, id)
         .await
         .map_err(AppError::Internal)?
         .ok_or_else(|| AppError::NotFound("Record not found".to_string()))?;
-    Ok(Json(json!({ "data": { "restoreNote": note } })))
+    let mut body = json!({ "data": { "restoreNote": note } });
+    shape.project(&mut body["data"]["restoreNote"], "note", NOTE_FIELDS)?;
+    Ok(Json(body))
 }
 
 fn list_target_page<T: Clone>(
@@ -1504,7 +1829,7 @@ pub(crate) async fn require(
     state: &AppState,
     headers: &HeaderMap,
 ) -> AppResult<squid_auth::AuthContext> {
-    resolve_auth(state, headers)
+    resolve_auth_with_policy(state, headers, false)
         .await
         .ok_or_else(|| AppError::Forbidden("Missing authentication token".to_string()))
 }
@@ -1998,4 +2323,365 @@ mod tests {
         assert!(parse_order_by(Some("createdAt[BadDirection]")).is_err());
         assert!(parse_order_by(Some("-createdAt")).is_err());
     }
+}
+
+const GROUP_PERSON_FIELDS: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "name.firstName",
+    "name.lastName",
+    "emails.primaryEmail",
+    "linkedinLink.primaryLinkUrl",
+    "linkedinLink.primaryLinkLabel",
+    "jobTitle",
+    "phones.primaryPhoneNumber",
+    "phones.primaryPhoneCountryCode",
+    "phones.primaryPhoneCallingCode",
+    "avatarUrl",
+    "companyId",
+];
+const GROUP_COMPANY_FIELDS: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "name",
+    "domainName.primaryLinkUrl",
+    "domainName.primaryLinkLabel",
+    "address.addressStreet1",
+    "address.addressStreet2",
+    "address.addressCity",
+    "address.addressState",
+    "address.addressPostcode",
+    "address.addressCountry",
+    "linkedinLink.primaryLinkUrl",
+    "linkedinLink.primaryLinkLabel",
+    "annualRevenue.amountMicros",
+    "annualRevenue.currencyCode",
+    "accountOwnerId",
+];
+const GROUP_OPPORTUNITY_FIELDS: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "name",
+    "amount.amountMicros",
+    "amount.currencyCode",
+    "closeDate",
+    "stage",
+    "companyId",
+    "pointOfContactId",
+    "ownerId",
+];
+const GROUP_TASK_FIELDS: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "title",
+    "bodyV2.markdown",
+    "dueAt",
+    "status",
+    "assigneeId",
+];
+const GROUP_NOTE_FIELDS: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "title",
+    "bodyV2.markdown",
+];
+const GROUP_TASK_TARGET_FIELDS: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "taskId",
+    "targetCompanyId",
+    "targetOpportunityId",
+    "targetPersonId",
+];
+const GROUP_NOTE_TARGET_FIELDS: &[&str] = &[
+    "id",
+    "createdAt",
+    "updatedAt",
+    "deletedAt",
+    "noteId",
+    "targetCompanyId",
+    "targetOpportunityId",
+    "targetPersonId",
+];
+
+#[derive(Debug, Deserialize)]
+pub struct GroupByParams {
+    pub group_by: Option<String>,
+    pub aggregate: Option<String>,
+    pub include_records_sample: Option<bool>,
+    pub order_by_for_records: Option<String>,
+    pub limit: Option<i64>,
+    pub filter: Option<String>,
+    #[serde(rename = "viewId", alias = "view_id")]
+    pub view_id: Option<String>,
+}
+
+async fn group_by_response(
+    state: &AppState,
+    workspace_id: Uuid,
+    params: &GroupByParams,
+    object_name: &str,
+    allowed: &[&str],
+    mut records: Vec<serde_json::Value>,
+) -> AppResult<Json<serde_json::Value>> {
+    let request = crate::group_by::parse_request(
+        params.group_by.as_deref(),
+        params.aggregate.as_deref(),
+        params.include_records_sample,
+        params.order_by_for_records.as_deref(),
+        params.limit,
+        allowed,
+    )?;
+    let date_fields = crate::group_by::date_field_set();
+
+    if let Some(raw) = params.filter.as_deref() {
+        let filter = parse_generic_filter(raw, allowed)?;
+        records
+            .retain(|record| filtering::matches(&filter, &|field| group_by_value(record, field)));
+    }
+
+    if let Some(view_id) = params
+        .view_id
+        .as_deref()
+        .and_then(|id| Uuid::parse_str(id).ok())
+    {
+        if let Some(view) = state
+            .db
+            .get_view(workspace_id, view_id)
+            .await
+            .map_err(AppError::Internal)?
+        {
+            let fields = state
+                .db
+                .list_fields(workspace_id, None)
+                .await
+                .map_err(AppError::Internal)?;
+            let field_names: std::collections::HashMap<Uuid, String> = fields
+                .into_iter()
+                .filter(|field| field.object_metadata_id == view.object_metadata_id)
+                .map(|field| (field.id, field.name))
+                .collect();
+            if let Some(node) = crate::group_by::view_filter_node(&view, &field_names) {
+                records.retain(|record| crate::group_by::matches(&node, record, &date_fields));
+            }
+        }
+    }
+    let _ = object_name;
+
+    Ok(Json(serde_json::Value::Array(crate::group_by::execute(
+        &records,
+        &request,
+        &date_fields,
+    )?)))
+}
+
+fn group_by_value(record: &serde_json::Value, field: &str) -> Option<crate::sorting::SortValue> {
+    let mut value = record;
+    for part in field.split('.') {
+        value = value.get(part)?;
+    }
+    match value {
+        serde_json::Value::Null => None,
+        serde_json::Value::String(value) if value.is_empty() => None,
+        serde_json::Value::String(value) => Some(crate::sorting::SortValue::Text(value.clone())),
+        serde_json::Value::Number(value) => value.as_f64().map(crate::sorting::SortValue::Number),
+        serde_json::Value::Bool(value) => Some(crate::sorting::SortValue::Bool(*value)),
+        _ => None,
+    }
+}
+
+fn to_group_records<T: serde::Serialize>(records: &[T]) -> AppResult<Vec<serde_json::Value>> {
+    records
+        .iter()
+        .map(|record| {
+            serde_json::to_value(record).map_err(|error| AppError::Internal(anyhow::anyhow!(error)))
+        })
+        .collect()
+}
+
+async fn all_people(state: &AppState, workspace_id: Uuid) -> AppResult<Vec<serde_json::Value>> {
+    let mut records = Vec::new();
+    let mut offset = 0;
+    loop {
+        let page = state
+            .db
+            .list_persons_page(workspace_id, 1000, offset, None, None, &[], None)
+            .await
+            .map_err(AppError::Internal)?;
+        let count = page.persons.len();
+        records.extend(to_group_records(&page.persons)?);
+        if !page.has_next_page || count == 0 {
+            break;
+        }
+        offset += count as i64;
+    }
+    Ok(records)
+}
+
+pub async fn group_by_people(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<GroupByParams>,
+) -> AppResult<Json<serde_json::Value>> {
+    let auth = require(&state, &headers).await?;
+    let records = all_people(&state, auth.workspace_id).await?;
+    group_by_response(
+        &state,
+        auth.workspace_id,
+        &params,
+        "person",
+        GROUP_PERSON_FIELDS,
+        records,
+    )
+    .await
+}
+
+pub async fn group_by_companies(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<GroupByParams>,
+) -> AppResult<Json<serde_json::Value>> {
+    let auth = require(&state, &headers).await?;
+    let (companies, _) = state
+        .db
+        .list_companies(auth.workspace_id, 10_000, 0)
+        .await
+        .map_err(AppError::Internal)?;
+    let records = to_group_records(&companies)?;
+    group_by_response(
+        &state,
+        auth.workspace_id,
+        &params,
+        "company",
+        GROUP_COMPANY_FIELDS,
+        records,
+    )
+    .await
+}
+
+pub async fn group_by_opportunities(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<GroupByParams>,
+) -> AppResult<Json<serde_json::Value>> {
+    let auth = require(&state, &headers).await?;
+    let (opportunities, _) = state
+        .db
+        .list_opportunities(auth.workspace_id, 10_000, 0)
+        .await
+        .map_err(AppError::Internal)?;
+    let records = to_group_records(&opportunities)?;
+    group_by_response(
+        &state,
+        auth.workspace_id,
+        &params,
+        "opportunity",
+        GROUP_OPPORTUNITY_FIELDS,
+        records,
+    )
+    .await
+}
+
+pub async fn group_by_tasks(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<GroupByParams>,
+) -> AppResult<Json<serde_json::Value>> {
+    let auth = require(&state, &headers).await?;
+    let (tasks, _) = state
+        .db
+        .list_tasks(auth.workspace_id, 10_000, 0)
+        .await
+        .map_err(AppError::Internal)?;
+    let records = to_group_records(&tasks)?;
+    group_by_response(
+        &state,
+        auth.workspace_id,
+        &params,
+        "task",
+        GROUP_TASK_FIELDS,
+        records,
+    )
+    .await
+}
+
+pub async fn group_by_notes(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<GroupByParams>,
+) -> AppResult<Json<serde_json::Value>> {
+    let auth = require(&state, &headers).await?;
+    let (notes, _) = state
+        .db
+        .list_notes(auth.workspace_id, 10_000, 0)
+        .await
+        .map_err(AppError::Internal)?;
+    let records = to_group_records(&notes)?;
+    group_by_response(
+        &state,
+        auth.workspace_id,
+        &params,
+        "note",
+        GROUP_NOTE_FIELDS,
+        records,
+    )
+    .await
+}
+
+pub async fn group_by_task_targets(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<GroupByParams>,
+) -> AppResult<Json<serde_json::Value>> {
+    let auth = require(&state, &headers).await?;
+    let targets = state
+        .db
+        .list_task_targets(auth.workspace_id, None, None, None, None)
+        .await
+        .map_err(AppError::Internal)?;
+    let records = to_group_records(&targets)?;
+    group_by_response(
+        &state,
+        auth.workspace_id,
+        &params,
+        "taskTarget",
+        GROUP_TASK_TARGET_FIELDS,
+        records,
+    )
+    .await
+}
+
+pub async fn group_by_note_targets(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<GroupByParams>,
+) -> AppResult<Json<serde_json::Value>> {
+    let auth = require(&state, &headers).await?;
+    let targets = state
+        .db
+        .list_note_targets(auth.workspace_id, None, None, None, None)
+        .await
+        .map_err(AppError::Internal)?;
+    let records = to_group_records(&targets)?;
+    group_by_response(
+        &state,
+        auth.workspace_id,
+        &params,
+        "noteTarget",
+        GROUP_NOTE_TARGET_FIELDS,
+        records,
+    )
+    .await
 }

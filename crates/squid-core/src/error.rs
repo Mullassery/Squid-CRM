@@ -21,6 +21,9 @@ pub enum AppError {
     #[error("conflict: {0}")]
     Conflict(String),
 
+    #[error("too many requests: {0}")]
+    TooManyRequests(String),
+
     #[error("internal error: {0}")]
     Internal(#[from] anyhow::Error),
 }
@@ -33,6 +36,7 @@ impl AppError {
             AppError::Forbidden(_) => StatusCode::FORBIDDEN,
             AppError::NotFound(_) => StatusCode::NOT_FOUND,
             AppError::Conflict(_) => StatusCode::CONFLICT,
+            AppError::TooManyRequests(_) => StatusCode::TOO_MANY_REQUESTS,
             AppError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -43,7 +47,8 @@ impl AppError {
             | AppError::Unauthorized(m)
             | AppError::Forbidden(m)
             | AppError::NotFound(m)
-            | AppError::Conflict(m) => m,
+            | AppError::Conflict(m)
+            | AppError::TooManyRequests(m) => m,
             AppError::Internal(_) => "Internal server error",
         }
     }
@@ -65,6 +70,7 @@ impl AppError {
             AppError::Forbidden(_) => "FORBIDDEN",
             AppError::NotFound(_) => "NOT_FOUND",
             AppError::Conflict(_) => "CONFLICT",
+            AppError::TooManyRequests(_) => "TOO_MANY_REQUESTS",
             AppError::Internal(_) => "INTERNAL_SERVER_ERROR",
         }
     }

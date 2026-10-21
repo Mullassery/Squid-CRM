@@ -3,6 +3,7 @@
 //! Only `viewFields` is seeded for the default person table. Filters, sorts,
 //! groups and field groups are modelled so the query validates; they are empty.
 
+use async_graphql::MaybeUndefined;
 use async_graphql::{Enum, InputObject, Json, SimpleObject};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -295,39 +296,39 @@ pub struct CreateViewInput {
 #[graphql(name = "UpdateViewInput")]
 pub struct UpdateViewInput {
     #[serde(default)]
-    pub name: Option<String>,
+    pub name: MaybeUndefined<String>,
     #[serde(default)]
-    pub view_type: Option<ViewType>,
+    pub view_type: MaybeUndefined<ViewType>,
     #[serde(default)]
-    pub icon: Option<String>,
+    pub icon: MaybeUndefined<String>,
     #[serde(default)]
-    pub position: Option<f64>,
+    pub position: MaybeUndefined<f64>,
     #[serde(default)]
-    pub is_compact: Option<bool>,
+    pub is_compact: MaybeUndefined<bool>,
     #[serde(default)]
-    pub open_record_in: Option<ViewOpenRecordIn>,
+    pub open_record_in: MaybeUndefined<ViewOpenRecordIn>,
     #[serde(default)]
-    pub kanban_aggregate_operation: Option<AggregateOperations>,
+    pub kanban_aggregate_operation: MaybeUndefined<AggregateOperations>,
     #[serde(default)]
-    pub kanban_aggregate_operation_field_metadata_id: Option<Uuid>,
+    pub kanban_aggregate_operation_field_metadata_id: MaybeUndefined<Uuid>,
     #[serde(default)]
-    pub any_field_filter_value: Option<String>,
+    pub any_field_filter_value: MaybeUndefined<String>,
     #[serde(default)]
-    pub calendar_layout: Option<ViewCalendarLayout>,
+    pub calendar_layout: MaybeUndefined<ViewCalendarLayout>,
     #[serde(default)]
-    pub calendar_field_metadata_id: Option<Uuid>,
+    pub calendar_field_metadata_id: MaybeUndefined<Uuid>,
     #[serde(default)]
-    pub calendar_end_field_metadata_id: Option<Uuid>,
+    pub calendar_end_field_metadata_id: MaybeUndefined<Uuid>,
     #[serde(default)]
-    pub visibility: Option<ViewVisibility>,
+    pub visibility: MaybeUndefined<ViewVisibility>,
     #[serde(default)]
-    pub main_group_by_field_metadata_id: Option<Uuid>,
+    pub main_group_by_field_metadata_id: MaybeUndefined<Uuid>,
     #[serde(default)]
-    pub should_hide_empty_groups: Option<bool>,
+    pub should_hide_empty_groups: MaybeUndefined<bool>,
     #[serde(default)]
-    pub kanban_column_width: Option<i32>,
+    pub kanban_column_width: MaybeUndefined<i32>,
     #[serde(default)]
-    pub group_load_limit: Option<i32>,
+    pub group_load_limit: MaybeUndefined<i32>,
 }
 
 #[derive(Debug, Clone, Deserialize, InputObject)]

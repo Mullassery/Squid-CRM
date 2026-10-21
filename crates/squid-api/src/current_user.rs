@@ -352,7 +352,7 @@ fn role_label(role: Role) -> &'static str {
 pub fn role_gql(workspace_id: Uuid, role: Role) -> RoleGql {
     let privileged = matches!(role, Role::Owner | Role::Admin);
     RoleGql {
-        id: workspace_id,
+        id: Uuid::new_v5(&workspace_id, role_label(role).as_bytes()),
         label: role_label(role).to_string(),
         description: None,
         icon: None,

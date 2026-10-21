@@ -5,13 +5,14 @@ currently implements.
 
 Sources, in order of precedence:
 
-1. Golden fixtures from a live `twentycrm/twenty:v2.49.0` in `contracts/v2.49.0/`
-   (captured 2026-10-19, see `contracts/README.md`).
+1. Golden fixtures from a live Twenty **2.50.0** in `contracts/v2.50.0/`
+   (pinned source built locally; captured 2026-10-20, see
+   `contracts/README.md`). The `contracts/v2.49.0/` fixtures are historical.
 2. Source inspection of `twentyhq/twenty@08a0e5f1` (`TWENTY_CURRENT_VERSION =
    2.50.0`) for behaviour not exercised by the fixtures.
 
-The image is one release behind the pinned source; re-capture at v2.50.0 when
-published. Every claim below is marked `[fixture]` or `[source]`.
+Fixtures now match the pinned source. Every claim below is marked `[fixture]`
+or `[source]`.
 
 ## 1. Endpoints
 
@@ -24,7 +25,7 @@ published. Every claim below is marked `[fixture]` or `[source]`.
 | `/open-api/core`, `/open-api/metadata` | OpenAPI JSON | not implemented |
 | `/auth` | OAuth/SSO callbacks only | **partial** (local REST auth) |
 | `/client-config` | Frontend runtime config | **implemented** (static feature flags) |
-| `/files`, `/file-upload`, `/file` | File storage | not implemented |
+| `/files`, `/file-upload`, `/file` | File storage | **partial** (`/files/upload/{id}`, `/files/{id}`; `createFileUpload`/`completeFileUpload`) |
 | `/webhooks` | Inbound webhooks | not implemented |
 | `/healthz` | Health | **implemented** |
 
@@ -54,16 +55,23 @@ Note: `GET /open-api` itself is **404**; only `/open-api/core` and
 
 Implemented in the Rust slice (documented divergences in §8):
 
-- `POST /auth/signup`, `/auth/signin`, `/auth/signout`.
+- `POST /auth/signup`, `/auth/signin`, `/auth/refresh`, `/auth/signout`.
 - GraphQL `signUp`, `signIn`, `getLoginTokenFromCredentials`,
-  `getAuthTokensFromLoginToken`, `signOut`.
-- Argon2id passwords; HS256 JWTs with typed `typ` claims; opaque 32-byte session
-  tokens stored as SHA-256 hashes.
-- Bearer access tokens and the session cookie are accepted for both REST and
-  GraphQL (more permissive than upstream).
-- `/metadata` is mounted with the same GraphQL schema, so auth mutations and
-  API-key management are reachable there. Metadata object/field queries are not
-  implemented.
+  `getAuthTokensFromLoginToken`, `renewToken`, `signOut(refreshToken:)`.
+- Argon2id passwords; HS256 access/login JWTs with `typ`, `sid` and `jti`
+  claims; opaque 32-byte session tokens stored as SHA-256 hashes.
+- Access tokens are accepted only on `/metadata`. The data API (`/graphql`,
+  `/rest`) accepts API keys or the `twenty-session` cookie; user access tokens
+  are rejected, matching upstream.
+- Refresh tokens are opaque, stored hashed, rotated atomically on use, and
+  rejected on replay. Signout deletes the session, so access tokens
+  carrying its `sid` stop working immediately.
+- Cookie-authenticated unsafe requests with a foreign `Origin` are rejected;
+  bearer/API-key requests are exempt. Signup/signin are burst-limited in
+  process (10 attempts / 15 minutes per account).
+- `/metadata` is mounted with the same GraphQL schema, so auth mutations,
+  API-key management and the implemented metadata object/field/index/role
+  queries are reachable there.
 - API keys: `createApiKey(input: { name, expiresAt, roleId })`,
   `generateApiKeyToken(apiKeyId, expiresAt)`, `revokeApiKey(input: { id })`,
   `apiKeys`, `apiKey(input: { id })`. Tokens are `api_<random>`, stored as
@@ -147,9 +155,13 @@ note) with seeded fields, cursor paging for `objects`, and id/object/active/
 system filters. Object and field metadata writes are implemented
 (`createOneObject`, `updateOneObject`, `deleteOneObject`, `createOneField`,
 `updateOneField`, `deleteOneField`) with system-object/system-field guards.
-Custom objects do **not** yet generate physical workspace tables or dynamic
-GraphQL/REST schemas; relation field creation and relation metadata are not
-implemented. `indexMetadataList` and `searchFieldMetadataList` are empty;
+Metadata indexes are persisted and exposed through `createOneIndex`,
+`deleteOneIndex` and `Object.indexMetadataList`; built-in
+`getRoles`/`getRole`/`getPermissionFlags` and
+`mostlyEmptyFieldMetadataIds` exist. Custom objects do **not** yet generate
+physical workspace tables or dynamic GraphQL/REST schemas; relation field
+creation, relation/morph metadata and `searchFieldMetadataList` remain
+unimplemented, and index metadata does not create physical PostgreSQL indexes.
 `Field.relation` is `null`.
 
 The default person view is seeded and served through:
@@ -173,9 +185,11 @@ relation filters, roles and `minimalMetadata` remain unimplemented (see
 
 The frontend boot document (`GetCurrentUser` / `UserQueryFragment`) is served:
 identity, workspace members, current workspace and workspace URLs are live.
-Roles are derived from the membership role; feature flags, SSO, billing,
-installed applications, available workspaces, permission flags and object/row
-level permissions are empty or disabled defaults (ADR 0005).
+Roles are derived from the membership role; `getRoles`/`getRole` and
+`getPermissionFlags` expose the built-in roles and static permission catalogue.
+Role assignment/enforcement, feature flags, SSO, billing, installed
+applications, available workspaces and object/row-level permissions remain
+empty, disabled or advisory defaults (ADR 0005).
 
 ## 5. GraphQL data contract `[fixture]`
 
@@ -209,7 +223,7 @@ type PageInfo {
 }
 ```
 
-Example fixture: `contracts/v2.49.0/examples/gql-people-connection.json`.
+Example fixture: `contracts/v2.50.0/examples/gql-people-connection.json`.
 
 ## 6. Person shape `[fixture]`
 
@@ -240,6 +254,38 @@ REST record fields observed on create/list:
 ```
 
 `additionalEmails` and `additionalPhones` are **empty arrays**, not `null`.
+
+## 6a. REST groupBy `[fixture]`
+
+All standard object routes expose `/rest/{people,companies,opportunities,tasks,notes,taskTargets,noteTargets}/groupBy`.
+The response is a **bare JSON array**, not the list envelope:
+
+```json
+[
+  {
+    "countNotEmptyId": "2",
+    "percentageNotEmptyId": "1.00000000000000000000",
+    "groupByDimensionValues": ["Engineer"]
+  }
+]
+```
+
+- `group_by` is a required JSON array of single-key objects:
+  `[{"jobTitle":true}]`, `[{"name":{"firstName":true}}]`,
+  `[{"createdAt":{"granularity":"MONTH","timeZone":"UTC"}}]`.
+- `aggregate` is a JSON array such as
+  `["countNotEmptyId","countEmptyJobTitle","countUniqueValuesJobTitle"]`.
+  Aggregate values are strings; percentages use 20 decimal places.
+- `include_records_sample=true` adds `records`; `order_by_for_records` uses
+  `field[Direction]` (four null-order variants only).
+- `viewId` is camelCase, unknown IDs are ignored, and view filters are ANDed
+  with an explicit `filter`.
+- `limit` defaults to 50, `limit=0` returns all groups, and dates support
+  `NONE`, `DAY`, `WEEK`, `MONTH`, `QUARTER`, `YEAR`, `DAY_OF_THE_WEEK`,
+  `MONTH_OF_THE_YEAR`, `QUARTER_OF_THE_YEAR`.
+- Captured errors include invalid `group_by` syntax, unknown group/aggregate
+  fields, `position` unsupported in groupBy and multiple subfields in one
+  groupBy input.
 
 ## 7. Pagination, sorting, filtering `[fixture]` / `[source]`
 
@@ -286,6 +332,7 @@ Alignment completed and covered by tests:
 | REST cursors | base64 `{"id":"<uuid>"}` | aligned (exact fixture cursor asserted) |
 | REST paging | `limit`, `offset`, `starting_after`, `ending_before` | aligned |
 | REST sorting | `order_by=field[Direction],...` | aligned for whitelisted person columns |
+| REST projection | `fields` (top-level), `depth` (0/1) | aligned; `id` always returned, unknown fields/depths return the captured `400` text |
 | `additionalEmails` / `additionalPhones` | `[]`, never `null` | aligned |
 | Person fields | phones, links, avatar, position, actors, deletedAt, searchVector, companyId | aligned (see actor/searchVector notes) |
 | REST/GraphQL update | `PATCH /rest/{objects}/{id}`, `update*` | aligned; explicit `null` clears nullable fields on people, companies, opportunities, tasks, notes and targets; omitted fields stay unchanged |
@@ -294,7 +341,7 @@ Alignment completed and covered by tests:
 | GraphQL `people` | `PersonConnection` with `edges`/`pageInfo` | aligned |
 | GraphQL filters | `and`/`or`/`not`, composite name/emails, dates | aligned for scalar person fields; relation filters absent |
 | GraphQL batch mutations | `createPeople`, `updatePeople`, `deletePeople`, `destroyPeople`, `restorePeople`, `mergePeople` | aligned; merge re-points opportunities and task/note targets and supports `dryRun` |
-| Metadata API | `objects`/`object`/`fields`/`field` + object/field CRUD | reads for five standard objects; object/field writes; no dynamic schema, roles, indexes or relations |
+| Metadata API | `objects`/`object`/`fields`/`field` + object/field/index/role reads and writes | reads for five standard objects; object/field writes; index CRUD; built-in roles and permission flags; no dynamic schema or relation metadata |
 | Views API | `getViews`/`getView`/`getViewFields`/`getViewFilters`/`getViewSorts`/`getViewGroups`/`getViewFieldGroups`/`getViewFilterGroups`, `createView`/`updateView`/`deleteView`/`destroyView`, view field/filter/sort/group/field-group/filter-group CRUD + batch mutations | aligned for standard views; relation filters and view-based paging semantics are not implemented |
 | Workspace members | `workspaceMembers`/`workspaceMember` (filters, ordering, pageInfo) | aligned for core profile fields; position/format filters, profile writes and aggregates are absent |
 | Frontend boot | `currentUser`/`currentWorkspace` full fragment | shape aligned; roles/permissions/billing/SSO are static or empty defaults |
@@ -309,8 +356,8 @@ Known remaining divergences (do not claim parity):
 
 | Area | Upstream | Rust today | Action |
 | --- | --- | --- | --- |
-| GraphQL auth host | `/metadata` | `/metadata`, `/graphql` and `/auth` | tighten later |
-| Data-API auth | API keys only | API keys **and** access token/cookie | tighten before release |
+| GraphQL auth host | `/metadata` | `/metadata`, plus `/graphql` and `/auth` aliases | tighten later |
+| Data-API auth | API keys only | API keys or session cookie; access tokens rejected | aligned for the implemented surface |
 | Workspace bootstrap | `PENDING_CREATION` + `activateWorkspace` | atomic signup + immediate schema | document; add lifecycle |
 | Company filters | full `CompanyFilterInput` with relations | GraphQL `id`/`name`; REST scalar filter grammar | extend as company relations land |
 | Company ordering | GraphQL `orderBy` + REST `order_by` | scalar fields applied in memory; nested relation ordering ignored | add relation ordering |
@@ -325,14 +372,18 @@ Known remaining divergences (do not claim parity):
 | GraphQL scalars | `Position`, `TSVector`, `ConnectionCursor` | `Float`, `String`, `Cursor` | add scalar types |
 | `createdBy`/`updatedBy` | actor name = workspace member | `name: "API"` | populate from principal |
 | `searchVector` | PostgreSQL `to_tsvector` output | simplified lexeme builder | use `to_tsvector` |
-| `avatarFile` | `[FileObject]` | JSON value/null | model file objects |
-| REST `fields`/`depth`/`viewId` | supported | ignored/absent | add projection params |
-| API-key roles | metadata role entity | caller's built-in role; `roleId` ignored | wire role engine |
-| Error `code` for auth | `NO_AUTHENTICATION_CONTEXT` on data API | none | align once access tokens are rejected |
+| `avatarFile` | `[FileObject]` | `[FileObject]`/null; writes resolve stored file IDs and return `400 File not found: <id>` | aligned for reads and writes |
+| REST `fields`/`depth` | supported | implemented for five objects | aligned |
+| `viewId`/groupBy | supported | implemented for seven standard object routes; in-memory evaluation and Monday week buckets | aligned for captured granularities and aggregates |
+| API-key roles | metadata role entity | caller's built-in role; `roleId` ignored; built-in role queries exist | wire role engine |
+| Error `code` for auth | `NO_AUTHENTICATION_CONTEXT` on data API | `UNAUTHENTICATED` GraphQL error / `403` REST | align exact error code/message |
 
 ## 10. Verification method
 
-- Golden fixtures: `contracts/v2.49.0/` (SDL, OpenAPI, examples).
+- Golden fixtures: `contracts/v2.50.0/` (SDL, OpenAPI, examples).
+- Frontend operation map: `docs/frontend-operation-map.md` (every document in
+  `twenty-front/src/generated/graphql.ts` and `generated-metadata/graphql.ts`).
+- REST route map: `docs/rest-route-map.md` (every captured OpenAPI route).
 - Capture script: `scripts/capture-contracts.py` (reproducible).
 - Rust integration tests assert the implemented subset against real PostgreSQL.
 - Divergences above are asserted as **known**; tests must not claim parity for

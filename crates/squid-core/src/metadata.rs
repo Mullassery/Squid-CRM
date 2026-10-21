@@ -225,7 +225,23 @@ impl ObjectOpenRecordIn {
 pub enum IndexType {
     Btree,
     Gin,
-    Gist,
+}
+
+impl IndexType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Btree => "BTREE",
+            Self::Gin => "GIN",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "BTREE" => Some(Self::Btree),
+            "GIN" => Some(Self::Gin),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, InputObject)]
@@ -274,6 +290,7 @@ pub struct SearchFieldMetadata {
 }
 
 #[derive(Debug, Clone, SimpleObject)]
+#[graphql(name = "IndexField")]
 pub struct IndexFieldMetadata {
     pub id: Uuid,
     pub field_metadata_id: Uuid,
@@ -283,7 +300,32 @@ pub struct IndexFieldMetadata {
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
+#[derive(Debug, Clone, InputObject)]
+pub struct CreateIndexFieldInput {
+    pub field_metadata_id: Uuid,
+    pub sub_field_name: Option<String>,
+}
+
+#[derive(Debug, Clone, InputObject)]
+pub struct CreateIndexInput {
+    pub object_metadata_id: Uuid,
+    pub fields: Vec<CreateIndexFieldInput>,
+    #[graphql(default_with = "IndexType::Btree")]
+    pub index_type: IndexType,
+}
+
+#[derive(Debug, Clone, InputObject)]
+pub struct CreateOneIndexInput {
+    pub index: CreateIndexInput,
+}
+
+#[derive(Debug, Clone, InputObject)]
+pub struct DeleteOneIndexInput {
+    pub id: Uuid,
+}
+
 #[derive(Debug, Clone, SimpleObject)]
+#[graphql(name = "Index")]
 pub struct IndexMetadata {
     pub id: Uuid,
     pub name: String,

@@ -16,7 +16,7 @@ flowchart LR
   API --> DBLAYER
   DBLAYER -->|SQLx| PG[(PostgreSQL 16)]
   subgraph PG
-    CORE_SCHEMA[(core schema\nusers, workspaces, members,\nsessions, api_keys,\nobject/field metadata)]
+    CORE_SCHEMA[(core schema\nusers, workspaces, members,\nsessions, api_keys,\nobject/field/index metadata, files)]
     WS_A[(workspace_<id>\nperson ...)]
     WS_B[(workspace_<id>\nperson ...)]
   end
@@ -36,11 +36,11 @@ sequenceDiagram
   participant Repo as squid-db
   participant P as PostgreSQL
 
-  C->>A: POST /rest/people (cookie or Bearer)
-  A->>Auth: resolve_auth(headers)
-  Auth->>Repo: find_session_by_hash / find_membership_role
-  Repo->>P: SELECT core.user_sessions / workspace_members
-  P-->>Repo: session + role
+  C->>A: POST /rest/people (API key or cookie)
+  A->>Auth: resolve_auth_with_policy(headers, data API)
+  Auth->>Repo: find_api_key_by_token_hash / find_session_by_hash / find_membership_role
+  Repo->>P: SELECT core.api_keys / core.user_sessions / workspace_members
+  P-->>Repo: principal + role
   Repo-->>Auth: AuthContext { user, workspace, role }
   Auth-->>A: AuthContext
   A->>Repo: create_person(workspace_id, input)
@@ -58,6 +58,7 @@ erDiagram
   WORKSPACES ||--o{ WORKSPACE_MEMBERS : has
   USERS ||--o{ USER_SESSIONS : owns
   WORKSPACES ||--o{ USER_SESSIONS : scopes
+  USER_SESSIONS ||--o{ REFRESH_TOKENS : rotates
   USERS {
     uuid id PK
     text email
@@ -82,6 +83,14 @@ erDiagram
     text token_hash
     timestamptz expires_at
   }
+  REFRESH_TOKENS {
+    uuid id PK
+    uuid session_id FK
+    text token_hash
+    text replaced_by_token_hash
+    timestamptz expires_at
+    timestamptz revoked_at
+  }
 ```
 
 Each workspace additionally owns a schema containing object tables (`person` in
@@ -94,10 +103,15 @@ enterprise surfaces (ADR 0005).
 
 ## Security boundary summary
 
-- Credentials: Argon2id password hashes; HS256 JWTs with typed claims.
-- Sessions: opaque tokens, SHA-256 hashed at rest, HttpOnly/SameSite=Lax cookie
+- Credentials: Argon2id password hashes; HS256 access/login JWTs with `typ`,
+  `sid`, `jti`; opaque, rotating, hashed refresh tokens.
+- Sessions: opaque tokens, SHA-256 hashed at rest, HttpOnly/SameSite=Lax cookie;
+  deleting a session revokes its refresh tokens and access tokens.
 - API keys: `api_*` bearer tokens, SHA-256 hashed at rest, expiry/revocation checks
-  (Secure in production).
+  (Secure in production). Data APIs accept API keys or the session cookie, never
+  user access tokens; `/metadata` accepts access tokens.
+- CSRF: credentialed CORS restricted to `FRONTEND_URL` plus an Origin check on
+  unsafe cookie-authenticated requests. Auth endpoints are burst-limited.
 - Tenancy: `workspace_id` from the principal only; validated schema identifiers.
-- Transport: credentialed CORS restricted to `FRONTEND_URL`; 2 MiB body limit.
+- Transport: 2 MiB body limit.
 - See `SECURITY.md` and `docs/threat-model.md` (Phase 6) for the full model.
