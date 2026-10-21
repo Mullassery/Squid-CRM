@@ -69,9 +69,11 @@
       relation metadata (`Field.relation` for the seeded relationship fields),
       including reciprocal `company.people`/`company.opportunities` and
       `person.pointOfContactForOpportunities` fields.
-- [ ] Full metadata field coverage: morph metadata, polymorphic target reverse
-      fields (task/note targets, workspace members) and dynamic schema
-      generation.
+- [x] Task/note target metadata objects, polymorphic target reverse fields
+      (`task.taskTargets`, `note.noteTargets`, company/person/opportunity
+      target collections) and target relation metadata.
+- [ ] Full metadata field coverage: morph metadata, workspace-member reverse
+      fields and dynamic schema generation.
 - [x] `client-config` endpoint.
 
 ## Phase 5 (module migration)
@@ -102,8 +104,8 @@
 - [x] View batch/group writes: `createManyViewFields`, `createManyViewGroups`,
       `updateManyViewGroups`, `createManyViewFieldGroups`, view field group CRUD,
       view filter group CRUD and `getViewFieldGroups`/`getViewFilterGroups`.
-- [ ] Role/permission assignment engine, relation metadata, remaining standard
-      objects, and metadata-driven dynamic schema generation.
+- [ ] Role/permission assignment engine, workspace-member metadata and
+      metadata-driven dynamic schema generation.
 - [ ] Custom-object physical tables and dynamic GraphQL/REST schema/relation
       field creation (metadata writes currently persist metadata only).
 - [x] `currentUser`/`currentWorkspace` full frontend boot fragment (ADR 0005;
@@ -131,7 +133,8 @@
 - [ ] Release docs and known-limitations file.
 
 ## Known limitations (current)
-- Static schema for the five standard objects; metadata writes persist rows but
+- Static schema for the seven standard objects (including task/note targets);
+  metadata writes persist rows but
   do not generate physical tables or dynamic GraphQL/REST types for custom
   objects (relation field creation is rejected).
 - Cursor pagination, `order_by`, and scalar/composite filters implemented for
@@ -153,10 +156,10 @@
 - `groupBy` is evaluated in memory per object slice (up to the repository
   fetch cap for non-person objects); date buckets support the captured
   granularities, week starts on Monday.
-- Morph metadata and reverse fields for unseeded objects (workspace members,
-  task/note targets) remain unimplemented; `Field.relation` is populated for
-  seeded forward relations and reciprocal company/person relation fields.
-  Index metadata is stored but does not create physical PostgreSQL indexes.
+- Morph metadata and reverse fields for workspace-member relations remain
+  unimplemented; `Field.relation` is populated for seeded forward relations and
+  reciprocal company/person/task/note target relation fields. Index metadata
+  is stored but does not create physical PostgreSQL indexes.
 - File uploads are stored in PostgreSQL (`core.files`) with an unauthenticated
   signed-UUID upload/download URL; S3-compatible storage and stronger upload
   authorization remain open.

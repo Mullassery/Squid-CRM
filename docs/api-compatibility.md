@@ -150,9 +150,9 @@ Object.fieldsList: [Field!]!
 Object.fields(paging: CursorPaging, filter: FieldFilter): ObjectFieldsConnection!
 ```
 
-Implemented: the five standard objects (person, company, opportunity, task,
-note) with seeded fields, cursor paging for `objects`, and id/object/active/
-system filters. Object and field metadata writes are implemented
+Implemented: seven standard objects (person, company, opportunity, task, note,
+taskTarget, noteTarget) with seeded fields, cursor paging for `objects`, and
+id/object/active/system filters. Object and field metadata writes are implemented
 (`createOneObject`, `updateOneObject`, `deleteOneObject`, `createOneField`,
 `updateOneField`, `deleteOneField`) with system-object/system-field guards.
 Metadata indexes are persisted and exposed through `createOneIndex`,
@@ -160,16 +160,16 @@ Metadata indexes are persisted and exposed through `createOneIndex`,
 `getRoles`/`getRole`/`getPermissionFlags` and
 `mostlyEmptyFieldMetadataIds` exist. Custom objects do **not** yet generate
 physical workspace tables or dynamic GraphQL/REST schemas; relation field
-creation, morph metadata and reverse fields for unseeded objects (workspace
-members, task/note targets) remain unimplemented, and index metadata does not
-create physical PostgreSQL indexes.
+creation, morph metadata and workspace-member reverse fields remain
+unimplemented, and index metadata does not create physical PostgreSQL indexes.
 `Object.searchFieldMetadataList` derives entries from searchable fields and the
 object's tsvector field. `Field.relation` is populated for seeded forward
 relations (`person.companyId`, `opportunity.companyId`/`pointOfContactId`,
 `task.assigneeId`, `company.accountOwnerId`) and reciprocal fields
 (`company.people`, `company.opportunities`,
-`person.pointOfContactForOpportunities`); remaining reverse targets use stable
-synthesized field ids.
+`person.pointOfContactForOpportunities`) plus `taskTargets`/`noteTargets`
+collections on task, note, company, person and opportunity; remaining
+workspace-member reverse targets use stable synthesized field ids.
 
 The default person view is seeded and served through:
 
@@ -348,7 +348,7 @@ Alignment completed and covered by tests:
 | GraphQL `people` | `PersonConnection` with `edges`/`pageInfo` | aligned |
 | GraphQL filters | `and`/`or`/`not`, composite name/emails, dates | aligned for scalar person fields; relation filters absent |
 | GraphQL batch mutations | `createPeople`, `updatePeople`, `deletePeople`, `destroyPeople`, `restorePeople`, `mergePeople` | aligned; merge re-points opportunities and task/note targets and supports `dryRun` |
-| Metadata API | `objects`/`object`/`fields`/`field` + object/field/index/role reads and writes | reads for five standard objects; object/field writes; index CRUD; built-in roles and permission flags; search-field and forward relation metadata; no dynamic schema, reverse relation fields or morph metadata |
+| Metadata API | `objects`/`object`/`fields`/`field` + object/field/index/role reads and writes | reads for seven standard objects; object/field writes; index CRUD; built-in roles and permission flags; search-field and relation metadata incl. task/note target collections; no dynamic schema, workspace-member reverse fields or morph metadata |
 | Views API | `getViews`/`getView`/`getViewFields`/`getViewFilters`/`getViewSorts`/`getViewGroups`/`getViewFieldGroups`/`getViewFilterGroups`, `createView`/`updateView`/`deleteView`/`destroyView`, view field/filter/sort/group/field-group/filter-group CRUD + batch mutations | aligned for standard views; relation filters and view-based paging semantics are not implemented |
 | Workspace members | `workspaceMembers`/`workspaceMember` (filters, ordering, pageInfo) | aligned for core profile fields; position/format filters, profile writes and aggregates are absent |
 | Frontend boot | `currentUser`/`currentWorkspace` full fragment | shape aligned; roles/permissions/billing/SSO are static or empty defaults |

@@ -1715,7 +1715,7 @@ async fn metadata_objects_match_frontend_fragment() {
         let objects = response.body["data"]["objects"]["edges"]
             .as_array()
             .unwrap();
-        assert_eq!(objects.len(), 5, "seed must be idempotent");
+        assert_eq!(objects.len(), 7, "seed must be idempotent");
         let object = objects
             .iter()
             .map(|edge| &edge["node"])
@@ -1804,6 +1804,48 @@ async fn metadata_objects_match_frontend_fragment() {
         assert_eq!(reverse["targetObjectMetadata"]["nameSingular"], "person");
         assert_eq!(reverse["sourceFieldMetadata"]["name"], "people");
         assert_eq!(reverse["targetFieldMetadata"]["name"], "companyId");
+
+        let task_target = objects
+            .iter()
+            .map(|edge| &edge["node"])
+            .find(|node| node["nameSingular"] == "taskTarget")
+            .expect("taskTarget object seeded");
+        let target_company = task_target["fieldsList"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|field| field["name"] == "targetCompanyId")
+            .expect("taskTarget.targetCompanyId");
+        assert_eq!(target_company["relation"]["type"], "MANY_TO_ONE");
+        assert_eq!(
+            target_company["relation"]["sourceObjectMetadata"]["nameSingular"],
+            "taskTarget"
+        );
+        assert_eq!(
+            target_company["relation"]["targetObjectMetadata"]["nameSingular"],
+            "company"
+        );
+        assert_eq!(
+            target_company["relation"]["targetFieldMetadata"]["name"],
+            "taskTargets"
+        );
+        let company_task_targets = company["fieldsList"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|field| field["name"] == "taskTargets")
+            .expect("company.taskTargets reverse field");
+        assert_eq!(
+            target_company["relation"]["targetFieldMetadata"]["id"],
+            company_task_targets["id"]
+        );
+        assert_eq!(company_task_targets["relation"]["type"], "ONE_TO_MANY");
+        assert!(
+            objects
+                .iter()
+                .any(|edge| edge["node"]["nameSingular"] == "noteTarget"),
+            "noteTarget object seeded"
+        );
         assert_eq!(name_field["relation"], json!(null));
         assert_eq!(name_field["morphRelations"], json!([]));
     }
@@ -3577,7 +3619,7 @@ async fn metadata_object_and_field_writes() {
             .as_array()
             .unwrap()
             .len(),
-        5,
+        7,
         "body: {}",
         objects.body
     );
@@ -3861,7 +3903,7 @@ async fn metadata_object_and_field_writes() {
             .as_array()
             .unwrap()
             .len(),
-        5,
+        7,
         "body: {}",
         after.body
     );
