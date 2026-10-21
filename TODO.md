@@ -66,9 +66,12 @@
       `Object.indexMetadataList`), basic `getRoles`/`getRole`/
       `getPermissionFlags` and `mostlyEmptyFieldMetadataIds`.
 - [x] Search-field metadata (`Object.searchFieldMetadataList`) and standard
-      relation metadata (`Field.relation` for the seeded relationship fields).
-- [ ] Full metadata field coverage: reverse relation fields, morph metadata
-      and dynamic schema generation.
+      relation metadata (`Field.relation` for the seeded relationship fields),
+      including reciprocal `company.people`/`company.opportunities` and
+      `person.pointOfContactForOpportunities` fields.
+- [ ] Full metadata field coverage: morph metadata, polymorphic target reverse
+      fields (task/note targets, workspace members) and dynamic schema
+      generation.
 - [x] `client-config` endpoint.
 
 ## Phase 5 (module migration)
@@ -150,11 +153,10 @@
 - `groupBy` is evaluated in memory per object slice (up to the repository
   fetch cap for non-person objects); date buckets support the captured
   granularities, week starts on Monday.
-- Reverse relation fields, morph metadata and dynamic schema generation remain
-  unimplemented; `Field.relation` is populated for seeded forward relations
-  (company, point of contact, owner/assignee, task/note targets) and reverse
-  targets use stable synthesized field ids. Index metadata is stored but does
-  not create physical PostgreSQL indexes.
+- Morph metadata and reverse fields for unseeded objects (workspace members,
+  task/note targets) remain unimplemented; `Field.relation` is populated for
+  seeded forward relations and reciprocal company/person relation fields.
+  Index metadata is stored but does not create physical PostgreSQL indexes.
 - File uploads are stored in PostgreSQL (`core.files`) with an unauthenticated
   signed-UUID upload/download URL; S3-compatible storage and stronger upload
   authorization remain open.

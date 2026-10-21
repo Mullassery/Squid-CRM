@@ -1786,6 +1786,24 @@ async fn metadata_objects_match_frontend_fragment() {
         assert_eq!(relation["targetObjectMetadata"]["nameSingular"], "company");
         assert_eq!(relation["sourceFieldMetadata"]["name"], "companyId");
         assert_eq!(relation["targetFieldMetadata"]["name"], "people");
+        let company = objects
+            .iter()
+            .map(|edge| &edge["node"])
+            .find(|node| node["nameSingular"] == "company")
+            .expect("company object seeded");
+        let people_field = company["fieldsList"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|field| field["name"] == "people")
+            .expect("company.people reverse field");
+        assert_eq!(relation["targetFieldMetadata"]["id"], people_field["id"]);
+        let reverse = &people_field["relation"];
+        assert_eq!(reverse["type"], "ONE_TO_MANY");
+        assert_eq!(reverse["sourceObjectMetadata"]["nameSingular"], "company");
+        assert_eq!(reverse["targetObjectMetadata"]["nameSingular"], "person");
+        assert_eq!(reverse["sourceFieldMetadata"]["name"], "people");
+        assert_eq!(reverse["targetFieldMetadata"]["name"], "companyId");
         assert_eq!(name_field["relation"], json!(null));
         assert_eq!(name_field["morphRelations"], json!([]));
     }

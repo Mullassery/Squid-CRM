@@ -160,13 +160,16 @@ Metadata indexes are persisted and exposed through `createOneIndex`,
 `getRoles`/`getRole`/`getPermissionFlags` and
 `mostlyEmptyFieldMetadataIds` exist. Custom objects do **not** yet generate
 physical workspace tables or dynamic GraphQL/REST schemas; relation field
-creation, reverse relation fields and morph metadata remain unimplemented, and
-index metadata does not create physical PostgreSQL indexes.
+creation, morph metadata and reverse fields for unseeded objects (workspace
+members, task/note targets) remain unimplemented, and index metadata does not
+create physical PostgreSQL indexes.
 `Object.searchFieldMetadataList` derives entries from searchable fields and the
 object's tsvector field. `Field.relation` is populated for seeded forward
 relations (`person.companyId`, `opportunity.companyId`/`pointOfContactId`,
-`task.assigneeId`, `company.accountOwnerId`), with reverse targets exposed via
-stable synthesized field ids until reverse fields are seeded.
+`task.assigneeId`, `company.accountOwnerId`) and reciprocal fields
+(`company.people`, `company.opportunities`,
+`person.pointOfContactForOpportunities`); remaining reverse targets use stable
+synthesized field ids.
 
 The default person view is seeded and served through:
 

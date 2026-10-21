@@ -3378,25 +3378,11 @@ impl Db {
         workspace_id: Uuid,
         object_id: Uuid,
     ) -> anyhow::Result<Option<ObjectMetadata>> {
-        self.ensure_standard_metadata(workspace_id).await?;
-        let row = sqlx::query(&format!(
-            "SELECT {OBJECT_SELECT} FROM core.object_metadata
-             WHERE workspace_id = $1 AND id = $2"
-        ))
-        .bind(workspace_id)
-        .bind(object_id)
-        .fetch_optional(&self.pool)
-        .await?;
-        let Some(row) = row else {
-            return Ok(None);
-        };
-        let mut object = row_to_object(&row)?;
-        object.fields = self.list_fields(workspace_id, Some(object_id)).await?;
-        object.index_metadata = self.list_indexes(workspace_id, Some(object_id)).await?;
-        let mut objects = vec![object];
-        self.attach_metadata_links(workspace_id, &mut objects)
-            .await?;
-        Ok(objects.into_iter().next())
+        Ok(self
+            .list_objects(workspace_id)
+            .await?
+            .into_iter()
+            .find(|object| object.id == object_id))
     }
 
     async fn attach_metadata_links(
@@ -3404,14 +3390,14 @@ impl Db {
         workspace_id: Uuid,
         objects: &mut [ObjectMetadata],
     ) -> anyhow::Result<()> {
-        let rows = sqlx::query(
+        let object_rows = sqlx::query(
             "SELECT id, name_singular, name_plural FROM core.object_metadata
              WHERE workspace_id = $1",
         )
         .bind(workspace_id)
         .fetch_all(&self.pool)
         .await?;
-        let summaries: std::collections::HashMap<String, ObjectSummary> = rows
+        let summaries: std::collections::HashMap<String, ObjectSummary> = object_rows
             .iter()
             .map(|row| {
                 let summary = ObjectSummary {
@@ -3423,6 +3409,25 @@ impl Db {
             })
             .collect();
 
+        let field_rows = sqlx::query(
+            "SELECT id, object_metadata_id, name FROM core.field_metadata
+             WHERE workspace_id = $1",
+        )
+        .bind(workspace_id)
+        .fetch_all(&self.pool)
+        .await?;
+        let field_ids: std::collections::HashMap<(Uuid, String), Uuid> = field_rows
+            .iter()
+            .map(|row| {
+                (
+                    (row.get("object_metadata_id"), row.get("name")),
+                    row.get("id"),
+                )
+            })
+            .collect();
+
+        let mut reverse_relations: std::collections::HashMap<(Uuid, Uuid), RelationMetadata> =
+            std::collections::HashMap::new();
         for object in objects.iter_mut() {
             object.search_field_metadata = build_search_field_metadata(object);
             let source_name = object.name_singular.clone();
@@ -3442,22 +3447,50 @@ impl Db {
                 let Some(target_summary) = summaries.get(*target_name) else {
                     continue;
                 };
+                let target_field_id = field_ids
+                    .get(&(target_summary.id, (*reverse_name).to_string()))
+                    .copied()
+                    .unwrap_or_else(|| {
+                        Uuid::new_v5(
+                            &target_summary.id,
+                            format!("relation-reverse:{reverse_name}").as_bytes(),
+                        )
+                    });
+                let source_field = FieldSummary {
+                    id: field.id,
+                    name: field.name.clone(),
+                };
                 field.relation = Some(RelationMetadata {
                     relation_type: RelationType::ManyToOne,
                     source_object_metadata: source_summary.clone(),
                     target_object_metadata: target_summary.clone(),
-                    source_field_metadata: FieldSummary {
-                        id: field.id,
-                        name: field.name.clone(),
-                    },
+                    source_field_metadata: source_field.clone(),
                     target_field_metadata: FieldSummary {
-                        id: Uuid::new_v5(
-                            &target_summary.id,
-                            format!("relation-reverse:{reverse_name}").as_bytes(),
-                        ),
+                        id: target_field_id,
                         name: (*reverse_name).to_string(),
                     },
                 });
+                reverse_relations.insert(
+                    (target_summary.id, target_field_id),
+                    RelationMetadata {
+                        relation_type: RelationType::OneToMany,
+                        source_object_metadata: target_summary.clone(),
+                        target_object_metadata: source_summary.clone(),
+                        source_field_metadata: FieldSummary {
+                            id: target_field_id,
+                            name: (*reverse_name).to_string(),
+                        },
+                        target_field_metadata: source_field,
+                    },
+                );
+            }
+        }
+
+        for object in objects.iter_mut() {
+            for field in object.fields.iter_mut() {
+                if let Some(relation) = reverse_relations.get(&(object.id, field.id)) {
+                    field.relation = Some(relation.clone());
+                }
             }
         }
         Ok(())
@@ -5615,6 +5648,22 @@ const COMPANY_METADATA_FIELDS: &[PersonFieldSeed] = &[
         unique: false,
         searchable: false,
     },
+    PersonFieldSeed {
+        name: "people",
+        label: "People",
+        field_type: FieldMetadataType::Relation,
+        nullable: true,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "opportunities",
+        label: "Opportunities",
+        field_type: FieldMetadataType::Relation,
+        nullable: true,
+        unique: false,
+        searchable: false,
+    },
 ];
 
 const DEFAULT_COMPANY_VIEW_FIELDS: &[(&str, f64)] =
@@ -5775,6 +5824,14 @@ const PERSON_METADATA_FIELDS: &[PersonFieldSeed] = &[
         name: "companyId",
         label: "Company",
         field_type: FieldMetadataType::Uuid,
+        nullable: true,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "pointOfContactForOpportunities",
+        label: "Point of contact for opportunities",
+        field_type: FieldMetadataType::Relation,
         nullable: true,
         unique: false,
         searchable: false,
