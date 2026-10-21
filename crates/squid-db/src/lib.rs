@@ -16,10 +16,11 @@ use squid_core::{
     CreateOpportunityInput, CreatePersonInput, CreateTaskInput, CreateTaskTargetInput,
     CreateViewFieldGroupInput, CreateViewFieldInput, CreateViewFilterGroupInput,
     CreateViewFilterInput, CreateViewGroupInput, CreateViewInput, CreateViewSortInput, DateOp,
-    Emails, FieldMetadata, FieldMetadataType, FileFolder, FileItemInput, FileObject, FilterExpr,
-    FullName, IndexFieldMetadata, IndexMetadata, IndexType, MaybeUndefined, MetadataReadability,
-    MetadataWritability, Note, NoteTarget, ObjectMetadata, ObjectOpenRecordIn, ObjectSharingReach,
-    Opportunity, OpportunityStage, Person, Role, StringOp, Task, TaskStatus, TaskTarget,
+    Emails, FieldMetadata, FieldMetadataType, FieldSummary, FileFolder, FileItemInput, FileObject,
+    FilterExpr, FullName, IndexFieldMetadata, IndexMetadata, IndexType, MaybeUndefined,
+    MetadataReadability, MetadataWritability, Note, NoteTarget, ObjectMetadata, ObjectOpenRecordIn,
+    ObjectSharingReach, ObjectSummary, Opportunity, OpportunityStage, Person, RelationMetadata,
+    RelationType, Role, SearchFieldMetadata, StringOp, Task, TaskStatus, TaskTarget,
     UpdateCompanyInput, UpdateFieldMetadataInput, UpdateNoteInput, UpdateNoteTargetInput,
     UpdateObjectMetadataInput, UpdateOpportunityInput, UpdatePersonInput, UpdateTaskInput,
     UpdateTaskTargetInput, UpdateViewFieldGroupInput, UpdateViewFieldInput,
@@ -3367,6 +3368,8 @@ impl Db {
             object.index_metadata = self.list_indexes(workspace_id, Some(object.id)).await?;
             objects.push(object);
         }
+        self.attach_metadata_links(workspace_id, &mut objects)
+            .await?;
         Ok(objects)
     }
 
@@ -3390,7 +3393,74 @@ impl Db {
         let mut object = row_to_object(&row)?;
         object.fields = self.list_fields(workspace_id, Some(object_id)).await?;
         object.index_metadata = self.list_indexes(workspace_id, Some(object_id)).await?;
-        Ok(Some(object))
+        let mut objects = vec![object];
+        self.attach_metadata_links(workspace_id, &mut objects)
+            .await?;
+        Ok(objects.into_iter().next())
+    }
+
+    async fn attach_metadata_links(
+        &self,
+        workspace_id: Uuid,
+        objects: &mut [ObjectMetadata],
+    ) -> anyhow::Result<()> {
+        let rows = sqlx::query(
+            "SELECT id, name_singular, name_plural FROM core.object_metadata
+             WHERE workspace_id = $1",
+        )
+        .bind(workspace_id)
+        .fetch_all(&self.pool)
+        .await?;
+        let summaries: std::collections::HashMap<String, ObjectSummary> = rows
+            .iter()
+            .map(|row| {
+                let summary = ObjectSummary {
+                    id: row.get("id"),
+                    name_singular: row.get("name_singular"),
+                    name_plural: row.get("name_plural"),
+                };
+                (summary.name_singular.clone(), summary)
+            })
+            .collect();
+
+        for object in objects.iter_mut() {
+            object.search_field_metadata = build_search_field_metadata(object);
+            let source_name = object.name_singular.clone();
+            let Some(source_summary) = summaries.get(&source_name).cloned() else {
+                continue;
+            };
+            for field in object.fields.iter_mut() {
+                let Some((_, _, target_name, reverse_name)) =
+                    METADATA_RELATIONS
+                        .iter()
+                        .find(|(source, field_name, _, _)| {
+                            *source == source_name && *field_name == field.name
+                        })
+                else {
+                    continue;
+                };
+                let Some(target_summary) = summaries.get(*target_name) else {
+                    continue;
+                };
+                field.relation = Some(RelationMetadata {
+                    relation_type: RelationType::ManyToOne,
+                    source_object_metadata: source_summary.clone(),
+                    target_object_metadata: target_summary.clone(),
+                    source_field_metadata: FieldSummary {
+                        id: field.id,
+                        name: field.name.clone(),
+                    },
+                    target_field_metadata: FieldSummary {
+                        id: Uuid::new_v5(
+                            &target_summary.id,
+                            format!("relation-reverse:{reverse_name}").as_bytes(),
+                        ),
+                        name: (*reverse_name).to_string(),
+                    },
+                });
+            }
+        }
+        Ok(())
     }
 
     pub async fn list_fields(
@@ -5762,6 +5832,7 @@ fn row_to_object(row: &sqlx::postgres::PgRow) -> anyhow::Result<ObjectMetadata> 
             .and_then(|raw| serde_json::from_str(&raw).ok()),
         fields: Vec::new(),
         index_metadata: Vec::new(),
+        search_field_metadata: Vec::new(),
     })
 }
 
@@ -5793,7 +5864,69 @@ fn row_to_field(row: &sqlx::postgres::PgRow) -> anyhow::Result<FieldMetadata> {
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
         application_id: row.get("application_id"),
+        relation: None,
+        morph_relations: Vec::new(),
     })
+}
+
+const METADATA_RELATIONS: &[(&str, &str, &str, &str)] = &[
+    ("person", "companyId", "company", "people"),
+    ("opportunity", "companyId", "company", "opportunities"),
+    (
+        "opportunity",
+        "pointOfContactId",
+        "person",
+        "pointOfContactForOpportunities",
+    ),
+    ("task", "assigneeId", "workspaceMember", "assignedTasks"),
+    (
+        "company",
+        "accountOwnerId",
+        "workspaceMember",
+        "accountOwnerForCompanies",
+    ),
+    ("taskTarget", "taskId", "task", "taskTargets"),
+    ("noteTarget", "noteId", "note", "noteTargets"),
+    ("taskTarget", "targetCompanyId", "company", "taskTargets"),
+    (
+        "taskTarget",
+        "targetOpportunityId",
+        "opportunity",
+        "taskTargets",
+    ),
+    ("taskTarget", "targetPersonId", "person", "taskTargets"),
+    ("noteTarget", "targetCompanyId", "company", "noteTargets"),
+    (
+        "noteTarget",
+        "targetOpportunityId",
+        "opportunity",
+        "noteTargets",
+    ),
+    ("noteTarget", "targetPersonId", "person", "noteTargets"),
+];
+
+fn build_search_field_metadata(object: &ObjectMetadata) -> Vec<SearchFieldMetadata> {
+    let Some(vector_field) = object
+        .fields
+        .iter()
+        .find(|field| field.field_type == FieldMetadataType::TsVector)
+    else {
+        return Vec::new();
+    };
+    object
+        .fields
+        .iter()
+        .filter(|field| field.is_searchable && field.field_type != FieldMetadataType::TsVector)
+        .enumerate()
+        .map(|(position, field)| SearchFieldMetadata {
+            id: Uuid::new_v5(&vector_field.id, field.id.as_bytes()),
+            field_metadata_id: field.id,
+            ts_vector_field_metadata_id: vector_field.id,
+            position: position as f64,
+            created_at: field.created_at,
+            updated_at: field.updated_at,
+        })
+        .collect()
 }
 
 fn parse_json_opt(raw: Option<String>) -> Option<squid_core::GqlJson<serde_json::Value>> {

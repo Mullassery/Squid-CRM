@@ -1761,6 +1761,33 @@ async fn metadata_objects_match_frontend_fragment() {
         let avatar_field = fields.iter().find(|f| f["name"] == "avatarFile").unwrap();
         assert_eq!(avatar_field["type"], "FILES");
         assert_eq!(object["imageIdentifierFieldMetadataId"], avatar_field["id"]);
+
+        let search_fields = object["searchFieldMetadataList"].as_array().unwrap();
+        assert_eq!(search_fields.len(), 3);
+        let vector_field_id = fields.iter().find(|f| f["name"] == "searchVector").unwrap()["id"]
+            .as_str()
+            .unwrap();
+        for (position, entry) in search_fields.iter().enumerate() {
+            assert_eq!(entry["position"], json!(position as f64));
+            assert_eq!(entry["tsVectorFieldMetadataId"], vector_field_id);
+            let field_id = entry["fieldMetadataId"].as_str().unwrap();
+            let field = fields
+                .iter()
+                .find(|field| field["id"] == field_id)
+                .expect("search field references a seeded field");
+            assert_eq!(field["isSearchable"], true);
+            assert_ne!(field["type"], "TS_VECTOR");
+        }
+
+        let company_field = fields.iter().find(|f| f["name"] == "companyId").unwrap();
+        let relation = &company_field["relation"];
+        assert_eq!(relation["type"], "MANY_TO_ONE");
+        assert_eq!(relation["sourceObjectMetadata"]["nameSingular"], "person");
+        assert_eq!(relation["targetObjectMetadata"]["nameSingular"], "company");
+        assert_eq!(relation["sourceFieldMetadata"]["name"], "companyId");
+        assert_eq!(relation["targetFieldMetadata"]["name"], "people");
+        assert_eq!(name_field["relation"], json!(null));
+        assert_eq!(name_field["morphRelations"], json!([]));
     }
 }
 

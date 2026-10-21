@@ -436,6 +436,8 @@ pub struct ObjectMetadata {
     pub fields: Vec<FieldMetadata>,
     #[graphql(skip)]
     pub index_metadata: Vec<IndexMetadata>,
+    #[graphql(skip)]
+    pub search_field_metadata: Vec<SearchFieldMetadata>,
 }
 
 #[ComplexObject]
@@ -453,7 +455,7 @@ impl ObjectMetadata {
     }
 
     async fn search_field_metadata_list(&self) -> Vec<SearchFieldMetadata> {
-        Vec::new()
+        self.search_field_metadata.clone()
     }
 }
 
@@ -486,16 +488,20 @@ pub struct FieldMetadata {
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
     pub application_id: Uuid,
+    #[graphql(skip)]
+    pub relation: Option<RelationMetadata>,
+    #[graphql(skip)]
+    pub morph_relations: Vec<RelationMetadata>,
 }
 
 #[ComplexObject]
 impl FieldMetadata {
     async fn relation(&self) -> Option<RelationMetadata> {
-        None
+        self.relation.clone()
     }
 
     async fn morph_relations(&self) -> Vec<RelationMetadata> {
-        Vec::new()
+        self.morph_relations.clone()
     }
 
     async fn object(&self) -> Option<ObjectSummary> {
