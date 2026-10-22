@@ -62,6 +62,8 @@ Statuses: **VERIFIED** (executable evidence in this repository), **PARTIAL**
 - Python client retries use the same idempotency key and correlation ID.
 - Added a dependency-free Python adapter mapping Squid envelope v1 to the
   documented MessageBirds top-level field names, with explicit validation.
+- Added a reverse-ETL person payload adapter with an explicit field allowlist
+  and a runnable activation example.
 - Added CSV export/import and role/data/file permission enforcement in earlier
   increments; see `TODO.md`, `docs/decision-log.md` and
   `docs/migration-matrix.md`.
@@ -108,6 +110,15 @@ Last verified result (2026-10-22):
   covered by integration tests.
 - Python package import check from PyPI: `squid_crm.__version__ == "0.2.0"`.
 - Python client tests: 6 passing (`python3 -m unittest discover -s python/tests`).
+
+Runnable reverse-ETL example:
+
+```bash
+SQUID_BASE_URL=http://127.0.0.1:3000 SQUID_API_KEY=... \
+python3 examples/reverse_etl_person_sync.py <<'JSON'
+{"email": "ada@example.com", "first_name": "Ada", "last_name": "Lovelace"}
+JSON
+```
 
 Runnable webhook example:
 

@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from squid_crm import to_messagebirds_event  # noqa: E402
+from squid_crm import person_activation_payload, to_messagebirds_event  # noqa: E402
 
 
 class AdapterTests(unittest.TestCase):
@@ -54,6 +54,36 @@ class AdapterTests(unittest.TestCase):
             correlation_id="corr-1",
         )
         self.assertEqual(mapped["correlation_id"], "corr-1")
+
+
+    def test_person_activation_payload_uses_allowlist(self):
+        payload = person_activation_payload(
+            {
+                "email": "ada@example.com",
+                "first_name": "Ada",
+                "last_name": "Lovelace",
+                "job_title": "Engineer",
+                "company_id": "company-1",
+                "ssn": "never-forward-this",
+            }
+        )
+        self.assertEqual(payload["emails"]["primaryEmail"], "ada@example.com")
+        self.assertEqual(payload["name"], {"firstName": "Ada", "lastName": "Lovelace"})
+        self.assertEqual(payload["jobTitle"], "Engineer")
+        self.assertEqual(payload["companyId"], "company-1")
+        self.assertNotIn("ssn", payload)
+
+    def test_person_activation_payload_requires_email(self):
+        with self.assertRaises(ValueError):
+            person_activation_payload({"first_name": "Ada"})
+
+    def test_person_activation_payload_supports_field_map(self):
+        payload = person_activation_payload(
+            {"work_email": "grace@example.com", "given_name": "Grace"},
+            field_map={"email": "work_email", "first_name": "given_name"},
+        )
+        self.assertEqual(payload["emails"]["primaryEmail"], "grace@example.com")
+        self.assertEqual(payload["name"]["firstName"], "Grace")
 
 
 if __name__ == "__main__":

@@ -10,11 +10,11 @@ import urllib.request
 import uuid
 from typing import Any, Dict, Optional
 
-from .adapters import to_messagebirds_event
+from .adapters import person_activation_payload, to_messagebirds_event
 
 __version__ = "0.2.0"
 
-__all__ = ["SquidClient", "SquidError", "to_messagebirds_event", "__version__"]
+__all__ = ["SquidClient", "SquidError", "person_activation_payload", "to_messagebirds_event", "__version__"]
 
 _RETRYABLE_STATUS = {408, 425, 429, 500, 502, 503, 504}
 _SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
@@ -194,6 +194,21 @@ class SquidClient:
             "GET",
             "/rest/people",
             params={"limit": limit, "offset": offset},
+            correlation_id=correlation_id,
+        )
+
+    def create_person_payload(
+        self,
+        payload: Dict[str, Any],
+        idempotency_key: Optional[str] = None,
+        correlation_id: Optional[str] = None,
+    ) -> Any:
+        """Create a person from a pre-built payload (for adapter-driven syncs)."""
+        return self._request(
+            "POST",
+            "/rest/people",
+            payload,
+            idempotency_key=idempotency_key or str(uuid.uuid4()),
             correlation_id=correlation_id,
         )
 
