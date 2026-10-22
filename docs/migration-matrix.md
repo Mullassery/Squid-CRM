@@ -38,7 +38,7 @@ Operation coverage: `docs/frontend-operation-map.md`, `docs/rest-route-map.md`.
 | Email (Gmail/Graph/IMAP/SMTP) | `core-modules/email`, `messaging` | — | not-started | | |
 | Calendar | `core-modules/calendar`, `src/modules/calendar` | — | not-started | | |
 | Connected accounts | `metadata-modules/connected-account`, `connection-provider` | — | not-started | | |
-| Webhooks | `metadata-modules/webhook`, `workspace-event-emitter` | `squid-db`/`squid-api` | partial | webhook CRUD/delivery tests | REST and GraphQL events for core objects delivered; target events and REST route pending |
+| Webhooks | `metadata-modules/webhook`, `workspace-event-emitter` | `squid-db`/`squid-api` | partial | webhook CRUD/delivery tests | REST/GraphQL events for core objects and targets delivered; REST route pending |
 | Background jobs / cron | `src/queue-worker`, `core-modules/message-queue`, `cron` | — | not-started | | Redis/BullMQ parity |
 | Workflows | `metadata-modules/workflow*`, `src/modules/workflow` | — | not-started | 36 static data documents MISSING | large area |
 | Logic functions | `core-modules/logic-function` | — | not-started | | |
