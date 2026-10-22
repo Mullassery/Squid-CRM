@@ -76,7 +76,6 @@
 - [x] Full metadata field coverage: morph metadata (`target` head plus
       `targetCompany`/`targetOpportunity`/`targetPerson`) and workspace-member
       reverse fields (`assignedTasks`, `accountOwnerForCompanies`).
-- [ ] Metadata-driven dynamic schema generation (deferred to Phase 5).
 - [x] `client-config` endpoint.
 
 ## Phase 5 (module migration)
