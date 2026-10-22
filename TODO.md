@@ -124,7 +124,9 @@
       task, note and task/note targets.
 - [x] Relation filters: nested `company` for people, nested `company` and
       `pointOfContact` for opportunities (GraphQL + REST dot-path).
-- [ ] Views parity: view-based paging semantics and nested relation ordering.
+- [x] View-based groupBy paging: `offsetForRecords` and default record order from
+      the view's sorts when `order_by_for_records` is omitted.
+- [ ] Nested relation ordering and remaining view semantics.
 - [ ] Search, export/import; local file upload exists for attachments/avatars
       but no object-storage backend.
 - [ ] Jobs/cron, webhooks, workflows, integrations.
@@ -143,7 +145,7 @@
   (relation field creation is rejected).
 - Cursor pagination, `order_by`, and scalar/composite filters implemented for
   whitelisted person columns including `companyId`; nested `company` filters
-  are implemented, nested relation ordering and view-based paging are not.
+  are implemented; nested relation ordering is not.
 - `WorkspaceMember` queries expose the core profile fields; position/calendar
   and date/time/number-format filters and connection aggregates are absent.
 - Company GraphQL filters cover `id`/`createdAt`/`updatedAt`/`name`/

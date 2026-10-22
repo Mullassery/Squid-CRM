@@ -2567,6 +2567,8 @@ pub struct GroupByParams {
     pub include_records_sample: Option<bool>,
     pub order_by_for_records: Option<String>,
     pub limit: Option<i64>,
+    #[serde(rename = "offsetForRecords", alias = "offset_for_records")]
+    pub offset_for_records: Option<i64>,
     pub filter: Option<String>,
     #[serde(rename = "viewId", alias = "view_id")]
     pub view_id: Option<String>,
@@ -2580,12 +2582,13 @@ async fn group_by_response(
     allowed: &[&str],
     mut records: Vec<serde_json::Value>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let request = crate::group_by::parse_request(
+    let mut request = crate::group_by::parse_request(
         params.group_by.as_deref(),
         params.aggregate.as_deref(),
         params.include_records_sample,
         params.order_by_for_records.as_deref(),
         params.limit,
+        params.offset_for_records,
         allowed,
     )?;
     let date_fields = crate::group_by::date_field_set();
@@ -2619,6 +2622,24 @@ async fn group_by_response(
                 .collect();
             if let Some(node) = crate::group_by::view_filter_node(&view, &field_names) {
                 records.retain(|record| crate::group_by::matches(&node, record, &date_fields));
+            }
+            if params.order_by_for_records.is_none() {
+                request.order_by_for_records = view
+                    .view_sorts
+                    .iter()
+                    .filter_map(|sort| {
+                        let name = field_names.get(&sort.field_metadata_id)?;
+                        let field = match &sort.sub_field_name {
+                            Some(sub_field) => format!("{name}.{sub_field}"),
+                            None => name.clone(),
+                        };
+                        Some(crate::group_by::SortTerm {
+                            field,
+                            descending: sort.direction == squid_core::ViewSortDirection::Desc,
+                            nulls_first: false,
+                        })
+                    })
+                    .collect();
             }
         }
     }

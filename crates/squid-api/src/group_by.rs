@@ -28,6 +28,7 @@ pub struct GroupByRequest {
     pub include_records_sample: bool,
     pub order_by_for_records: Vec<SortTerm>,
     pub limit: usize,
+    pub offset_for_records: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -108,6 +109,7 @@ pub fn parse_request(
     include_records_sample: Option<bool>,
     order_by_for_records: Option<&str>,
     limit: Option<i64>,
+    offset_for_records: Option<i64>,
     allowed_fields: &[&str],
 ) -> AppResult<GroupByRequest> {
     let dimensions = parse_dimensions(group_by, allowed_fields)?;
@@ -123,12 +125,22 @@ pub fn parse_request(
         Some(limit) => limit.min(200) as usize,
         None => 50,
     };
+    let offset_for_records = match offset_for_records {
+        Some(offset) if offset < 0 => {
+            return Err(AppError::BadRequest(format!(
+                "offsetForRecords '{offset}' is invalid. Should be an integer"
+            )))
+        }
+        Some(offset) => offset as usize,
+        None => 0,
+    };
     Ok(GroupByRequest {
         dimensions,
         aggregates,
         include_records_sample: include_records_sample.unwrap_or(false),
         order_by_for_records,
         limit,
+        offset_for_records,
     })
 }
 
@@ -580,6 +592,10 @@ pub fn execute(
     for (key, mut members) in groups {
         if request.include_records_sample {
             sort_records(&mut members, &request.order_by_for_records, date_fields);
+            members = members
+                .into_iter()
+                .skip(request.offset_for_records)
+                .collect();
         }
         let mut group = serde_json::Map::new();
         for aggregate in &request.aggregates {
@@ -881,6 +897,7 @@ mod tests {
             Some(true),
             Some("createdAt[DescNullsLast]"),
             None,
+            None,
             &fields(),
         )
         .unwrap();
@@ -899,12 +916,14 @@ mod tests {
             None,
             None,
             None,
+            None,
             &fields(),
         )
         .is_err());
         assert!(parse_request(
             Some(r#"[{"jobTitle":true}]"#),
             Some(r#"["wat"]"#),
+            None,
             None,
             None,
             None,

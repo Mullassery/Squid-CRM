@@ -5981,6 +5981,54 @@ async fn rest_group_by_matches_captured_contract() {
     assert_eq!(filter.status, StatusCode::OK, "body: {}", filter.body);
     assert!(filter.body["errors"].is_null(), "errors: {}", filter.body);
 
+    let second_view = send(
+        &app,
+        authorized(
+            "POST",
+            "/graphql",
+            &token,
+            Some(json!({
+                "query": "mutation($input: CreateViewInput!) { createView(input:$input) { id } }",
+                "variables": { "input": { "name": "Sorted", "objectMetadataId": object_id, "icon": "IconList" } }
+            })),
+        ),
+    )
+    .await;
+    assert!(
+        second_view.body["errors"].is_null(),
+        "view body: {}",
+        second_view.body
+    );
+    let second_view_id = second_view.body["data"]["createView"]["id"]
+        .as_str()
+        .expect("view id")
+        .to_string();
+    let view_sort = send(
+        &app,
+        authorized(
+            "POST",
+            "/graphql",
+            &token,
+            Some(json!({
+                "query": "mutation($input: CreateViewSortInput!) { createViewSort(input: $input) { id direction } }",
+                "variables": {
+                    "input": {
+                        "fieldMetadataId": name_field_id,
+                        "viewId": second_view_id,
+                        "direction": "DESC",
+                        "subFieldName": "firstName"
+                    }
+                }
+            })),
+        ),
+    )
+    .await;
+    assert!(
+        view_sort.body["errors"].is_null(),
+        "sort: {}",
+        view_sort.body
+    );
+
     let response = send(
         &app,
         authorized(
@@ -6003,6 +6051,38 @@ async fn rest_group_by_matches_captured_contract() {
     assert_eq!(groups[0]["records"].as_array().unwrap().len(), 2);
     assert_eq!(groups[1]["groupByDimensionValues"], json!([null]));
     assert_eq!(groups[1]["countNotEmptyId"], "1");
+
+    let offset = send(
+        &app,
+        authorized(
+            "GET",
+            "/rest/people/groupBy?group_by=%5B%7B%22jobTitle%22%3Atrue%7D%5D&aggregate=%5B%22countNotEmptyId%22%5D&include_records_sample=true&order_by_for_records=createdAt%5BAscNullsLast%5D&offsetForRecords=1",
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(offset.status, StatusCode::OK, "body: {}", offset.body);
+    let offset_groups = offset.body.as_array().expect("offset groups");
+    assert_eq!(offset_groups[0]["records"].as_array().unwrap().len(), 1);
+    assert_eq!(offset_groups[0]["records"][0]["name"]["firstName"], "Grace");
+
+    let sorted = send(
+        &app,
+        authorized(
+            "GET",
+            &format!(
+                "/rest/people/groupBy?group_by=%5B%7B%22jobTitle%22%3Atrue%7D%5D&aggregate=%5B%22countNotEmptyId%22%5D&include_records_sample=true&viewId={second_view_id}"
+            ),
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(sorted.status, StatusCode::OK, "body: {}", sorted.body);
+    let sorted_groups = sorted.body.as_array().expect("sorted groups");
+    assert_eq!(sorted_groups[0]["records"][0]["name"]["firstName"], "Grace");
+    assert_eq!(sorted_groups[0]["records"][1]["name"]["firstName"], "Ada");
 
     let filtered = send(
         &app,
