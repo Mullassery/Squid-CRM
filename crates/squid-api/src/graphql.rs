@@ -95,6 +95,16 @@ fn api_key_gql(
     }
 }
 
+fn file_signature(secret: &str, action: &str, id: Uuid, expires: i64) -> String {
+    squid_auth::hash_token(&format!("{secret}:{action}:{id}:{expires}"))
+}
+
+fn signed_file_path(secret: &str, prefix: &str, action: &str, id: Uuid) -> String {
+    let expires = Utc::now().timestamp() + 3600;
+    let signature = file_signature(secret, action, id, expires);
+    format!("{prefix}/{id}?expires={expires}&token={signature}")
+}
+
 #[derive(Debug, SimpleObject)]
 pub struct AuthPayload {
     pub tokens: AuthTokenPair,
@@ -4749,6 +4759,11 @@ impl MutationRoot {
         _field_metadata_universal_identifier: Option<String>,
     ) -> async_graphql::Result<FileUploadTarget> {
         let auth = require_auth(ctx)?;
+        if !has_permission(state(ctx), auth, "UPLOAD_FILE").await? {
+            return Err(gql_err(AppError::Forbidden(
+                "Insufficient permissions".to_string(),
+            )));
+        }
         let field_metadata_id = field_metadata_id
             .as_deref()
             .map(Uuid::parse_str)
@@ -4771,9 +4786,15 @@ impl MutationRoot {
             )
             .await
             .map_err(|e| gql_err(AppError::Internal(e)))?;
+        let upload_url = signed_file_path(
+            &state(ctx).config.jwt_secret,
+            "/files/upload",
+            "upload",
+            file.id,
+        );
         Ok(FileUploadTarget {
             file_id: file.id,
-            upload_url: format!("/files/upload/{}", file.id),
+            upload_url,
             content_type: content_type.to_string(),
             expires_at: Utc::now() + chrono::Duration::hours(1),
         })
@@ -4785,6 +4806,11 @@ impl MutationRoot {
         file_id: String,
     ) -> async_graphql::Result<FileWithSignedUrl> {
         let auth = require_auth(ctx)?;
+        if !has_permission(state(ctx), auth, "DOWNLOAD_FILE").await? {
+            return Err(gql_err(AppError::Forbidden(
+                "Insufficient permissions".to_string(),
+            )));
+        }
         let file_id = Uuid::parse_str(&file_id)
             .map_err(|_| gql_err(AppError::BadRequest("Invalid file id".to_string())))?;
         let file = state(ctx)
@@ -4793,7 +4819,7 @@ impl MutationRoot {
             .await
             .map_err(|e| gql_err(AppError::Internal(e)))?
             .ok_or_else(|| gql_err(AppError::NotFound("File not found".to_string())))?;
-        let url = file.url();
+        let url = signed_file_path(&state(ctx).config.jwt_secret, "/files", "download", file.id);
         Ok(FileWithSignedUrl {
             id: file.id,
             path: file.path,

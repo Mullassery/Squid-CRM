@@ -7047,6 +7047,39 @@ async fn file_upload_and_avatar_file_write_round_trip() {
         "image/png"
     );
 
+    let unsigned_upload = send(
+        &app,
+        Request::builder()
+            .method("PUT")
+            .uri(format!("/files/upload/{file_id}"))
+            .header(header::CONTENT_TYPE, "image/png")
+            .body(Body::from(vec![0x89, b'P', b'N', b'G']))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        unsigned_upload.status,
+        StatusCode::FORBIDDEN,
+        "body: {}",
+        unsigned_upload.body
+    );
+
+    let unsigned_download = send(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri(format!("/files/{file_id}"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        unsigned_download.status,
+        StatusCode::FORBIDDEN,
+        "body: {}",
+        unsigned_download.body
+    );
+
     let stored = send(
         &app,
         Request::builder()

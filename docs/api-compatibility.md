@@ -1,408 +1,213 @@
-# API Compatibility Contract
+# TODO
 
-Authority for what the Rust backend must reproduce, and what the Phase 4 slice
-currently implements.
+## Done in the current increment (Phase 4 slice)
+- [x] D-001 recorded: reference-only + firewall + legal review.
+- [x] D-007 recorded: slice = Person + auth + workspace bootstrap.
+- [x] Rust workspace (core/db/auth/api/server) compiles.
+- [x] Core + per-workspace migrations with advisory-lock safety.
+- [x] Auth: signup/signin/signout, Argon2id, JWT, hashed session cookies, bearer.
+- [x] GraphQL login flow + person query/mutations.
+- [x] REST people list/get/create/delete with upstream envelope + error contract.
+- [x] Tenant isolation enforced and tested against real PostgreSQL.
+- [x] 57 tests passing (13 API unit, 37 integration, 5 auth, 2 DB); clippy clean; live smoke test.
+- [x] Dockerfile, docker-compose, CI workflow, Makefile, smoke script.
 
-Sources, in order of precedence:
+## Phase 2 (contracts)
+- [x] Boot upstream via Docker (`twentycrm/twenty:v2.49.0`) and capture SDL,
+      OpenAPI and REST/GraphQL examples into `contracts/v2.49.0/`.
+- [x] Diff captured contracts against `docs/api-compatibility.md` (divergence
+      table §8).
+- [x] Build the pinned source (`--target twenty-server`), capture v2.50.0 SDL,
+      OpenAPI and examples into `contracts/v2.50.0/`, and diff against v2.49.0.
+- [x] Map every frontend operation in `twenty-front/src/generated/graphql.ts`
+      and `generated-metadata/graphql.ts` (`docs/frontend-operation-map.md`).
+- [x] Map every captured REST/OpenAPI route (`docs/rest-route-map.md`).
 
-1. Golden fixtures from a live Twenty **2.50.0** in `contracts/v2.50.0/`
-   (pinned source built locally; captured 2026-10-20, see
-   `contracts/README.md`). The `contracts/v2.49.0/` fixtures are historical.
-2. Source inspection of `twentyhq/twenty@08a0e5f1` (`TWENTY_CURRENT_VERSION =
-   2.50.0`) for behaviour not exercised by the fixtures.
+## Phase 4 follow-ups (contract alignment — from captured fixtures)
+- [x] REST create returns `data.createPerson`; delete returns
+      `data.deletePerson.id`.
+- [x] Unauthenticated REST is `403 FORBIDDEN_EXCEPTION` (no `code`); 404 has no
+      `code`.
+- [x] Cursors = base64 `{"id":"<uuid>"}`; support `starting_after` /
+      `ending_before`; `hasPreviousPage` only for cursor paging.
+- [x] `additionalEmails`/`additionalPhones` are `[]`, never `null`.
+- [x] GraphQL `people` returns `PersonConnection` (edges/cursor/pageInfo);
+      `person(filter:)`, `createPerson(data:)`.
+- [x] `order_by=field[DescNullsLast],...` grammar (REST + GraphQL); `-createdAt`
+      rejected.
+- [x] Serve auth mutations on `/metadata` and add API-key lifecycle for the data API.
+- [x] Person filter grammar (`and`/`or`/`not`, scalar/composite fields,
+      `companyId` scalar filter) for REST and GraphQL.
+- [x] GraphQL pagination (`first`/`last`/`offset`/`before`/`after`) and
+      `pageInfo` for connections.
+- [x] REST `fields`/`depth` projection and validation for people, companies,
+      opportunities, tasks and notes.
+- [x] REST `groupBy` for people/companies/opportunities/tasks/notes and
+      task/note targets: raw-array response, `group_by`, `aggregate`,
+      `include_records_sample`, `order_by_for_records`, `limit` (0 = all) and
+      `viewId` filters (camelCase, ANDed with explicit `filter`).
+- [x] Tighten the data API to API keys (or the session cookie); user access
+      tokens are rejected on `/graphql` and `/rest`.
+- [x] Opaque refresh-token rotation, replay rejection, and access-token
+      revocation via the session `sid` on signout.
+- [x] CSRF decision: SameSite=Lax HttpOnly cookie + Origin check on unsafe
+      cookie-authenticated requests; bearer/API-key requests are exempt.
+- [x] In-process burst limiting on signup/signin (10 attempts / 15 minutes per
+      account), with a clear extension point for edge/multi-replica limits.
+- [x] Person fields: phones, linkedinLink, avatar file, companyId, actors.
+- [x] Person update (`PATCH /rest/people/{id}`, GraphQL `updatePerson`).
+- [x] Person batch mutations (`createPeople`, `updatePeople`, `deletePeople`, `destroyPeople`, `restorePeople`).
+- [x] Soft/hard delete + restore (`soft_delete`, `restorePerson`, `destroyPerson`).
+- [x] `mergePeople` with conflict priority, dry run, relation re-pointing and soft delete.
+- [x] Null-clearing updates for person, company, opportunity, task, note and
+      task/note targets (REST + GraphQL); omitted fields stay unchanged.
+- [x] `Person.avatarFile` typed as `[FileObject]`.
+- [x] Null-clearing for view settings and view child records.
+- [x] Metadata indexes (`createOneIndex`/`deleteOneIndex`,
+      `Object.indexMetadataList`), basic `getRoles`/`getRole`/
+      `getPermissionFlags` and `mostlyEmptyFieldMetadataIds`.
+- [x] Search-field metadata (`Object.searchFieldMetadataList`) and standard
+      relation metadata (`Field.relation` for the seeded relationship fields),
+      including reciprocal `company.people`/`company.opportunities` and
+      `person.pointOfContactForOpportunities` fields.
+- [x] Task/note target metadata objects, polymorphic target reverse fields
+      (`task.taskTargets`, `note.noteTargets`, company/person/opportunity
+      target collections) and target relation metadata.
+- [x] Full metadata field coverage: morph metadata (`target` head plus
+      `targetCompany`/`targetOpportunity`/`targetPerson`) and workspace-member
+      reverse fields (`assignedTasks`, `accountOwnerForCompanies`).
+- [x] `client-config` endpoint.
 
-Fixtures now match the pinned source. Every claim below is marked `[fixture]`
-or `[source]`.
+## Phase 5 (module migration)
+- [x] Metadata storage (`core.object_metadata` / `core.field_metadata`) and read
+      API for the standard person object/fields (frontend boot fragment passes).
+- [x] Default person view and `getViews`/`getView` read API matching the
+      frontend `ViewFragment`.
+- [x] Company object slice: workspace `0003_company.sql`, seeded metadata +
+      default view, REST `/rest/companies` CRUD, GraphQL
+      `companies`/`company`/`createCompany`/`updateCompany`/`deleteCompany`/
+      `destroyCompany`/`restoreCompany`.
+- [x] Opportunity object slice: workspace `0004_opportunity.sql`, seeded
+      metadata + default view, REST `/rest/opportunities` CRUD, GraphQL
+      `opportunities`/`opportunity`/CRUD with stage/name/company filters.
+- [x] Task and Note slices: workspace `0005_task.sql` / `0006_note.sql`, seeded
+      metadata + default views, REST CRUD and GraphQL CRUD with status/title
+      filters; `RichText` body support.
+- [x] Task/note targets: `task_target`/`note_target` migrations, GraphQL
+      `taskTargets`/`noteTargets` connections with `totalCount`, root queries,
+      create/update/delete/destroy/restore single and batch mutations, nested
+      target records, and REST `/rest/taskTargets` + `/rest/noteTargets` CRUD.
+- [x] Metadata object/field writes (`createOneObject`/`updateOneObject`/
+      `deleteOneObject`, `createOneField`/`updateOneField`/`deleteOneField`) with
+      system guards; seeded default `name` field for custom objects.
+- [x] View writes: `createView`/`updateView`/`deleteView`/`destroyView` plus
+      view field/filter/sort/group create/update/delete/destroy and
+      `getViewFields`/`getViewFilters`/`getViewSorts`/`getViewGroups` queries.
+- [x] View batch/group writes: `createManyViewFields`, `createManyViewGroups`,
+      `updateManyViewGroups`, `createManyViewFieldGroups`, view field group CRUD,
+      view filter group CRUD and `getViewFieldGroups`/`getViewFilterGroups`.
+- [x] Built-in role metadata (`core.roles`) and role assignment:
+      `updateWorkspaceMemberRole`, `assignRoleToApiKey`, `getApiKeyRoles`.
+- [x] Custom role CRUD (`createOneRole`/`updateOneRole`/`deleteOneRole`) with
+      immutable built-in roles.
+- [x] Permission-flag storage on roles (`role_permission_flags`) and
+      `upsertPermissionFlags`/`Role.permissionFlags` read API.
+- [x] `VIEWS` permission-flag enforcement on view write mutations.
+- [x] REST data operations enforce role read/update/soft-delete/destroy
+      capabilities.
+- [x] GraphQL data operations enforce role read/update/soft-delete/destroy
+      capabilities.
+- [x] File permission enforcement: upload/download URLs are HMAC-signed and
+      issuance requires `UPLOAD_FILE`/`DOWNLOAD_FILE`.
+- [ ] Metadata-generated GraphQL types/routes for custom objects.
+- [x] Custom-object physical tables and scalar column DDL: create table on
+      object creation, add/rename/drop columns on field writes.
+- [x] Generic REST CRUD for custom objects (`/rest/{object}` fallback routes).
+- [x] Relation-field DDL for custom objects: MANY_TO_ONE fields create a UUID
+      column, metadata relation settings and a reverse ONE_TO_MANY field.
+- [ ] Metadata-generated GraphQL types/routes for custom objects.
+- [x] `currentUser`/`currentWorkspace` full frontend boot fragment (ADR 0005;
+      enterprise surfaces are explicit empty/static defaults).
+- [x] `workspaceMembers`/`workspaceMember` GraphQL queries with filters,
+      ordering and pageInfo; boot `workspaceMembers` now lists every member.
+- [x] Admin guard on object/field metadata writes and role/webhook settings
+      mutations (non-admin callers receive `FORBIDDEN`).
+- [x] `ApiKey.role` exposes the upstream `Role` object, resolved from the
+      assigned metadata role.
+- [ ] Permission-flag enforcement for billing/SSO data and feature flags (REST
+      and GraphQL data capabilities, view-write flags and file flags are
+      enforced).
+- [x] REST target routes, target updates/batches, and nested target record resolution (`TaskTarget.targetCompany` etc.).
+- [x] Scalar ordering parity (`orderBy` + REST `order_by`) for company,
+      opportunity, task, note and task/note targets; relation ordering pending.
+- [x] REST filter grammar (`eq`/`neq`/`in`/`contains`/`startsWith`/`endsWith`/
+      `like`/`ilike`/ranges/`is`, `and`/`or`/`not`) for company, opportunity,
+      task, note and task/note targets.
+- [x] Relation filters: nested `company` for people, nested `company` and
+      `pointOfContact` for opportunities (GraphQL + REST dot-path).
+- [x] View-based groupBy paging: `offsetForRecords` and default record order from
+      the view's sorts when `order_by_for_records` is omitted.
+- [x] Nested relation ordering for opportunities (`company.*`,
+      `pointOfContact.*`) in GraphQL `orderBy` and REST `order_by`.
+- [x] Nested relation ordering for people (`company.*`), companies
+      (`accountOwner.*`), tasks (`assignee.*`) and task/note targets.
+- [x] GraphQL `search` across person/company/opportunity/task/note with
+      ranked `tsRankCD`/`tsRank`, cursors and include/exclude object filters.
+- [x] Search `ObjectRecordFilterInput` semantics (id/createdAt/updatedAt/
+      deletedAt plus and/or/not).
+- [ ] Export/import; local file upload exists for attachments/avatars but no
+      object-storage backend.
+- [x] Webhook settings CRUD (`webhooks`/`webhook`,
+      `createWebhook`/`updateWebhook`/`deleteWebhook`); delivery workers are not
+      implemented.
+- [ ] Jobs/cron, webhook delivery, workflows, integrations.
 
-## 1. Endpoints
+## Phase 6-8
+- [ ] Threat model (`docs/threat-model.md`).
+- [ ] Security tests + fuzz/property tests for authz and parsers.
+- [ ] Baseline benchmarks on the reference; then Rust comparison (no fabricated numbers).
+- [ ] SBOM + `cargo audit` + `cargo deny` in CI.
+- [ ] Release docs and known-limitations file.
 
-| Prefix | Upstream purpose | Rust status |
-| --- | --- | --- |
-| `/graphql` | Workspace **data** GraphQL | **partial** (person, auth helpers) |
-| `/metadata` | Metadata GraphQL **and auth mutations** | **partial** (auth helpers, API keys) |
-| `/admin-panel` | Admin GraphQL | excluded (licence) |
-| `/rest` | REST CRUD | **partial** (people) |
-| `/open-api/core`, `/open-api/metadata` | OpenAPI JSON | not implemented |
-| `/auth` | OAuth/SSO callbacks only | **partial** (local REST auth) |
-| `/client-config` | Frontend runtime config | **implemented** (static feature flags) |
-| `/files`, `/file-upload`, `/file` | File storage | **partial** (`/files/upload/{id}`, `/files/{id}`; `createFileUpload`/`completeFileUpload`) |
-| `/webhooks` | Inbound webhooks | not implemented |
-| `/healthz` | Health | **implemented** |
-
-Note: `GET /open-api` itself is **404**; only `/open-api/core` and
-`/open-api/metadata` exist `[fixture]`.
-
-## 2. Authentication — actual upstream model
-
-- GraphQL auth mutations (`signUp`, `signUpInWorkspace`, `signUpInNewWorkspace`,
-  `getLoginTokenFromCredentials`, `getAuthTokensFromLoginToken`,
-  `activateWorkspace`, API-key management) are served on **`/metadata`**
-  `[fixture]`.
-- Workspaces start in `PENDING_CREATION`. `activateWorkspace(data: {})` must run
-  before the workspace schema (and therefore the data schema) exists `[fixture]`.
-- The **data API** (`/graphql`, `/rest`) accepts **API keys** as
-  `Authorization: Bearer <token>` `[fixture]`. A user access token is rejected:
-  - REST → `400` `{"statusCode":400,"error":"Error","messages":["Authentication context is invalid"],"code":"NO_AUTHENTICATION_CONTEXT"}`
-  - GraphQL resolver → `INVALID_AUTH_CONTEXT`
-- API key creation `[fixture]`:
-  `createApiKey(input: { name, expiresAt, roleId })` then
-  `generateApiKeyToken(apiKeyId, expiresAt)`; the latter returns the bearer token.
-- Unauthenticated REST `[fixture]`:
-  `403` `{"statusCode":403,"messages":["Missing authentication token"],"error":"FORBIDDEN_EXCEPTION"}`
-  (no `code` member).
-- The frontend uses a `twenty-session` HttpOnly cookie; cookie issuance is
-  restricted to an allowed origin `[source]`.
-
-Implemented in the Rust slice (documented divergences in §8):
-
-- `POST /auth/signup`, `/auth/signin`, `/auth/refresh`, `/auth/signout`.
-- GraphQL `signUp`, `signIn`, `getLoginTokenFromCredentials`,
-  `getAuthTokensFromLoginToken`, `renewToken`, `signOut(refreshToken:)`.
-- Argon2id passwords; HS256 access/login JWTs with `typ`, `sid` and `jti`
-  claims; opaque 32-byte session tokens stored as SHA-256 hashes.
-- Access tokens are accepted only on `/metadata`. The data API (`/graphql`,
-  `/rest`) accepts API keys or the `twenty-session` cookie; user access tokens
-  are rejected, matching upstream.
-- Refresh tokens are opaque, stored hashed, rotated atomically on use, and
-  rejected on replay. Signout deletes the session, so access tokens
-  carrying its `sid` stop working immediately.
-- Cookie-authenticated unsafe requests with a foreign `Origin` are rejected;
-  bearer/API-key requests are exempt. Signup/signin are burst-limited in
-  process (10 attempts / 15 minutes per account).
-- `/metadata` is mounted with the same GraphQL schema, so auth mutations,
-  API-key management and the implemented metadata object/field/index/role
-  queries are reachable there.
-- API keys: `createApiKey(input: { name, expiresAt, roleId })`,
-  `generateApiKeyToken(apiKeyId, expiresAt)`, `revokeApiKey(input: { id })`,
-  `apiKeys`, `apiKey(input: { id })`. Tokens are `api_<random>`, stored as
-  SHA-256 hashes; revocation is immediate. `roleId` is accepted but the key
-  inherits the caller's built-in role until the metadata role engine lands.
-
-## 3. REST data contract `[fixture]`
-
-List — `GET /rest/people?limit=2`:
-
-```json
-{
-  "data": { "people": [ { "id": "...", "name": { "firstName": "Ada" } } ] },
-  "totalCount": 6,
-  "pageInfo": {
-    "startCursor": "eyJpZCI6IjZjNzc0ZDgwLTczMGYtNGUyMy1iNzA3LTM5MDUzOTc3Y2JmZiJ9",
-    "endCursor": "eyJpZCI6IjdhOTNkMWU1LTNmNzQtNDk0NS04YTY1LWQ3Zjk5NjA4M2Y3MiJ9",
-    "hasNextPage": true,
-    "hasPreviousPage": false
-  }
-}
-```
-
-- Cursor is base64 of `{"id":"<uuid>"}`.
-- `hasPreviousPage` was `false` for `offset=1`; do not assume parity from
-  `offset > 0` without further fixtures.
-- `limit`, `offset` and `order_by` are accepted.
-
-Create — `POST /rest/people` → `201`:
-
-```json
-{ "data": { "createPerson": { "id": "...", "name": { ... } } } }
-```
-
-Get one — `GET /rest/people/{id}` → `{ "data": { "person": { ... } } }`.
-
-Update — `PATCH /rest/people/{id}` with the partial `PersonForUpdate` body
-(fields directly, not wrapped in `data`) → `200`:
-
-```json
-{ "data": { "updatePerson": { "id": "...", "jobTitle": "Countess" } } }
-```
-
-Delete — `DELETE /rest/people/{id}` → `200`:
-
-```json
-{ "data": { "deletePerson": { "id": "..." } } }
-```
-
-`?soft_delete=true` performs a recoverable delete; the default is a permanent
-delete, matching the OpenAPI default (`soft_delete=false`). Restore —
-`PATCH /rest/people/{id}/restore` → `{ "data": { "restorePerson": { ... } } }`.
-
-Errors `[fixture]`:
-
-```json
-{ "statusCode": 404, "error": "NotFoundException", "messages": ["Record not found"] }
-{ "statusCode": 400, "error": "BadRequestException",
-  "messages": ["Invalid string value 'not-an-email' for email field \"emails.primaryEmail\""] }
-```
-
-There is no `code` member on these two. The `NO_AUTHENTICATION_CONTEXT` body
-does include `code`.
-
-## 4. Metadata contract (Phase 5 slice)
-
-`/metadata` now serves the read path used by the frontend boot query
-(`ObjectMetadataItems`):
-
-```graphql
-objects(paging: CursorPaging, filter: ObjectFilter): ObjectConnection
-object(id: UUID!): Object
-fields(paging: CursorPaging, filter: FieldFilter): FieldConnection
-field(id: UUID!): Field
-Object.fieldsList: [Field!]!
-Object.fields(paging: CursorPaging, filter: FieldFilter): ObjectFieldsConnection!
-```
-
-Implemented: eight standard objects (person, company, opportunity, task, note,
-taskTarget, noteTarget, workspaceMember) with seeded fields, cursor paging for
-`objects`, and
-id/object/active/system filters. Object and field metadata writes are implemented
-(`createOneObject`, `updateOneObject`, `deleteOneObject`, `createOneField`,
-`updateOneField`, `deleteOneField`) with system-object/system-field guards.
-Metadata indexes are persisted and exposed through `createOneIndex`,
-`deleteOneIndex` and `Object.indexMetadataList`; roles are stored in
-`core.roles` and exposed through `getRoles`/`getRole`/`getApiKeyRoles` with
-built-in role seeding, member/API-key assignment and custom-role CRUD.
-`getPermissionFlags`, `upsertPermissionFlags` and
-`mostlyEmptyFieldMetadataIds` exist; view writes enforce the `VIEWS` role flag; REST and GraphQL data operations
-enforce the role's read/update/soft-delete/destroy capabilities. File flags and
-custom-role authorization beyond the legacy enum remain open. Custom objects do **not** yet generate
-physical workspace tables or dynamic GraphQL/REST schemas; relation field
-creation remains unimplemented, and index metadata does not create physical
-PostgreSQL indexes.
-`Object.searchFieldMetadataList` derives entries from searchable fields and the
-object's tsvector field. `Field.relation` is populated for seeded forward
-relations (`person.companyId`, `opportunity.companyId`/`pointOfContactId`,
-`task.assigneeId`, `company.accountOwnerId`) and reciprocal fields
-(`company.people`, `company.opportunities`,
-`person.pointOfContactForOpportunities`) plus `taskTargets`/`noteTargets`
-collections on task, note, company, person and opportunity.
-`taskTarget`/`noteTarget` expose a `target` morph head and
-`targetCompany`/`targetOpportunity`/`targetPerson` morph relations (one shared
-`morphId`) through `Field.morphRelations`; `workspaceMember.assignedTasks` and
-`workspaceMember.accountOwnerForCompanies` resolve `task.assigneeId` and
-`company.accountOwnerId` to real reverse field ids.
-
-The default person view is seeded and served through:
-
-```graphql
-getViews(objectMetadataId: String, viewTypes: [ViewType!]): [View!]!
-getView(id: String!): View
-getViewFields(viewId: String!): [ViewField!]!
-getViewFilters(viewId: String!): [ViewFilter!]!
-getViewSorts(viewId: String!): [ViewSort!]!
-getViewGroups(viewId: String!): [ViewGroup!]!
-```
-
-It is a `TABLE`/`INDEX` view named "All people" with five visible view fields
-(name, emails, jobTitle, phones, createdAt). Filters, sorts, groups and field
-groups are empty by default. `createView`/`updateView`/`deleteView`/`destroyView`
-and view field/filter/sort/group create/update/delete/destroy plus the batch
-create/update mutations and view field/filter group writes are implemented;
-nested relation filters for people (`company`) and opportunities (`company`,
-`pointOfContact`), roles and `minimalMetadata` remain partially unimplemented
-(see `TODO.md`).
-
-The frontend boot document (`GetCurrentUser` / `UserQueryFragment`) is served:
-identity, workspace members, current workspace and workspace URLs are live.
-Roles are derived from the membership role; `getRoles`/`getRole` and
-`getPermissionFlags` expose the built-in roles and static permission catalogue.
-Role assignment/enforcement, feature flags, SSO, billing, installed
-applications, available workspaces and object/row-level permissions remain
-empty, disabled or advisory defaults (ADR 0005).
-
-## 5. GraphQL data contract `[fixture]`
-
-```graphql
-people(first: Int, last: Int, offset: Int, before: String, after: String,
-       filter: PersonFilterInput, orderBy: [PersonOrderByInput]): PersonConnection
-person(filter: PersonFilterInput!): Person
-createPerson(data: PersonCreateInput!, upsert: Boolean, shareWith: [ShareWithInput!]): Person
-updatePerson(id: UUID!, data: PersonUpdateInput!): Person
-deletePerson(id: UUID!): Person
-destroyPerson(id: UUID!): Person
-restorePerson(id: UUID!): Person
-mergePeople(ids: [UUID!]!, conflictPriorityIndex: Int!, dryRun: Boolean): Person
-createPeople(data: [PersonCreateInput!]!, upsert: Boolean, shareWith: [ShareWithInput!]): [Person!]
-updatePeople(data: PersonUpdateInput!, filter: PersonFilterInput!): [Person!]
-deletePeople(filter: PersonFilterInput!): [Person!]
-destroyPeople(filter: PersonFilterInput!): [Person!]
-restorePeople(filter: PersonFilterInput!): [Person!]
-
-type PersonConnection {
-  totalCount: Int
-  edges: [PersonEdge!]!
-  pageInfo: PageInfo!
-}
-type PersonEdge { node: Person! cursor: Cursor! }
-type PageInfo {
-  startCursor: ConnectionCursor
-  endCursor: ConnectionCursor
-  hasNextPage: Boolean!
-  hasPreviousPage: Boolean!
-}
-```
-
-Example fixture: `contracts/v2.50.0/examples/gql-people-connection.json`.
-
-## 6. Person shape `[fixture]`
-
-REST record fields observed on create/list:
-
-```json
-{
-  "id": "uuid",
-  "createdAt": "2026-10-19T21:55:27.301Z",
-  "updatedAt": "2026-10-19T21:55:27.301Z",
-  "deletedAt": null,
-  "name": { "firstName": "Ada", "lastName": "Lovelace" },
-  "emails": { "primaryEmail": "ada@example.com", "additionalEmails": [] },
-  "linkedinLink": { "primaryLinkLabel": "", "primaryLinkUrl": "", "secondaryLinks": [] },
-  "jobTitle": "Mathematician",
-  "phones": { "primaryPhoneNumber": "", "primaryPhoneCountryCode": "",
-              "primaryPhoneCallingCode": "", "additionalPhones": [] },
-  "avatarUrl": "",
-  "avatarFile": null,
-  "position": 0,
-  "createdBy": { "source": "API", "workspaceMemberId": null,
-                 "name": "contract-capture", "context": {} },
-  "updatedBy": { "source": "API", "workspaceMemberId": null,
-                 "name": "contract-capture", "context": {} },
-  "searchVector": "'ada':1 'ada@example.com':3 ...",
-  "companyId": null
-}
-```
-
-`additionalEmails` and `additionalPhones` are **empty arrays**, not `null`.
-
-## 6a. REST groupBy `[fixture]`
-
-All standard object routes expose `/rest/{people,companies,opportunities,tasks,notes,taskTargets,noteTargets}/groupBy`.
-The response is a **bare JSON array**, not the list envelope:
-
-```json
-[
-  {
-    "countNotEmptyId": "2",
-    "percentageNotEmptyId": "1.00000000000000000000",
-    "groupByDimensionValues": ["Engineer"]
-  }
-]
-```
-
-- `group_by` is a required JSON array of single-key objects:
-  `[{"jobTitle":true}]`, `[{"name":{"firstName":true}}]`,
-  `[{"createdAt":{"granularity":"MONTH","timeZone":"UTC"}}]`.
-- `aggregate` is a JSON array such as
-  `["countNotEmptyId","countEmptyJobTitle","countUniqueValuesJobTitle"]`.
-  Aggregate values are strings; percentages use 20 decimal places.
-- `include_records_sample=true` adds `records`; `order_by_for_records` uses
-  `field[Direction]` (four null-order variants only).
-- `viewId` is camelCase, unknown IDs are ignored, and view filters are ANDed
-  with an explicit `filter`.
-- `limit` defaults to 50, `limit=0` returns all groups, and dates support
-  `NONE`, `DAY`, `WEEK`, `MONTH`, `QUARTER`, `YEAR`, `DAY_OF_THE_WEEK`,
-  `MONTH_OF_THE_YEAR`, `QUARTER_OF_THE_YEAR`.
-- Captured errors include invalid `group_by` syntax, unknown group/aggregate
-  fields, `position` unsupported in groupBy and multiple subfields in one
-  groupBy input.
-
-## 7. Pagination, sorting, filtering `[fixture]` / `[source]`
-
-- GraphQL connections use `first`/`last`/`before`/`after`/`offset`.
-- REST paging parameters are `limit`, `offset`, `starting_after`, `ending_before`.
-  `starting_after=<cursor>` is exclusive and flips `hasPreviousPage` to `true`;
-  plain `after=` is not the REST spelling.
-- REST sorting: `order_by=field` (ascending, `AscNullsFirst` by default), with
-  optional direction in brackets and comma-separated fields:
-  `?order_by=createdAt[DescNullsLast],name.firstName[AscNullsFirst]`.
-  `-createdAt` is **not** accepted (`FIELD_NOT_FOUND`).
-- REST cursors are base64 JSON (`{"id": "<uuid>"}` in the fixtures) and must
-  round-trip. `hasPreviousPage` stays `false` for pure `offset` paging even when
-  `offset > 0`.
-- REST filters use the documented mini-language:
-  `?filter=createdAt[gte]:"2024-01-01",name.firstName[startsWith]:A`,
-  `or(...)`, `not(...)`, quoted values, and `(a,b)` lists for `in`.
-  Implemented fields: `id`, `createdAt`, `updatedAt`, `name.firstName`,
-  `name.lastName`, `emails.primaryEmail`, `jobTitle`; comparators: `eq`, `neq`,
-  `contains`, `startsWith`, `endsWith`, `like`, `ilike`, `gt`, `gte`, `lt`,
-  `lte`, `in`, `is` (`NULL`/`NOT_NULL`). Unknown fields/comparators are `400`.
-- GraphQL filters accept the same structured operators under
-  `PersonFilterInput` (`and`/`or`/`not`, `id`, `name`, `emails`, `jobTitle`,
-  dates). Filtered `totalCount` matches the filtered set.
-
-## 8. Tenant isolation
-
-Every workspace-scoped query resolves `workspace_id` from the principal and
-derives a validated schema name (`workspace_<32 hex>`). Integration test
-`tenant_isolation_blocks_cross_workspace_reads` proves workspace B cannot read,
-list or delete workspace A's records.
-
-## 9. Divergences in the current Rust slice
-
-Alignment completed and covered by tests:
-
-| Area | Contract | Rust status |
-| --- | --- | --- |
-| REST create | `data.createPerson` | aligned |
-| REST delete | `data.deletePerson.id` | aligned |
-| REST unauth | `403` `FORBIDDEN_EXCEPTION` + `Missing authentication token` | aligned |
-| REST 404 | `NotFoundException`, `Record not found`, no `code` | aligned |
-| REST 400 | `BadRequestException`, no `code` | aligned |
-| REST cursors | base64 `{"id":"<uuid>"}` | aligned (exact fixture cursor asserted) |
-| REST paging | `limit`, `offset`, `starting_after`, `ending_before` | aligned |
-| REST sorting | `order_by=field[Direction],...` | aligned for whitelisted person columns |
-| REST projection | `fields` (top-level), `depth` (0/1) | aligned; `id` always returned, unknown fields/depths return the captured `400` text |
-| `additionalEmails` / `additionalPhones` | `[]`, never `null` | aligned |
-| Person fields | phones, links, avatar, position, actors, deletedAt, searchVector, companyId | aligned (see actor/searchVector notes) |
-| REST/GraphQL update | `PATCH /rest/{objects}/{id}`, `update*` | aligned; explicit `null` clears nullable fields on people, companies, opportunities, tasks, notes and targets; omitted fields stay unchanged |
-| Delete semantics | default hard delete, `soft_delete=true` soft, restore endpoint | aligned |
-| GraphQL lifecycle | `deletePerson`, `destroyPerson`, `restorePerson` | aligned |
-| GraphQL `people` | `PersonConnection` with `edges`/`pageInfo` | aligned |
-| GraphQL filters | `and`/`or`/`not`, composite name/emails, dates, `companyId`, `company` | aligned for scalar person fields and nested `company`; other relations absent |
-| GraphQL batch mutations | `createPeople`, `updatePeople`, `deletePeople`, `destroyPeople`, `restorePeople`, `mergePeople` | aligned; merge re-points opportunities and task/note targets and supports `dryRun` |
-| Metadata API | `objects`/`object`/`fields`/`field` + object/field/index/role reads and writes | reads for eight standard objects; object/field writes; index CRUD; built-in roles and permission flags; search-field, relation and morph metadata incl. task/note target collections and workspace-member reverse fields; no dynamic schema |
-| Views API | `getViews`/`getView`/`getViewFields`/`getViewFilters`/`getViewSorts`/`getViewGroups`/`getViewFieldGroups`/`getViewFilterGroups`, `createView`/`updateView`/`deleteView`/`destroyView`, view field/filter/sort/group/field-group/filter-group CRUD + batch mutations | aligned for standard views; groupBy honors `offsetForRecords` and view sorts; nested relation ordering is not implemented |
-| Workspace members | `workspaceMembers`/`workspaceMember` (filters, ordering, pageInfo) | aligned for core profile fields; position/format filters, profile writes and aggregates are absent |
-| Search | `search` query with ranked `SearchRecord` edges | implemented across person/company/opportunity/task/note with include/exclude filters, cursors and id/date `ObjectRecordFilterInput` predicates |
-| Frontend boot | `currentUser`/`currentWorkspace` full fragment | shape aligned; roles/permissions/billing/SSO are static or empty defaults |
-| API key role | upstream `Role` object | internal enum serialised as `WorkspaceRole`; no role engine yet |
-| GraphQL `person(filter:)` | `PersonFilterInput!` | aligned for scalar person fields including `companyId`; nested `company` filter absent |
-| GraphQL `createPerson(data:)` | `PersonCreateInput!`, `upsert`, `shareWith` | aligned; `upsert`/`shareWith` accepted but not applied |
-| GraphQL `deletePerson(id:)` | returns `Person` | aligned |
-| GraphQL cursor type | `Cursor` scalar | aligned |
-| GraphQL `OrderByDirection` | four null-order variants | aligned |
-
-Known remaining divergences (do not claim parity):
-
-| Area | Upstream | Rust today | Action |
-| --- | --- | --- | --- |
-| GraphQL auth host | `/metadata` | `/metadata`, plus `/graphql` and `/auth` aliases | tighten later |
-| Data-API auth | API keys only | API keys or session cookie; access tokens rejected | aligned for the implemented surface |
-| Workspace bootstrap | `PENDING_CREATION` + `activateWorkspace` | atomic signup + immediate schema | document; add lifecycle |
-| Company filters | full `CompanyFilterInput` with relations | GraphQL `id`/`createdAt`/`updatedAt`/`name`/`accountOwnerId` + logic; REST scalar and dot-path `company.*` filters | nested `accountOwner` relation filters pending |
-| Company ordering | GraphQL `orderBy` + REST `order_by` | scalar fields plus `accountOwner.*` ordering | aligned for implemented fields |
-| Opportunity filters | full scalar + relation filters | GraphQL scalar fields plus nested `company`/`pointOfContact`; REST scalar and dot-path filters | nested `owner` filters and relation ordering pending |
-| Opportunity ordering | GraphQL `orderBy` + REST `order_by` | scalar fields plus nested `company.*`/`pointOfContact.*` ordering | other relation ordering pending |
-| Task/Note targets | full polymorphic relations + REST | GraphQL nested/root queries + CRUD/batches + `totalCount`; REST CRUD + scalar/relation filter/order | aligned for implemented relations |
-| Task/Note ordering | GraphQL `orderBy` + REST `order_by` | task `assignee.*` plus scalar fields; note scalar fields | aligned for implemented fields |
-| Workspace prefill | sample people/companies on activation | none (new workspace has 0 people) | implement prefill |
-| Filter coverage | all person fields/relations | scalar person fields plus nested `company`; REST dot-path `company.*` | other relations and nested relation ordering pending |
-| REST sort/filter errors | `FIELD_NOT_FOUND` for unknown fields | `400 BadRequestException` text | align error code |
-| GraphQL nullability | `name`/`emails`/`linkedinLink`/`phones`/`avatarUrl` nullable | non-null | align schema |
-| GraphQL scalars | `Position`, `TSVector`, `ConnectionCursor` | `Float`, `String`, `Cursor` | add scalar types |
-| `createdBy`/`updatedBy` | actor name = workspace member | `name: "API"` | populate from principal |
-| `searchVector` | PostgreSQL `to_tsvector` output | simplified lexeme builder | use `to_tsvector` |
-| `avatarFile` | `[FileObject]` | `[FileObject]`/null; writes resolve stored file IDs and return `400 File not found: <id>` | aligned for reads and writes |
-| REST `fields`/`depth` | supported | implemented for five objects | aligned |
-| `viewId`/groupBy | supported | implemented for seven standard object routes; in-memory evaluation and Monday week buckets | aligned for captured granularities and aggregates |
-| API-key roles | metadata role entity | `ApiKey.role` returns the assigned `Role` object; built-in/custom role assignment exists; permission enforcement absent | extend role engine |
-| Error `code` for auth | `NO_AUTHENTICATION_CONTEXT` on data API | `UNAUTHENTICATED` GraphQL error / `403` REST | align exact error code/message |
-
-## 10. Verification method
-
-- Golden fixtures: `contracts/v2.50.0/` (SDL, OpenAPI, examples).
-- Frontend operation map: `docs/frontend-operation-map.md` (every document in
-  `twenty-front/src/generated/graphql.ts` and `generated-metadata/graphql.ts`).
-- REST route map: `docs/rest-route-map.md` (every captured OpenAPI route).
-- Capture script: `scripts/capture-contracts.py` (reproducible).
-- Rust integration tests assert the implemented subset against real PostgreSQL.
-- Divergences above are asserted as **known**; tests must not claim parity for
-  them. No performance claims are made.
+## Known limitations (current)
+- Static schema for the eight seeded standard objects (including task/note
+  targets and workspaceMember). Custom-object metadata writes now create
+  physical tables, scalar/relation columns and generic REST CRUD, but there are
+  no generated GraphQL types/routes for custom objects.
+- Cursor pagination, `order_by`, and scalar/composite filters implemented for
+  whitelisted person columns including `companyId`; nested `company` filters
+  are implemented; nested relation ordering is not.
+- `WorkspaceMember` queries expose the core profile fields; position/calendar
+  and date/time/number-format filters and connection aggregates are absent.
+- Company GraphQL filters cover `id`/`createdAt`/`updatedAt`/`name`/
+  `accountOwnerId` plus `and`/`or`/`not`; nested `accountOwner` relation filters
+  and relation ordering are not implemented.
+- Opportunity filters support nested `company` and `pointOfContact` in GraphQL
+  and REST dot-path syntax; nested `owner` filters are not implemented. Relation
+  ordering is supported for `company.*` and `pointOfContact.*`.
+- Task/Note target REST filters and ordering cover scalar fields.
+- Task/Note GraphQL and REST filters cover scalar fields
+  (id/title/status/dueAt/assigneeId); relation filters and nested ordering are not.
+- No OpenAPI document emitted yet.
+- Workspace activation lifecycle (`PENDING_CREATION` / `activateWorkspace`) and
+  `signUpInNewWorkspace` are not implemented; `/auth/signup` activates directly.
+- No OAuth, 2FA or app-token flows. Built-in roles are metadata-backed and can
+  be assigned to members/API keys, but custom-role CRUD and permission-flag
+  enforcement are absent; `ApiKey.role` still serialises the legacy enum. Auth
+  throttling is per-process only.
+- `groupBy` is evaluated in memory per object slice (up to the repository
+  fetch cap for non-person objects); date buckets support the captured
+  granularities, week starts on Monday.
+- Morph metadata is modelled in metadata only: `taskTarget`/`noteTarget`
+  expose a `target` morph head and `targetCompany`/`targetOpportunity`/
+  `targetPerson` morph relations, while records still use separate `*Id`
+  columns. `Field.relation` is populated for seeded forward relations and
+  reciprocal company/person/task/note target relation fields, including
+  workspace-member reverse fields. Index metadata is stored but does not create
+  physical PostgreSQL indexes.
+- File uploads are stored in PostgreSQL (`core.files`) with HMAC-signed
+  upload/download URLs and file permission flags; S3-compatible storage remains
+  open.
+- Enterprise features excluded (licence).
+- No baseline performance numbers captured; no performance claims made.
+- `reference/twenty` is git-ignored; recreate with `scripts/clone-reference.sh`.

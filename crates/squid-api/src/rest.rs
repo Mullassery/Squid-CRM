@@ -279,11 +279,46 @@ fn map_person_error(error: anyhow::Error) -> AppError {
     }
 }
 
+#[derive(Debug, Default, Deserialize)]
+pub struct FileTokenParams {
+    pub expires: Option<i64>,
+    pub token: Option<String>,
+}
+
+fn file_signature(secret: &str, action: &str, id: Uuid, expires: i64) -> String {
+    squid_auth::hash_token(&format!("{secret}:{action}:{id}:{expires}"))
+}
+
+fn validate_file_token(
+    state: &AppState,
+    id: Uuid,
+    action: &str,
+    params: &FileTokenParams,
+) -> AppResult<()> {
+    let (Some(expires), Some(token)) = (params.expires, params.token.as_deref()) else {
+        return Err(AppError::Forbidden(
+            "Missing or invalid file token".to_string(),
+        ));
+    };
+    if expires < chrono::Utc::now().timestamp() {
+        return Err(AppError::Forbidden("File token expired".to_string()));
+    }
+    let expected = file_signature(&state.config.jwt_secret, action, id, expires);
+    if token != expected {
+        return Err(AppError::Forbidden(
+            "Missing or invalid file token".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 pub async fn upload_file(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
+    Query(params): Query<FileTokenParams>,
     body: axum::body::Bytes,
 ) -> AppResult<axum::http::StatusCode> {
+    validate_file_token(&state, id, "upload", &params)?;
     let stored = state
         .db
         .store_file_content(id, &body)
@@ -299,8 +334,11 @@ pub async fn upload_file(
 pub async fn download_file(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
+    Query(params): Query<FileTokenParams>,
 ) -> AppResult<axum::response::Response> {
     use axum::response::IntoResponse;
+
+    validate_file_token(&state, id, "download", &params)?;
 
     let Some((file, content)) = state
         .db

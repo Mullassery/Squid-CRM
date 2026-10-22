@@ -117,8 +117,9 @@
       capabilities.
 - [x] GraphQL data operations enforce role read/update/soft-delete/destroy
       capabilities.
-- [ ] File permission enforcement plus metadata-driven dynamic schema
-      generation.
+- [x] File permission enforcement: upload/download URLs are HMAC-signed and
+      issuance requires `UPLOAD_FILE`/`DOWNLOAD_FILE`.
+- [ ] Metadata-generated GraphQL types/routes for custom objects.
 - [x] Custom-object physical tables and scalar column DDL: create table on
       object creation, add/rename/drop columns on field writes.
 - [x] Generic REST CRUD for custom objects (`/rest/{object}` fallback routes).
@@ -133,8 +134,8 @@
       mutations (non-admin callers receive `FORBIDDEN`).
 - [x] `ApiKey.role` exposes the upstream `Role` object, resolved from the
       assigned metadata role.
-- [ ] Permission-flag enforcement across file operations, billing/SSO data and
-      feature flags (REST and GraphQL data capabilities plus view-write flags are
+- [ ] Permission-flag enforcement for billing/SSO data and feature flags (REST
+      and GraphQL data capabilities, view-write flags and file flags are
       enforced).
 - [x] REST target routes, target updates/batches, and nested target record resolution (`TaskTarget.targetCompany` etc.).
 - [x] Scalar ordering parity (`orderBy` + REST `order_by`) for company,
@@ -204,9 +205,9 @@
   reciprocal company/person/task/note target relation fields, including
   workspace-member reverse fields. Index metadata is stored but does not create
   physical PostgreSQL indexes.
-- File uploads are stored in PostgreSQL (`core.files`) with an unauthenticated
-  signed-UUID upload/download URL; S3-compatible storage and stronger upload
-  authorization remain open.
+- File uploads are stored in PostgreSQL (`core.files`) with HMAC-signed
+  upload/download URLs and file permission flags; S3-compatible storage remains
+  open.
 - Enterprise features excluded (licence).
 - No baseline performance numbers captured; no performance claims made.
 - `reference/twenty` is git-ignored; recreate with `scripts/clone-reference.sh`.
