@@ -149,6 +149,8 @@ pub struct SearchHit {
     pub image_url: Option<String>,
     pub ts_rank_cd: f32,
     pub ts_rank: f32,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone)]
@@ -1302,35 +1304,35 @@ impl Db {
                 "person",
                 "Person",
                 &format!(
-                    "SELECT 'person'::text AS object_name_singular, 'Person'::text AS object_label_singular, id AS record_id, concat_ws(' ', name_first, name_last) AS label, avatar_url AS image_url, ts_rank_cd(to_tsvector('simple', coalesce(search_vector, '')), plainto_tsquery('simple', $2)) AS ts_rank_cd, ts_rank(to_tsvector('simple', coalesce(search_vector, '')), plainto_tsquery('simple', $2)) AS ts_rank FROM {schema}.person WHERE deleted_at IS NULL AND search_vector ILIKE $1"
+                    "SELECT 'person'::text AS object_name_singular, 'Person'::text AS object_label_singular, id AS record_id, concat_ws(' ', name_first, name_last) AS label, avatar_url AS image_url, ts_rank_cd(to_tsvector('simple', coalesce(search_vector, '')), plainto_tsquery('simple', $2)) AS ts_rank_cd, ts_rank(to_tsvector('simple', coalesce(search_vector, '')), plainto_tsquery('simple', $2)) AS ts_rank, created_at, updated_at FROM {schema}.person WHERE deleted_at IS NULL AND search_vector ILIKE $1"
                 ),
             ),
             (
                 "company",
                 "Company",
                 &format!(
-                    "SELECT 'company'::text, 'Company'::text, id, coalesce(name, ''), NULL::text, ts_rank_cd(to_tsvector('simple', coalesce(search_vector, '')), plainto_tsquery('simple', $2)), ts_rank(to_tsvector('simple', coalesce(search_vector, '')), plainto_tsquery('simple', $2)) FROM {schema}.company WHERE deleted_at IS NULL AND search_vector ILIKE $1"
+                    "SELECT 'company'::text, 'Company'::text, id, coalesce(name, ''), NULL::text, ts_rank_cd(to_tsvector('simple', coalesce(search_vector, '')), plainto_tsquery('simple', $2)), ts_rank(to_tsvector('simple', coalesce(search_vector, '')), plainto_tsquery('simple', $2)), created_at, updated_at FROM {schema}.company WHERE deleted_at IS NULL AND search_vector ILIKE $1"
                 ),
             ),
             (
                 "opportunity",
                 "Opportunity",
                 &format!(
-                    "SELECT 'opportunity'::text, 'Opportunity'::text, id, coalesce(name, ''), NULL::text, ts_rank_cd(to_tsvector('simple', coalesce(search_vector, '')), plainto_tsquery('simple', $2)), ts_rank(to_tsvector('simple', coalesce(search_vector, '')), plainto_tsquery('simple', $2)) FROM {schema}.opportunity WHERE deleted_at IS NULL AND search_vector ILIKE $1"
+                    "SELECT 'opportunity'::text, 'Opportunity'::text, id, coalesce(name, ''), NULL::text, ts_rank_cd(to_tsvector('simple', coalesce(search_vector, '')), plainto_tsquery('simple', $2)), ts_rank(to_tsvector('simple', coalesce(search_vector, '')), plainto_tsquery('simple', $2)), created_at, updated_at FROM {schema}.opportunity WHERE deleted_at IS NULL AND search_vector ILIKE $1"
                 ),
             ),
             (
                 "task",
                 "Task",
                 &format!(
-                    "SELECT 'task'::text, 'Task'::text, id, coalesce(title, ''), NULL::text, ts_rank_cd(to_tsvector('simple', coalesce(search_vector, '')), plainto_tsquery('simple', $2)), ts_rank(to_tsvector('simple', coalesce(search_vector, '')), plainto_tsquery('simple', $2)) FROM {schema}.task WHERE deleted_at IS NULL AND search_vector ILIKE $1"
+                    "SELECT 'task'::text, 'Task'::text, id, coalesce(title, ''), NULL::text, ts_rank_cd(to_tsvector('simple', coalesce(search_vector, '')), plainto_tsquery('simple', $2)), ts_rank(to_tsvector('simple', coalesce(search_vector, '')), plainto_tsquery('simple', $2)), created_at, updated_at FROM {schema}.task WHERE deleted_at IS NULL AND search_vector ILIKE $1"
                 ),
             ),
             (
                 "note",
                 "Note",
                 &format!(
-                    "SELECT 'note'::text, 'Note'::text, id, coalesce(title, ''), NULL::text, ts_rank_cd(to_tsvector('simple', coalesce(search_vector, '')), plainto_tsquery('simple', $2)), ts_rank(to_tsvector('simple', coalesce(search_vector, '')), plainto_tsquery('simple', $2)) FROM {schema}.note WHERE deleted_at IS NULL AND search_vector ILIKE $1"
+                    "SELECT 'note'::text, 'Note'::text, id, coalesce(title, ''), NULL::text, ts_rank_cd(to_tsvector('simple', coalesce(search_vector, '')), plainto_tsquery('simple', $2)), ts_rank(to_tsvector('simple', coalesce(search_vector, '')), plainto_tsquery('simple', $2)), created_at, updated_at FROM {schema}.note WHERE deleted_at IS NULL AND search_vector ILIKE $1"
                 ),
             ),
         ];
@@ -1377,6 +1379,8 @@ impl Db {
                 image_url: row.get("image_url"),
                 ts_rank_cd: row.get("ts_rank_cd"),
                 ts_rank: row.get("ts_rank"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
             })
             .collect())
     }

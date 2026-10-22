@@ -142,9 +142,10 @@
 - [ ] Nested relation ordering for the remaining objects.
 - [x] GraphQL `search` across person/company/opportunity/task/note with
       ranked `tsRankCD`/`tsRank`, cursors and include/exclude object filters.
-- [ ] Search filter input (`ObjectRecordFilterInput`) semantics, export/import;
-      local file upload exists for attachments/avatars but no object-storage
-      backend.
+- [x] Search `ObjectRecordFilterInput` semantics (id/createdAt/updatedAt/
+      deletedAt plus and/or/not).
+- [ ] Export/import; local file upload exists for attachments/avatars but no
+      object-storage backend.
 - [x] Webhook settings CRUD (`webhooks`/`webhook`,
       `createWebhook`/`updateWebhook`/`deleteWebhook`); delivery workers are not
       implemented.

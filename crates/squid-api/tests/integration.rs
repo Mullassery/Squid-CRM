@@ -4041,6 +4041,10 @@ async fn search_returns_ranked_records_with_object_filters() {
         "body: {}",
         company.body
     );
+    let company_id = company.body["data"]["createCompany"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     let person = send(
         &app,
@@ -4092,6 +4096,32 @@ async fn search_returns_ranked_records_with_object_filters() {
     assert!(objects.contains(&"company"));
     assert!(objects.contains(&"person"));
     assert!(edges[0]["node"]["tsRankCD"].as_f64().unwrap() > 0.0);
+
+    let filtered = send(
+        &app,
+        authorized(
+            "POST",
+            "/graphql",
+            &token,
+            Some(json!({
+                "query": "query($searchInput: String!, $limit: Int!, $filter: ObjectRecordFilterInput) { search(searchInput: $searchInput, limit: $limit, filter: $filter) { edges { node { recordId objectNameSingular } } } }",
+                "variables": {
+                    "searchInput": "Searchable",
+                    "limit": 10,
+                    "filter": { "id": { "eq": company_id } }
+                }
+            })),
+        ),
+    )
+    .await;
+    assert!(
+        filtered.body["errors"].is_null(),
+        "errors: {}",
+        filtered.body
+    );
+    let filtered_edges = filtered.body["data"]["search"]["edges"].as_array().unwrap();
+    assert_eq!(filtered_edges.len(), 1);
+    assert_eq!(filtered_edges[0]["node"]["objectNameSingular"], "company");
 
     let people_only = send(
         &app,

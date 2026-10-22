@@ -130,20 +130,64 @@ impl async_graphql::ScalarType for Cursor {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct ObjectRecordFilterInputValue(pub serde_json::Value);
+#[derive(Debug, Default, InputObject)]
+#[graphql(name = "ObjectRecordFilterInput")]
+pub struct ObjectRecordFilterInput {
+    pub id: Option<UuidFilter>,
+    pub created_at: Option<DateTimeFilter>,
+    pub updated_at: Option<DateTimeFilter>,
+    pub deleted_at: Option<DateTimeFilter>,
+    pub and: Option<Vec<ObjectRecordFilterInput>>,
+    pub or: Option<Vec<ObjectRecordFilterInput>>,
+    pub not: Option<Box<ObjectRecordFilterInput>>,
+}
 
-#[async_graphql::Scalar(name = "ObjectRecordFilterInput")]
-impl async_graphql::ScalarType for ObjectRecordFilterInputValue {
-    fn parse(value: async_graphql::Value) -> async_graphql::InputValueResult<Self> {
-        let json = serde_json::to_value(&value)
-            .map_err(|_| async_graphql::InputValueError::custom("invalid filter"))?;
-        Ok(Self(json))
+fn search_filter_matches(
+    record_id: Uuid,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+    filter: &ObjectRecordFilterInput,
+) -> bool {
+    if let Some(and) = filter.and.as_ref() {
+        if !and
+            .iter()
+            .all(|filter| search_filter_matches(record_id, created_at, updated_at, filter))
+        {
+            return false;
+        }
     }
-
-    fn to_value(&self) -> async_graphql::Value {
-        async_graphql::Value::Null
+    if let Some(or) = filter.or.as_ref() {
+        if !or
+            .iter()
+            .any(|filter| search_filter_matches(record_id, created_at, updated_at, filter))
+        {
+            return false;
+        }
     }
+    if let Some(not) = filter.not.as_ref() {
+        if search_filter_matches(record_id, created_at, updated_at, not) {
+            return false;
+        }
+    }
+    if let Some(id) = filter.id.as_ref() {
+        if !uuid_op_matches(&uuid_ops(id), Some(record_id)) {
+            return false;
+        }
+    }
+    if let Some(created) = filter.created_at.as_ref() {
+        if !date_op_matches(&date_ops(created), Some(created_at)) {
+            return false;
+        }
+    }
+    if let Some(updated) = filter.updated_at.as_ref() {
+        if !date_op_matches(&date_ops(updated), Some(updated_at)) {
+            return false;
+        }
+    }
+    if filter.deleted_at.is_some() {
+        return false;
+    }
+    true
 }
 
 #[derive(Debug, SimpleObject)]
@@ -3009,7 +3053,7 @@ impl QueryRoot {
         after: Option<String>,
         excluded_object_name_singulars: Option<Vec<String>>,
         included_object_name_singulars: Option<Vec<String>>,
-        _filter: Option<ObjectRecordFilterInputValue>,
+        filter: Option<ObjectRecordFilterInput>,
     ) -> async_graphql::Result<SearchResultConnection> {
         let auth = require_auth(ctx)?;
         let mut hits = state(ctx)
@@ -3022,6 +3066,11 @@ impl QueryRoot {
             )
             .await
             .map_err(|e| gql_err(AppError::Internal(e)))?;
+        if let Some(filter) = filter.as_ref() {
+            hits.retain(|hit| {
+                search_filter_matches(hit.record_id, hit.created_at, hit.updated_at, filter)
+            });
+        }
         if let Some(after) = after
             .as_deref()
             .map(crate::rest::decode_cursor)
