@@ -78,6 +78,7 @@ pub struct AuthContext {
     pub user_id: Option<Uuid>,
     pub workspace_id: Uuid,
     pub role: Role,
+    pub role_id: Option<Uuid>,
     pub session_id: Option<Uuid>,
     pub api_key_id: Option<Uuid>,
 }

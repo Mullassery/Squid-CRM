@@ -2045,6 +2045,41 @@ fn require_auth<'a>(ctx: &'a Context<'_>) -> async_graphql::Result<&'a AuthConte
     })
 }
 
+async fn has_permission(
+    state: &AppState,
+    auth: &AuthContext,
+    flag: &str,
+) -> async_graphql::Result<bool> {
+    if let Some(role_id) = auth.role_id {
+        if let Some(role) = state
+            .db
+            .get_role(auth.workspace_id, role_id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+        {
+            return Ok(role.permission_flags.iter().any(|value| value == flag));
+        }
+    }
+    Ok(match auth.role {
+        Role::Owner | Role::Admin => true,
+        Role::Member => matches!(
+            flag,
+            "VIEWS" | "UPLOAD_FILE" | "DOWNLOAD_FILE" | "PROFILE_INFORMATION"
+        ),
+    })
+}
+
+async fn require_view_write<'a>(ctx: &'a Context<'_>) -> async_graphql::Result<&'a AuthContext> {
+    let auth = require_auth(ctx)?;
+    if has_permission(state(ctx), auth, "VIEWS").await? {
+        Ok(auth)
+    } else {
+        Err(gql_err(AppError::Forbidden(
+            "Insufficient permissions".to_string(),
+        )))
+    }
+}
+
 fn require_admin<'a>(ctx: &'a Context<'_>) -> async_graphql::Result<&'a AuthContext> {
     let auth = require_auth(ctx)?;
     if !auth.role.can_administer() {
@@ -4757,7 +4792,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         input: CreateViewInput,
     ) -> async_graphql::Result<View> {
-        let auth = require_auth(ctx)?;
+        let auth = require_view_write(ctx).await?;
         let state = state(ctx);
         state
             .db
@@ -4778,7 +4813,7 @@ impl MutationRoot {
         id: String,
         input: UpdateViewInput,
     ) -> async_graphql::Result<View> {
-        let auth = require_auth(ctx)?;
+        let auth = require_view_write(ctx).await?;
         let id = Uuid::parse_str(&id)
             .map_err(|_| gql_err(AppError::BadRequest("Invalid view id".to_string())))?;
         state(ctx)
@@ -4790,7 +4825,7 @@ impl MutationRoot {
     }
 
     async fn delete_view(&self, ctx: &Context<'_>, id: String) -> async_graphql::Result<bool> {
-        let auth = require_auth(ctx)?;
+        let auth = require_view_write(ctx).await?;
         let id = Uuid::parse_str(&id)
             .map_err(|_| gql_err(AppError::BadRequest("Invalid view id".to_string())))?;
         state(ctx)
@@ -4801,7 +4836,7 @@ impl MutationRoot {
     }
 
     async fn destroy_view(&self, ctx: &Context<'_>, id: String) -> async_graphql::Result<bool> {
-        let auth = require_auth(ctx)?;
+        let auth = require_view_write(ctx).await?;
         let id = Uuid::parse_str(&id)
             .map_err(|_| gql_err(AppError::BadRequest("Invalid view id".to_string())))?;
         state(ctx)
@@ -4816,7 +4851,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         input: CreateViewFieldInput,
     ) -> async_graphql::Result<ViewField> {
-        let auth = require_auth(ctx)?;
+        let auth = require_view_write(ctx).await?;
         state(ctx)
             .db
             .create_view_field(auth.workspace_id, &input)
@@ -4829,7 +4864,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         input: UpdateViewFieldMutationInput,
     ) -> async_graphql::Result<ViewField> {
-        let auth = require_auth(ctx)?;
+        let auth = require_view_write(ctx).await?;
         state(ctx)
             .db
             .update_view_field(auth.workspace_id, input.id, &input.update)
@@ -4843,7 +4878,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         input: DeleteViewFieldInput,
     ) -> async_graphql::Result<ViewField> {
-        let auth = require_auth(ctx)?;
+        let auth = require_view_write(ctx).await?;
         state(ctx)
             .db
             .delete_view_field(auth.workspace_id, input.id)
@@ -4857,7 +4892,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         input: DestroyViewFieldInput,
     ) -> async_graphql::Result<ViewField> {
-        let auth = require_auth(ctx)?;
+        let auth = require_view_write(ctx).await?;
         state(ctx)
             .db
             .destroy_view_field(auth.workspace_id, input.id)
@@ -4871,7 +4906,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         input: CreateViewFilterInput,
     ) -> async_graphql::Result<ViewFilter> {
-        let auth = require_auth(ctx)?;
+        let auth = require_view_write(ctx).await?;
         state(ctx)
             .db
             .create_view_filter(auth.workspace_id, &input)
@@ -4884,7 +4919,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         input: UpdateViewFilterMutationInput,
     ) -> async_graphql::Result<ViewFilter> {
-        let auth = require_auth(ctx)?;
+        let auth = require_view_write(ctx).await?;
         state(ctx)
             .db
             .update_view_filter(auth.workspace_id, input.id, &input.update)
@@ -4898,7 +4933,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         input: DeleteViewFilterInput,
     ) -> async_graphql::Result<ViewFilter> {
-        let auth = require_auth(ctx)?;
+        let auth = require_view_write(ctx).await?;
         state(ctx)
             .db
             .delete_view_filter(auth.workspace_id, input.id)
@@ -4912,7 +4947,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         input: DestroyViewFilterInput,
     ) -> async_graphql::Result<ViewFilter> {
-        let auth = require_auth(ctx)?;
+        let auth = require_view_write(ctx).await?;
         state(ctx)
             .db
             .destroy_view_filter(auth.workspace_id, input.id)
@@ -4926,7 +4961,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         input: CreateViewSortInput,
     ) -> async_graphql::Result<ViewSort> {
-        let auth = require_auth(ctx)?;
+        let auth = require_view_write(ctx).await?;
         state(ctx)
             .db
             .create_view_sort(auth.workspace_id, &input)
@@ -4939,7 +4974,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         input: UpdateViewSortMutationInput,
     ) -> async_graphql::Result<ViewSort> {
-        let auth = require_auth(ctx)?;
+        let auth = require_view_write(ctx).await?;
         state(ctx)
             .db
             .update_view_sort(auth.workspace_id, input.id, &input.update)
@@ -4953,7 +4988,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         input: DeleteViewSortInput,
     ) -> async_graphql::Result<bool> {
-        let auth = require_auth(ctx)?;
+        let auth = require_view_write(ctx).await?;
         state(ctx)
             .db
             .delete_view_sort(auth.workspace_id, input.id)
@@ -4966,7 +5001,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         input: DestroyViewSortInput,
     ) -> async_graphql::Result<bool> {
-        let auth = require_auth(ctx)?;
+        let auth = require_view_write(ctx).await?;
         state(ctx)
             .db
             .destroy_view_sort(auth.workspace_id, input.id)
@@ -4979,7 +5014,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         input: CreateViewGroupInput,
     ) -> async_graphql::Result<ViewGroup> {
-        let auth = require_auth(ctx)?;
+        let auth = require_view_write(ctx).await?;
         state(ctx)
             .db
             .create_view_group(auth.workspace_id, &input)
@@ -4992,7 +5027,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         input: UpdateViewGroupMutationInput,
     ) -> async_graphql::Result<ViewGroup> {
-        let auth = require_auth(ctx)?;
+        let auth = require_view_write(ctx).await?;
         state(ctx)
             .db
             .update_view_group(auth.workspace_id, input.id, &input.update)
@@ -5006,7 +5041,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         input: DeleteViewGroupInput,
     ) -> async_graphql::Result<ViewGroup> {
-        let auth = require_auth(ctx)?;
+        let auth = require_view_write(ctx).await?;
         state(ctx)
             .db
             .delete_view_group(auth.workspace_id, input.id)
@@ -5020,7 +5055,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         input: DestroyViewGroupInput,
     ) -> async_graphql::Result<ViewGroup> {
-        let auth = require_auth(ctx)?;
+        let auth = require_view_write(ctx).await?;
         state(ctx)
             .db
             .destroy_view_group(auth.workspace_id, input.id)
@@ -5034,7 +5069,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         inputs: Vec<CreateViewGroupInput>,
     ) -> async_graphql::Result<Vec<ViewGroup>> {
-        let auth = require_auth(ctx)?;
+        let auth = require_view_write(ctx).await?;
         state(ctx)
             .db
             .create_many_view_groups(auth.workspace_id, &inputs)
@@ -5064,7 +5099,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         inputs: Vec<CreateViewFieldInput>,
     ) -> async_graphql::Result<Vec<ViewField>> {
-        let auth = require_auth(ctx)?;
+        let auth = require_view_write(ctx).await?;
         state(ctx)
             .db
             .create_many_view_fields(auth.workspace_id, &inputs)
@@ -5077,7 +5112,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         input: CreateViewFieldGroupInput,
     ) -> async_graphql::Result<ViewFieldGroup> {
-        let auth = require_auth(ctx)?;
+        let auth = require_view_write(ctx).await?;
         state(ctx)
             .db
             .create_view_field_group(auth.workspace_id, &input)
@@ -5090,7 +5125,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         inputs: Vec<CreateViewFieldGroupInput>,
     ) -> async_graphql::Result<Vec<ViewFieldGroup>> {
-        let auth = require_auth(ctx)?;
+        let auth = require_view_write(ctx).await?;
         state(ctx)
             .db
             .create_many_view_field_groups(auth.workspace_id, &inputs)
@@ -5103,7 +5138,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         input: UpdateViewFieldGroupMutationInput,
     ) -> async_graphql::Result<ViewFieldGroup> {
-        let auth = require_auth(ctx)?;
+        let auth = require_view_write(ctx).await?;
         state(ctx)
             .db
             .update_view_field_group(auth.workspace_id, input.id, &input.update)
@@ -5117,7 +5152,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         input: DeleteViewFieldGroupInput,
     ) -> async_graphql::Result<ViewFieldGroup> {
-        let auth = require_auth(ctx)?;
+        let auth = require_view_write(ctx).await?;
         state(ctx)
             .db
             .delete_view_field_group(auth.workspace_id, input.id)
@@ -5131,7 +5166,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         input: DestroyViewFieldGroupInput,
     ) -> async_graphql::Result<ViewFieldGroup> {
-        let auth = require_auth(ctx)?;
+        let auth = require_view_write(ctx).await?;
         state(ctx)
             .db
             .destroy_view_field_group(auth.workspace_id, input.id)
@@ -5145,7 +5180,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         input: CreateViewFilterGroupInput,
     ) -> async_graphql::Result<ViewFilterGroup> {
-        let auth = require_auth(ctx)?;
+        let auth = require_view_write(ctx).await?;
         state(ctx)
             .db
             .create_view_filter_group(auth.workspace_id, &input)
@@ -5159,7 +5194,7 @@ impl MutationRoot {
         id: String,
         input: UpdateViewFilterGroupInput,
     ) -> async_graphql::Result<ViewFilterGroup> {
-        let auth = require_auth(ctx)?;
+        let auth = require_view_write(ctx).await?;
         let id = Uuid::parse_str(&id).map_err(|_| {
             gql_err(AppError::BadRequest(
                 "Invalid view filter group id".to_string(),
@@ -5182,7 +5217,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         id: String,
     ) -> async_graphql::Result<bool> {
-        let auth = require_auth(ctx)?;
+        let auth = require_view_write(ctx).await?;
         let id = Uuid::parse_str(&id).map_err(|_| {
             gql_err(AppError::BadRequest(
                 "Invalid view filter group id".to_string(),
@@ -5200,7 +5235,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         id: String,
     ) -> async_graphql::Result<bool> {
-        let auth = require_auth(ctx)?;
+        let auth = require_view_write(ctx).await?;
         let id = Uuid::parse_str(&id).map_err(|_| {
             gql_err(AppError::BadRequest(
                 "Invalid view filter group id".to_string(),

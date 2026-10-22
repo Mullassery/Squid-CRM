@@ -112,8 +112,9 @@
       immutable built-in roles.
 - [x] Permission-flag storage on roles (`role_permission_flags`) and
       `upsertPermissionFlags`/`Role.permissionFlags` read API.
-- [ ] Permission-flag enforcement across views/files/data operations and
-      metadata-driven dynamic schema generation.
+- [x] `VIEWS` permission-flag enforcement on view write mutations.
+- [ ] File/data permission enforcement and metadata-driven dynamic schema
+      generation.
 - [ ] Custom-object physical tables and dynamic GraphQL/REST schema/relation
       field creation (metadata writes currently persist metadata only).
 - [x] `currentUser`/`currentWorkspace` full frontend boot fragment (ADR 0005;
@@ -124,9 +125,9 @@
       mutations (non-admin callers receive `FORBIDDEN`).
 - [x] `ApiKey.role` exposes the upstream `Role` object, resolved from the
       assigned metadata role.
-- [ ] Permission-flag enforcement across views/files/data operations,
-      billing/SSO data and feature flags (flags are stored and exposed but not
-      enforced).
+- [ ] Permission-flag enforcement across file/data operations, billing/SSO
+      data and feature flags (role flags are stored; view writes enforce
+      `VIEWS`).
 - [x] REST target routes, target updates/batches, and nested target record resolution (`TaskTarget.targetCompany` etc.).
 - [x] Scalar ordering parity (`orderBy` + REST `order_by`) for company,
       opportunity, task, note and task/note targets; relation ordering pending.

@@ -129,6 +129,7 @@ pub struct ApiKeyAuth {
     pub api_key_id: Uuid,
     pub workspace_id: Uuid,
     pub role: Role,
+    pub role_id: Option<Uuid>,
     pub expires_at: DateTime<Utc>,
 }
 
@@ -692,6 +693,21 @@ impl Db {
         Ok(role.and_then(|r| Role::parse(&r)))
     }
 
+    pub async fn find_membership_role_id(
+        &self,
+        workspace_id: Uuid,
+        user_id: Uuid,
+    ) -> sqlx::Result<Option<Uuid>> {
+        sqlx::query_scalar(
+            "SELECT role_id FROM core.workspace_members WHERE workspace_id = $1 AND user_id = $2",
+        )
+        .bind(workspace_id)
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map(|value| value.flatten())
+    }
+
     pub async fn find_workspace_member(
         &self,
         workspace_id: Uuid,
@@ -1064,7 +1080,7 @@ impl Db {
         token_hash: &str,
     ) -> sqlx::Result<Option<ApiKeyAuth>> {
         let row = sqlx::query(
-            "SELECT id, workspace_id, role, expires_at FROM core.api_keys
+            "SELECT id, workspace_id, role, role_id, expires_at FROM core.api_keys
              WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > now()",
         )
         .bind(token_hash)
@@ -1074,6 +1090,7 @@ impl Db {
             api_key_id: row.get("id"),
             workspace_id: row.get("workspace_id"),
             role: Role::parse(row.get("role")).unwrap_or(Role::Member),
+            role_id: row.get("role_id"),
             expires_at: row.get("expires_at"),
         }))
     }

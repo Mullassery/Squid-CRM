@@ -371,10 +371,17 @@ pub async fn resolve_auth_with_policy(
                             .await
                             .ok()
                             .flatten()?;
+                        let role_id = state
+                            .db
+                            .find_membership_role_id(workspace_id, verified.user_id)
+                            .await
+                            .ok()
+                            .flatten();
                         return Some(AuthContext {
                             user_id: Some(verified.user_id),
                             workspace_id,
                             role,
+                            role_id,
                             session_id: Some(session_id),
                             api_key_id: None,
                         });
@@ -390,6 +397,7 @@ pub async fn resolve_auth_with_policy(
                         user_id: None,
                         workspace_id: key.workspace_id,
                         role: key.role,
+                        role_id: key.role_id,
                         session_id: None,
                         api_key_id: Some(key.api_key_id),
                     });
@@ -412,10 +420,17 @@ pub async fn resolve_auth_with_policy(
         .ok()
         .flatten()?;
 
+    let role_id = state
+        .db
+        .find_membership_role_id(session.workspace_id, session.user_id)
+        .await
+        .ok()
+        .flatten();
     Some(AuthContext {
         user_id: Some(session.user_id),
         workspace_id: session.workspace_id,
         role,
+        role_id,
         session_id: Some(session.id),
         api_key_id: None,
     })
