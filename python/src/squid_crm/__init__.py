@@ -10,9 +10,11 @@ import urllib.request
 import uuid
 from typing import Any, Dict, Optional
 
+from .adapters import to_messagebirds_event
+
 __version__ = "0.2.0"
 
-__all__ = ["SquidClient", "SquidError", "__version__"]
+__all__ = ["SquidClient", "SquidError", "to_messagebirds_event", "__version__"]
 
 _RETRYABLE_STATUS = {408, 425, 429, 500, 502, 503, 504}
 _SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}

@@ -33,7 +33,7 @@ Statuses: **VERIFIED** (executable evidence in this repository), **PARTIAL**
 | ClusterAudienceKit | inbound audience/custom-object sync | Custom-object REST `/rest/{object}` | PARTIAL | Custom-object tables, relation fields and generic CRUD are tested in `metadata_object_and_field_writes`. No batch/upsert endpoint or audience-specific schema contract. |
 | PyTagShield | inbound validated events/records | REST/GraphQL, custom objects | PARTIAL | Record APIs and relation fields exist. Consent enforcement belongs to PyTagShield; Squid does not independently prove consent and must not be treated as a consent authority. |
 | PyTagManager | inbound findings storage | Custom-object REST | PARTIAL | Generic custom objects can store findings, but no agreed findings schema/version is available in this repository. |
-| MessageBirds | outbound record events | Webhooks | PARTIAL | Envelope v1, HMAC signatures, bounded retries, durable delivery log and manual replay are implemented and tested. No shared event-schema registry or ordering guarantee. |
+| MessageBirds | outbound record events | Webhooks + Python adapter | PARTIAL | Envelope v1, HMAC signatures, retries and replay are tested. `squid_crm.adapters.to_messagebirds_event` maps the documented top-level OCDS fields, but the exact MessageBirds schema and nested identity contract still need confirmation. |
 | ScrapeOwl | none | none | NOT APPLICABLE | No direct data contract; scraping output would arrive through another ecosystem service. |
 | MudFish | none | none | NOT APPLICABLE | No direct data contract; crawling output would arrive through another ecosystem service. |
 | Any counterpart | Python integration | `python/` `squid_crm` client | VERIFIED | 0.2.0 installed from PyPI; import/version and six client tests cover idempotency, correlation and retry headers. REST/GraphQL contract tests live in the Rust suite. |
@@ -60,6 +60,8 @@ Statuses: **VERIFIED** (executable evidence in this repository), **PARTIAL**
 - Added replay-safe REST POSTs via `Idempotency-Key` with request-body hashing,
   conflict detection and stored responses; added `X-Correlation-Id` propagation.
 - Python client retries use the same idempotency key and correlation ID.
+- Added a dependency-free Python adapter mapping Squid envelope v1 to the
+  documented MessageBirds top-level field names, with explicit validation.
 - Added CSV export/import and role/data/file permission enforcement in earlier
   increments; see `TODO.md`, `docs/decision-log.md` and
   `docs/migration-matrix.md`.
@@ -135,8 +137,9 @@ SQUID_WEBHOOK_SECRET='the-webhook-secret' \
 ## G. Remaining gaps and blockers
 
 - **No counterpart contracts verified live.** Sibling repositories and their
-  OpenAPI/GraphQL schemas are not present in this workspace. Adapters must not
-  be invented from README claims.
+  OpenAPI/GraphQL schemas are not present in this workspace. The MessageBirds
+  adapter encodes only the top-level fields documented in the audit and remains
+  unverified until MessageBirds confirms its nested schema.
 - **Idempotency**: header-bearing mutating requests are replay-safe, but
   counterparts must still be taught to send stable keys, and expired-key
   cleanup/retention is not automated.
