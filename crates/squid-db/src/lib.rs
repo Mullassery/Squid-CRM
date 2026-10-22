@@ -4557,6 +4557,24 @@ impl Db {
         .fetch_one(&self.pool)
         .await?;
         let object_id: Uuid = row.get("id");
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        assert_valid_identifier(&input.name_singular)?;
+        let table = quote_identifier(&input.name_singular);
+        let ddl = format!(
+            "CREATE TABLE IF NOT EXISTS {schema}.{table} (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                deleted_at TIMESTAMPTZ,
+                name TEXT,
+                position DOUBLE PRECISION NOT NULL DEFAULT 0,
+                created_by JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                updated_by JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                search_vector TEXT
+            )"
+        );
+        sqlx::raw_sql(&ddl).execute(&self.pool).await?;
 
         if !input.skip_name_field {
             let field = CreateFieldMetadataInput {
@@ -4661,12 +4679,24 @@ impl Db {
         workspace_id: Uuid,
         id: Uuid,
     ) -> anyhow::Result<bool> {
+        let object_name = object_singular_name(&self.pool, workspace_id, id).await?;
         let result =
             sqlx::query("DELETE FROM core.object_metadata WHERE workspace_id = $1 AND id = $2")
                 .bind(workspace_id)
                 .bind(id)
                 .execute(&self.pool)
                 .await?;
+        if result.rows_affected() > 0 {
+            if let Some(object_name) = object_name {
+                assert_valid_identifier(&object_name)?;
+                let schema = Self::workspace_schema_name(workspace_id);
+                assert_valid_schema(&schema)?;
+                let table = quote_identifier(&object_name);
+                sqlx::raw_sql(&format!("DROP TABLE IF EXISTS {schema}.{table} CASCADE"))
+                    .execute(&self.pool)
+                    .await?;
+            }
+        }
         Ok(result.rows_affected() > 0)
     }
 
@@ -4709,6 +4739,21 @@ impl Db {
         .fetch_one(&self.pool)
         .await?;
         let field_id: Uuid = row.get("id");
+        if let Some(object_name) =
+            object_singular_name(&self.pool, workspace_id, input.object_metadata_id).await?
+        {
+            assert_valid_identifier(&object_name)?;
+            assert_valid_identifier(&input.name)?;
+            let schema = Self::workspace_schema_name(workspace_id);
+            assert_valid_schema(&schema)?;
+            let table = quote_identifier(&object_name);
+            let column = quote_identifier(&input.name);
+            let ddl = format!(
+                "ALTER TABLE {schema}.{table} ADD COLUMN IF NOT EXISTS {column} {}",
+                field_column_type(input.field_type)
+            );
+            sqlx::raw_sql(&ddl).execute(&self.pool).await?;
+        }
         self.get_field(workspace_id, field_id)
             .await?
             .ok_or_else(|| anyhow::anyhow!("created field not found"))
@@ -4720,6 +4765,16 @@ impl Db {
         id: Uuid,
         input: &UpdateFieldMetadataInput,
     ) -> anyhow::Result<Option<FieldMetadata>> {
+        let existing = sqlx::query(
+            "SELECT f.name AS field_name, o.name_singular AS object_name
+             FROM core.field_metadata f
+             JOIN core.object_metadata o ON o.id = f.object_metadata_id
+             WHERE f.workspace_id = $1 AND f.id = $2",
+        )
+        .bind(workspace_id)
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
         let universal_identifier = input
             .universal_identifier
             .as_deref()
@@ -4774,6 +4829,25 @@ impl Db {
         if result.rows_affected() == 0 {
             return Ok(None);
         }
+        if let (Some(existing), Some(new_name)) = (existing, input.name.as_deref()) {
+            let old_name: String = existing.get("field_name");
+            let object_name: String = existing.get("object_name");
+            if old_name != new_name {
+                assert_valid_identifier(&old_name)?;
+                assert_valid_identifier(new_name)?;
+                assert_valid_identifier(&object_name)?;
+                let schema = Self::workspace_schema_name(workspace_id);
+                assert_valid_schema(&schema)?;
+                sqlx::raw_sql(&format!(
+                    "ALTER TABLE {schema}.{} RENAME COLUMN {} TO {}",
+                    quote_identifier(&object_name),
+                    quote_identifier(&old_name),
+                    quote_identifier(new_name)
+                ))
+                .execute(&self.pool)
+                .await?;
+            }
+        }
         self.get_field(workspace_id, id).await
     }
 
@@ -4782,6 +4856,16 @@ impl Db {
         workspace_id: Uuid,
         id: Uuid,
     ) -> anyhow::Result<bool> {
+        let field = sqlx::query(
+            "SELECT f.name AS field_name, o.name_singular AS object_name
+             FROM core.field_metadata f
+             JOIN core.object_metadata o ON o.id = f.object_metadata_id
+             WHERE f.workspace_id = $1 AND f.id = $2",
+        )
+        .bind(workspace_id)
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
         let mut tx = self.pool.begin().await?;
         sqlx::query(
             "UPDATE core.object_metadata
@@ -4808,6 +4892,23 @@ impl Db {
                 .execute(&mut *tx)
                 .await?;
         tx.commit().await?;
+        if result.rows_affected() > 0 {
+            if let Some(field) = field {
+                let field_name: String = field.get("field_name");
+                let object_name: String = field.get("object_name");
+                assert_valid_identifier(&field_name)?;
+                assert_valid_identifier(&object_name)?;
+                let schema = Self::workspace_schema_name(workspace_id);
+                assert_valid_schema(&schema)?;
+                sqlx::raw_sql(&format!(
+                    "ALTER TABLE {schema}.{} DROP COLUMN IF EXISTS {}",
+                    quote_identifier(&object_name),
+                    quote_identifier(&field_name)
+                ))
+                .execute(&self.pool)
+                .await?;
+            }
+        }
         Ok(result.rows_affected() > 0)
     }
 
@@ -7638,6 +7739,68 @@ fn row_to_person(row: &sqlx::postgres::PgRow) -> Person {
 
 fn parse_json<T: DeserializeOwned + Default>(raw: String) -> T {
     serde_json::from_str(&raw).unwrap_or_default()
+}
+
+fn assert_valid_identifier(identifier: &str) -> anyhow::Result<()> {
+    let valid = !identifier.is_empty()
+        && identifier.len() <= 63
+        && identifier
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && identifier
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_');
+    if valid {
+        Ok(())
+    } else {
+        anyhow::bail!("invalid SQL identifier")
+    }
+}
+
+fn quote_identifier(identifier: &str) -> String {
+    format!("\"{}\"", identifier.replace('"', "\"\""))
+}
+
+fn field_column_type(field_type: FieldMetadataType) -> &'static str {
+    match field_type {
+        FieldMetadataType::Uuid => "UUID",
+        FieldMetadataType::Boolean => "BOOLEAN",
+        FieldMetadataType::DateTime => "TIMESTAMPTZ",
+        FieldMetadataType::Date => "DATE",
+        FieldMetadataType::Number | FieldMetadataType::Numeric | FieldMetadataType::Rating => {
+            "NUMERIC"
+        }
+        FieldMetadataType::Position => "DOUBLE PRECISION",
+        FieldMetadataType::Text | FieldMetadataType::Select | FieldMetadataType::TsVector => "TEXT",
+        FieldMetadataType::Relation | FieldMetadataType::MorphRelation => "UUID",
+        FieldMetadataType::Actor
+        | FieldMetadataType::Address
+        | FieldMetadataType::Array
+        | FieldMetadataType::Currency
+        | FieldMetadataType::Emails
+        | FieldMetadataType::Files
+        | FieldMetadataType::FullName
+        | FieldMetadataType::Links
+        | FieldMetadataType::MultiSelect
+        | FieldMetadataType::Phones
+        | FieldMetadataType::RawJson
+        | FieldMetadataType::RichText => "JSONB",
+    }
+}
+
+async fn object_singular_name(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    object_id: Uuid,
+) -> anyhow::Result<Option<String>> {
+    Ok(sqlx::query_scalar(
+        "SELECT name_singular FROM core.object_metadata WHERE workspace_id = $1 AND id = $2",
+    )
+    .bind(workspace_id)
+    .bind(object_id)
+    .fetch_optional(pool)
+    .await?)
 }
 
 fn assert_valid_schema(schema: &str) -> anyhow::Result<()> {

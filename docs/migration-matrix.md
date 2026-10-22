@@ -18,8 +18,8 @@ Operation coverage: `docs/frontend-operation-map.md`, `docs/rest-route-map.md`.
 | Workspace & members | `core-modules/workspace`, `workspace-invitation`, `workspace-member` | `squid-db`/`squid-api` | partial | tenant isolation, `workspace_members_query_and_boot_list` | bootstrap, members query, activation simplified; invitations pending |
 | Roles & permissions (RBAC) | `metadata-modules/role*`, object/field permissions | `squid-auth`/`squid-db` | partial | role CRUD/assignment tests, forbidden metadata-write test | built-in/custom roles with member/API-key assignment; permission flags, object/field/row permissions pending |
 | Row-level permission predicates | `metadata-modules/row-level-permission-predicate*` | — | not-started | | |
-| Object metadata (custom objects) | `metadata-modules/object-metadata` | `squid-db`/`squid-api` | partial | metadata integration tests | read/write rows; no physical tables or dynamic schema |
-| Field metadata (custom fields) | `metadata-modules/field-metadata` | `squid-db`/`squid-api` | partial | metadata integration tests | read/write rows; relation fields rejected |
+| Object metadata (custom objects) | `metadata-modules/object-metadata` | `squid-db`/`squid-api` | partial | metadata integration tests | read/write rows; physical table created; no dynamic schema/routes |
+| Field metadata (custom fields) | `metadata-modules/field-metadata` | `squid-db`/`squid-api` | partial | metadata integration tests | read/write rows; scalar columns added/renamed/dropped; relation fields rejected |
 | Views / filters / sorts / groups | `metadata-modules/view*` | `squid-db`/`squid-api` | partial | view write/batch integration tests | standard views; relation filters and view paging semantics pending |
 | Dynamic GraphQL schema | `api/graphql/*` | `squid-api` | partial | frontend operation map | static schema plus metadata queries; metadata-driven object schema pending |
 | REST + OpenAPI | `api/rest/*`, `core-modules/open-api` | `squid-api` | partial | REST route map, example fixtures | 42/535 core routes; OpenAPI not emitted |

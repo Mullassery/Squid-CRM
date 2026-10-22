@@ -119,8 +119,10 @@
       capabilities.
 - [ ] File permission enforcement plus metadata-driven dynamic schema
       generation.
-- [ ] Custom-object physical tables and dynamic GraphQL/REST schema/relation
-      field creation (metadata writes currently persist metadata only).
+- [x] Custom-object physical tables and scalar column DDL: create table on
+      object creation, add/rename/drop columns on field writes.
+- [ ] Metadata-generated GraphQL/REST routes and relation-field DDL for custom
+      objects.
 - [x] `currentUser`/`currentWorkspace` full frontend boot fragment (ADR 0005;
       enterprise surfaces are explicit empty/static defaults).
 - [x] `workspaceMembers`/`workspaceMember` GraphQL queries with filters,
@@ -166,9 +168,9 @@
 
 ## Known limitations (current)
 - Static schema for the eight seeded standard objects (including task/note
-  targets and workspaceMember); metadata writes persist rows but do not
-  generate physical tables or dynamic GraphQL/REST types for custom objects
-  (relation field creation is rejected).
+  targets and workspaceMember). Custom-object metadata writes now create
+  physical tables and scalar columns, but there are no generated GraphQL/REST
+  types/routes and relation-field creation is still rejected.
 - Cursor pagination, `order_by`, and scalar/composite filters implemented for
   whitelisted person columns including `companyId`; nested `company` filters
   are implemented; nested relation ordering is not.
