@@ -1256,6 +1256,46 @@ async fn api_key_lifecycle_authenticates_data_api() {
     assert_eq!(gql.status, StatusCode::OK, "body: {}", gql.body);
     assert_eq!(gql.body["data"]["people"]["totalCount"], 1);
 
+    let roles = send(
+        &app,
+        json_request(
+            "POST",
+            "/metadata",
+            json!({ "query": "{ getApiKeyRoles { id label } }" }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    let admin_role_id = roles.body["data"]["getApiKeyRoles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|role| role["label"] == "Admin")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let assigned = send(
+        &app,
+        json_request(
+            "POST",
+            "/metadata",
+            json!({
+                "query": "mutation($apiKeyId: UUID!, $roleId: UUID!) { assignRoleToApiKey(apiKeyId: $apiKeyId, roleId: $roleId) }",
+                "variables": { "apiKeyId": api_key_id, "roleId": admin_role_id }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(assigned.status, StatusCode::OK, "body: {}", assigned.body);
+    assert_eq!(assigned.body["data"]["assignRoleToApiKey"], true);
+    assert!(
+        assigned.body["errors"].is_null(),
+        "errors: {}",
+        assigned.body
+    );
+
     // Revocation takes effect for the already-issued token.
     let revoked = send(
         &app,
@@ -6092,6 +6132,99 @@ async fn object_updates_clear_nullable_fields() {
         target_cleared.body
     );
     assert!(target_cleared.body["data"]["updateTaskTarget"]["targetCompanyId"].is_null());
+}
+
+#[tokio::test]
+async fn role_assignment_uses_metadata_roles() {
+    let app = test_app().await;
+    let email = unique_email("roles");
+    let (token, _workspace) = signup_with_access(&app, &email).await;
+
+    let roles = send(
+        &app,
+        json_request(
+            "POST",
+            "/metadata",
+            json!({ "query": "{ getRoles { id label isEditable } getApiKeyRoles { id label } }" }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(roles.status, StatusCode::OK, "body: {}", roles.body);
+    assert!(roles.body["errors"].is_null(), "errors: {}", roles.body);
+    let role_list = roles.body["data"]["getRoles"].as_array().unwrap();
+    assert_eq!(role_list.len(), 3);
+    let admin_role_id = role_list
+        .iter()
+        .find(|role| role["label"] == "Admin")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        roles.body["data"]["getApiKeyRoles"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+
+    let members = send(
+        &app,
+        json_request(
+            "POST",
+            "/metadata",
+            json!({ "query": "{ workspaceMembers { edges { node { id roles { label } } } } }" }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert!(members.body["errors"].is_null(), "errors: {}", members.body);
+    let member_id = members.body["data"]["workspaceMembers"]["edges"][0]["node"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        members.body["data"]["workspaceMembers"]["edges"][0]["node"]["roles"][0]["label"],
+        "Owner"
+    );
+
+    let updated = send(
+        &app,
+        json_request(
+            "POST",
+            "/metadata",
+            json!({
+                "query": "mutation($memberId: UUID!, $roleId: UUID!) { updateWorkspaceMemberRole(workspaceMemberId: $memberId, roleId: $roleId) { id roles { label } } }",
+                "variables": { "memberId": member_id, "roleId": admin_role_id }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(updated.status, StatusCode::OK, "body: {}", updated.body);
+    assert!(updated.body["errors"].is_null(), "errors: {}", updated.body);
+    assert_eq!(
+        updated.body["data"]["updateWorkspaceMemberRole"]["roles"][0]["label"],
+        "Admin"
+    );
+
+    let role = send(
+        &app,
+        json_request(
+            "POST",
+            "/metadata",
+            json!({
+                "query": "query($id: UUID!) { getRole(id: $id) { id label canUpdateAllSettings } }",
+                "variables": { "id": admin_role_id }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert!(role.body["errors"].is_null(), "errors: {}", role.body);
+    assert_eq!(role.body["data"]["getRole"]["label"], "Admin");
+    assert_eq!(role.body["data"]["getRole"]["canUpdateAllSettings"], true);
 }
 
 #[tokio::test]

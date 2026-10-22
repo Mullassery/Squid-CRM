@@ -7,7 +7,8 @@
 use async_graphql::{Json, SimpleObject};
 use serde_json::Value;
 use squid_core::{
-    Actor, FullName, Role, User as CoreUser, Workspace as CoreWorkspace, WorkspaceMember,
+    Actor, FullName, Role, RoleRecord, User as CoreUser, Workspace as CoreWorkspace,
+    WorkspaceMember,
 };
 use uuid::Uuid;
 
@@ -459,5 +460,28 @@ pub fn workspace_member(
         search_vector: None,
         created_by: Actor::default(),
         updated_by: Actor::default(),
+    }
+}
+
+impl From<RoleRecord> for RoleGql {
+    fn from(role: RoleRecord) -> Self {
+        Self {
+            id: role.id,
+            label: role.label,
+            description: role.description,
+            icon: role.icon,
+            can_update_all_settings: role.can_update_all_settings,
+            can_access_all_tools: role.can_access_all_tools,
+            is_editable: role.is_editable,
+            can_read_all_object_records: role.can_read_all_object_records,
+            can_update_all_object_records: role.can_update_all_object_records,
+            can_soft_delete_all_object_records: role.can_soft_delete_all_object_records,
+            can_destroy_all_object_records: role.can_destroy_all_object_records,
+            can_be_assigned_to_users: role.can_be_assigned_to_users,
+            can_be_assigned_to_agents: role.can_be_assigned_to_agents,
+            can_be_assigned_to_api_keys: role.can_be_assigned_to_api_keys,
+            application_id: role.application_id,
+            universal_identifier: role.universal_identifier,
+        }
     }
 }

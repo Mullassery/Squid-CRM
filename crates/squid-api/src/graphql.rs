@@ -2968,9 +2968,13 @@ impl QueryRoot {
         ctx: &Context<'_>,
     ) -> async_graphql::Result<Vec<current_user::RoleGql>> {
         let auth = require_auth(ctx)?;
-        Ok([Role::Owner, Role::Admin, Role::Member]
+        Ok(state(ctx)
+            .db
+            .list_roles(auth.workspace_id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
             .into_iter()
-            .map(|role| current_user::role_gql(auth.workspace_id, role))
+            .map(current_user::RoleGql::from)
             .collect())
     }
 
@@ -2980,11 +2984,20 @@ impl QueryRoot {
         id: Uuid,
     ) -> async_graphql::Result<current_user::RoleGql> {
         let auth = require_auth(ctx)?;
-        [Role::Owner, Role::Admin, Role::Member]
-            .into_iter()
-            .map(|role| current_user::role_gql(auth.workspace_id, role))
-            .find(|role| role.id == id)
+        state(ctx)
+            .db
+            .get_role(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .map(current_user::RoleGql::from)
             .ok_or_else(|| gql_err(AppError::NotFound("Role not found".to_string())))
+    }
+
+    async fn get_api_key_roles(
+        &self,
+        ctx: &Context<'_>,
+    ) -> async_graphql::Result<Vec<current_user::RoleGql>> {
+        self.get_roles(ctx).await
     }
 
     async fn get_permission_flags(
@@ -5097,6 +5110,65 @@ impl MutationRoot {
             .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))?;
 
         Ok(ApiKeyToken { token })
+    }
+
+    async fn update_workspace_member_role(
+        &self,
+        ctx: &Context<'_>,
+        workspace_member_id: Uuid,
+        role_id: Uuid,
+    ) -> async_graphql::Result<WorkspaceMemberGql> {
+        let auth = require_auth(ctx)?;
+        if !auth.role.can_administer() {
+            return Err(gql_err(AppError::Forbidden(
+                "Insufficient permissions".to_string(),
+            )));
+        }
+        let updated = state(ctx)
+            .db
+            .update_workspace_member_role(auth.workspace_id, workspace_member_id, role_id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        if !updated {
+            return Err(gql_err(AppError::NotFound(
+                "Workspace member or role not found".to_string(),
+            )));
+        }
+        let members = state(ctx)
+            .db
+            .list_workspace_members_with_users(auth.workspace_id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e.into())))?;
+        members
+            .into_iter()
+            .find(|(member, _)| member.id == workspace_member_id)
+            .map(|(member, user)| current_user::workspace_member(&member, &user, member.role))
+            .ok_or_else(|| gql_err(AppError::NotFound("Workspace member not found".to_string())))
+    }
+
+    async fn assign_role_to_api_key(
+        &self,
+        ctx: &Context<'_>,
+        api_key_id: Uuid,
+        role_id: Uuid,
+    ) -> async_graphql::Result<bool> {
+        let auth = require_auth(ctx)?;
+        if !auth.role.can_administer() {
+            return Err(gql_err(AppError::Forbidden(
+                "Insufficient permissions".to_string(),
+            )));
+        }
+        let updated = state(ctx)
+            .db
+            .assign_role_to_api_key(auth.workspace_id, api_key_id, role_id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        if !updated {
+            return Err(gql_err(AppError::NotFound(
+                "API key or role not found".to_string(),
+            )));
+        }
+        Ok(true)
     }
 
     async fn revoke_api_key(

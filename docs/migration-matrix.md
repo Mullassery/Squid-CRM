@@ -16,7 +16,7 @@ Operation coverage: `docs/frontend-operation-map.md`, `docs/rest-route-map.md`.
 | Auth: SAML/OIDC/SSO | `sso`, `auth/strategies/saml*`, `oidc*` | — | excluded (licence) | n/a | `@license Enterprise` |
 | User | `core-modules/user` | `squid-db`/`squid-api` | partial | boot integration test | email/password user only |
 | Workspace & members | `core-modules/workspace`, `workspace-invitation`, `workspace-member` | `squid-db`/`squid-api` | partial | tenant isolation, `workspace_members_query_and_boot_list` | bootstrap, members query, activation simplified; invitations pending |
-| Roles & permissions (RBAC) | `metadata-modules/role*`, object/field permissions | `squid-auth` | partial | built-in role tests | built-in roles only; object/field/row permissions pending |
+| Roles & permissions (RBAC) | `metadata-modules/role*`, object/field permissions | `squid-auth`/`squid-db` | partial | role assignment integration test | built-in roles metadata-backed with member/API-key assignment; custom roles, object/field/row permissions pending |
 | Row-level permission predicates | `metadata-modules/row-level-permission-predicate*` | — | not-started | | |
 | Object metadata (custom objects) | `metadata-modules/object-metadata` | `squid-db`/`squid-api` | partial | metadata integration tests | read/write rows; no physical tables or dynamic schema |
 | Field metadata (custom fields) | `metadata-modules/field-metadata` | `squid-db`/`squid-api` | partial | metadata integration tests | read/write rows; relation fields rejected |

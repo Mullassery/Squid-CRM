@@ -157,9 +157,11 @@ id/object/active/system filters. Object and field metadata writes are implemente
 (`createOneObject`, `updateOneObject`, `deleteOneObject`, `createOneField`,
 `updateOneField`, `deleteOneField`) with system-object/system-field guards.
 Metadata indexes are persisted and exposed through `createOneIndex`,
-`deleteOneIndex` and `Object.indexMetadataList`; built-in
-`getRoles`/`getRole`/`getPermissionFlags` and
-`mostlyEmptyFieldMetadataIds` exist. Custom objects do **not** yet generate
+`deleteOneIndex` and `Object.indexMetadataList`; roles are stored in
+`core.roles` and exposed through `getRoles`/`getRole`/`getApiKeyRoles` with
+built-in role seeding and member/API-key assignment. `getPermissionFlags` and
+`mostlyEmptyFieldMetadataIds` exist; custom-role CRUD and permission-flag
+enforcement are absent. Custom objects do **not** yet generate
 physical workspace tables or dynamic GraphQL/REST schemas; relation field
 creation remains unimplemented, and index metadata does not create physical
 PostgreSQL indexes.
@@ -389,7 +391,7 @@ Known remaining divergences (do not claim parity):
 | `avatarFile` | `[FileObject]` | `[FileObject]`/null; writes resolve stored file IDs and return `400 File not found: <id>` | aligned for reads and writes |
 | REST `fields`/`depth` | supported | implemented for five objects | aligned |
 | `viewId`/groupBy | supported | implemented for seven standard object routes; in-memory evaluation and Monday week buckets | aligned for captured granularities and aggregates |
-| API-key roles | metadata role entity | caller's built-in role; `roleId` ignored; built-in role queries exist | wire role engine |
+| API-key roles | metadata role entity | built-in roles metadata-backed; `assignRoleToApiKey` updates the role id and legacy enum; custom roles and enforcement absent | extend role engine |
 | Error `code` for auth | `NO_AUTHENTICATION_CONTEXT` on data API | `UNAUTHENTICATED` GraphQL error / `403` REST | align exact error code/message |
 
 ## 10. Verification method

@@ -719,3 +719,23 @@ pub struct UpdateFieldMetadataInput {
     #[serde(default)]
     pub morph_relations_update_payload: Option<Vec<Json<Value>>>,
 }
+
+#[derive(Debug, Clone)]
+pub struct RoleRecord {
+    pub id: Uuid,
+    pub label: String,
+    pub description: Option<String>,
+    pub icon: Option<String>,
+    pub is_editable: bool,
+    pub can_update_all_settings: bool,
+    pub can_access_all_tools: bool,
+    pub can_read_all_object_records: bool,
+    pub can_update_all_object_records: bool,
+    pub can_soft_delete_all_object_records: bool,
+    pub can_destroy_all_object_records: bool,
+    pub can_be_assigned_to_users: bool,
+    pub can_be_assigned_to_agents: bool,
+    pub can_be_assigned_to_api_keys: bool,
+    pub application_id: Uuid,
+    pub universal_identifier: Option<String>,
+}

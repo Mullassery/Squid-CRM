@@ -10,6 +10,7 @@ use regex::Regex;
 use serde::de::DeserializeOwned;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Postgres, QueryBuilder, Row};
+use squid_core::RoleRecord;
 use squid_core::{
     Actor, AggregateOperations, ApiKey, Company, CreateCompanyInput, CreateFieldMetadataInput,
     CreateIndexInput, CreateNoteInput, CreateNoteTargetInput, CreateObjectMetadataInput,
@@ -50,6 +51,7 @@ const CORE_VIEWS_SQL: &str = include_str!("../migrations/core/0004_views.sql");
 const CORE_REFRESH_TOKENS_SQL: &str = include_str!("../migrations/core/0005_refresh_tokens.sql");
 const CORE_FILES_SQL: &str = include_str!("../migrations/core/0006_files.sql");
 const CORE_INDEXES_SQL: &str = include_str!("../migrations/core/0007_indexes.sql");
+const CORE_ROLES_SQL: &str = include_str!("../migrations/core/0008_roles.sql");
 
 #[derive(Clone)]
 pub struct Db {
@@ -394,6 +396,7 @@ impl Db {
             CORE_REFRESH_TOKENS_SQL,
             CORE_FILES_SQL,
             CORE_INDEXES_SQL,
+            CORE_ROLES_SQL,
         ] {
             result = sqlx::raw_sql(ddl).execute(&mut *conn).await.map(|_| ());
             if result.is_err() {
@@ -1840,7 +1843,179 @@ impl Db {
         Ok(())
     }
 
+    pub async fn ensure_roles(&self, workspace_id: Uuid) -> anyhow::Result<()> {
+        for (role, label) in [
+            (Role::Owner, "Owner"),
+            (Role::Admin, "Admin"),
+            (Role::Member, "Member"),
+        ] {
+            let privileged = matches!(role, Role::Owner | Role::Admin);
+            let id = Uuid::new_v5(&workspace_id, label.as_bytes());
+            sqlx::query(
+                "INSERT INTO core.roles
+                    (id, workspace_id, label, description, icon, is_editable,
+                     can_update_all_settings, can_access_all_tools,
+                     can_read_all_object_records, can_update_all_object_records,
+                     can_soft_delete_all_object_records, can_destroy_all_object_records,
+                     can_be_assigned_to_users, can_be_assigned_to_agents,
+                     can_be_assigned_to_api_keys, application_id, universal_identifier)
+                 VALUES ($1, $2, $3, NULL, NULL, false, $4, true, true, true, true, $5,
+                         true, false, true, $6, $7)
+                 ON CONFLICT (workspace_id, label) DO NOTHING",
+            )
+            .bind(id)
+            .bind(workspace_id)
+            .bind(label)
+            .bind(privileged)
+            .bind(privileged)
+            .bind(Uuid::nil())
+            .bind(workspace_id.to_string())
+            .execute(&self.pool)
+            .await?;
+        }
+        sqlx::query(
+            "UPDATE core.workspace_members wm
+             SET role_id = r.id
+             FROM core.roles r
+             WHERE wm.workspace_id = $1 AND wm.role_id IS NULL
+               AND r.workspace_id = $1
+               AND r.label = CASE wm.role
+                   WHEN 'OWNER' THEN 'Owner'
+                   WHEN 'ADMIN' THEN 'Admin'
+                   ELSE 'Member'
+               END",
+        )
+        .bind(workspace_id)
+        .execute(&self.pool)
+        .await?;
+        sqlx::query(
+            "UPDATE core.api_keys ak
+             SET role_id = r.id
+             FROM core.roles r
+             WHERE ak.workspace_id = $1 AND ak.role_id IS NULL
+               AND r.workspace_id = $1
+               AND r.label = CASE ak.role
+                   WHEN 'OWNER' THEN 'Owner'
+                   WHEN 'ADMIN' THEN 'Admin'
+                   ELSE 'Member'
+               END",
+        )
+        .bind(workspace_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn list_roles(&self, workspace_id: Uuid) -> anyhow::Result<Vec<RoleRecord>> {
+        self.ensure_roles(workspace_id).await?;
+        let rows = sqlx::query(
+            "SELECT id, label, description, icon, is_editable, can_update_all_settings,
+                    can_access_all_tools, can_read_all_object_records,
+                    can_update_all_object_records, can_soft_delete_all_object_records,
+                    can_destroy_all_object_records, can_be_assigned_to_users,
+                    can_be_assigned_to_agents, can_be_assigned_to_api_keys,
+                    application_id, universal_identifier
+             FROM core.roles WHERE workspace_id = $1
+             ORDER BY created_at ASC, label ASC",
+        )
+        .bind(workspace_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.iter().map(row_to_role).collect())
+    }
+
+    pub async fn get_role(
+        &self,
+        workspace_id: Uuid,
+        role_id: Uuid,
+    ) -> anyhow::Result<Option<RoleRecord>> {
+        self.ensure_roles(workspace_id).await?;
+        let row = sqlx::query(
+            "SELECT id, label, description, icon, is_editable, can_update_all_settings,
+                    can_access_all_tools, can_read_all_object_records,
+                    can_update_all_object_records, can_soft_delete_all_object_records,
+                    can_destroy_all_object_records, can_be_assigned_to_users,
+                    can_be_assigned_to_agents, can_be_assigned_to_api_keys,
+                    application_id, universal_identifier
+             FROM core.roles WHERE workspace_id = $1 AND id = $2",
+        )
+        .bind(workspace_id)
+        .bind(role_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.as_ref().map(row_to_role))
+    }
+
+    pub async fn update_workspace_member_role(
+        &self,
+        workspace_id: Uuid,
+        member_id: Uuid,
+        role_id: Uuid,
+    ) -> anyhow::Result<bool> {
+        self.ensure_roles(workspace_id).await?;
+        let label: Option<String> =
+            sqlx::query_scalar("SELECT label FROM core.roles WHERE workspace_id = $1 AND id = $2")
+                .bind(workspace_id)
+                .bind(role_id)
+                .fetch_optional(&self.pool)
+                .await?;
+        let Some(label) = label else {
+            return Ok(false);
+        };
+        let legacy = match label.as_str() {
+            "Owner" => Role::Owner.as_str(),
+            "Admin" => Role::Admin.as_str(),
+            _ => Role::Member.as_str(),
+        };
+        let result = sqlx::query(
+            "UPDATE core.workspace_members SET role_id = $3, role = $4
+             WHERE workspace_id = $1 AND id = $2",
+        )
+        .bind(workspace_id)
+        .bind(member_id)
+        .bind(role_id)
+        .bind(legacy)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    pub async fn assign_role_to_api_key(
+        &self,
+        workspace_id: Uuid,
+        api_key_id: Uuid,
+        role_id: Uuid,
+    ) -> anyhow::Result<bool> {
+        self.ensure_roles(workspace_id).await?;
+        let label: Option<String> =
+            sqlx::query_scalar("SELECT label FROM core.roles WHERE workspace_id = $1 AND id = $2")
+                .bind(workspace_id)
+                .bind(role_id)
+                .fetch_optional(&self.pool)
+                .await?;
+        let Some(label) = label else {
+            return Ok(false);
+        };
+        let legacy = match label.as_str() {
+            "Owner" => Role::Owner.as_str(),
+            "Admin" => Role::Admin.as_str(),
+            _ => Role::Member.as_str(),
+        };
+        let result = sqlx::query(
+            "UPDATE core.api_keys SET role_id = $3, role = $4, updated_at = now()
+             WHERE workspace_id = $1 AND id = $2 AND revoked_at IS NULL",
+        )
+        .bind(workspace_id)
+        .bind(api_key_id)
+        .bind(role_id)
+        .bind(legacy)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
     pub async fn ensure_standard_metadata(&self, workspace_id: Uuid) -> anyhow::Result<()> {
+        self.ensure_roles(workspace_id).await?;
         self.ensure_person_metadata(workspace_id).await?;
         self.ensure_company_metadata(workspace_id).await?;
         self.ensure_opportunity_metadata(workspace_id).await?;
@@ -6612,6 +6787,27 @@ fn row_to_object(row: &sqlx::postgres::PgRow) -> anyhow::Result<ObjectMetadata> 
         index_metadata: Vec::new(),
         search_field_metadata: Vec::new(),
     })
+}
+
+fn row_to_role(row: &sqlx::postgres::PgRow) -> RoleRecord {
+    RoleRecord {
+        id: row.get("id"),
+        label: row.get("label"),
+        description: row.get("description"),
+        icon: row.get("icon"),
+        is_editable: row.get("is_editable"),
+        can_update_all_settings: row.get("can_update_all_settings"),
+        can_access_all_tools: row.get("can_access_all_tools"),
+        can_read_all_object_records: row.get("can_read_all_object_records"),
+        can_update_all_object_records: row.get("can_update_all_object_records"),
+        can_soft_delete_all_object_records: row.get("can_soft_delete_all_object_records"),
+        can_destroy_all_object_records: row.get("can_destroy_all_object_records"),
+        can_be_assigned_to_users: row.get("can_be_assigned_to_users"),
+        can_be_assigned_to_agents: row.get("can_be_assigned_to_agents"),
+        can_be_assigned_to_api_keys: row.get("can_be_assigned_to_api_keys"),
+        application_id: row.get("application_id"),
+        universal_identifier: row.get("universal_identifier"),
+    }
 }
 
 fn row_to_field(row: &sqlx::postgres::PgRow) -> anyhow::Result<FieldMetadata> {

@@ -106,8 +106,10 @@
 - [x] View batch/group writes: `createManyViewFields`, `createManyViewGroups`,
       `updateManyViewGroups`, `createManyViewFieldGroups`, view field group CRUD,
       view filter group CRUD and `getViewFieldGroups`/`getViewFilterGroups`.
-- [ ] Role/permission assignment engine and metadata-driven dynamic schema
-      generation (workspace-member metadata is seeded).
+- [x] Built-in role metadata (`core.roles`) and role assignment:
+      `updateWorkspaceMemberRole`, `assignRoleToApiKey`, `getApiKeyRoles`.
+- [ ] Custom role CRUD, permission-flag assignment/enforcement and
+      metadata-driven dynamic schema generation.
 - [ ] Custom-object physical tables and dynamic GraphQL/REST schema/relation
       field creation (metadata writes currently persist metadata only).
 - [x] `currentUser`/`currentWorkspace` full frontend boot fragment (ADR 0005;
@@ -115,7 +117,8 @@
 - [x] `workspaceMembers`/`workspaceMember` GraphQL queries with filters,
       ordering and pageInfo; boot `workspaceMembers` now lists every member.
 - [ ] Role/permission enforcement, billing/SSO data, feature flags, and
-      `ApiKey.role` as the upstream `Role` object (built-in role queries exist).
+      `ApiKey.role` as the upstream `Role` object (built-in role queries and
+      assignment exist; `ApiKey.role` remains the legacy enum).
 - [x] REST target routes, target updates/batches, and nested target record resolution (`TaskTarget.targetCompany` etc.).
 - [x] Scalar ordering parity (`orderBy` + REST `order_by`) for company,
       opportunity, task, note and task/note targets; relation ordering pending.
@@ -165,8 +168,10 @@
 - No OpenAPI document emitted yet.
 - Workspace activation lifecycle (`PENDING_CREATION` / `activateWorkspace`) and
   `signUpInNewWorkspace` are not implemented; `/auth/signup` activates directly.
-- No OAuth, 2FA or app-token flows. API-key `roleId` is ignored until metadata
-  roles land; auth throttling is per-process only.
+- No OAuth, 2FA or app-token flows. Built-in roles are metadata-backed and can
+  be assigned to members/API keys, but custom-role CRUD and permission-flag
+  enforcement are absent; `ApiKey.role` still serialises the legacy enum. Auth
+  throttling is per-process only.
 - `groupBy` is evaluated in memory per object slice (up to the repository
   fetch cap for non-person objects); date buckets support the captured
   granularities, week starts on Monday.
