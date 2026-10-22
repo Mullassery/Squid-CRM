@@ -57,6 +57,9 @@ Statuses: **VERIFIED** (executable evidence in this repository), **PARTIAL**
 - Added the Python client package under `python/`, including `Idempotency-Key`,
   `X-Correlation-Id`, `Retry-After` and safe-retry support, and published
   `squid-crm` 0.2.0 to PyPI.
+- Added replay-safe REST POSTs via `Idempotency-Key` with request-body hashing,
+  conflict detection and stored responses; added `X-Correlation-Id` propagation.
+- Python client retries use the same idempotency key and correlation ID.
 - Added CSV export/import and role/data/file permission enforcement in earlier
   increments; see `TODO.md`, `docs/decision-log.md` and
   `docs/migration-matrix.md`.
@@ -87,6 +90,7 @@ TEST_DATABASE_URL=postgres://$USER@127.0.0.1:5432/squid_test \
   CARGO_INCREMENTAL=0 cargo test --workspace
 TEST_DATABASE_URL=postgres://$USER@127.0.0.1:5432/squid_test \
   ./scripts/smoke.sh
+PYTHONPATH=python/src python3 -m unittest discover -s python/tests
 ```
 
 Last verified result (2026-10-22):
@@ -162,8 +166,8 @@ Required counterpart decisions:
 
 1. Agree idempotency-key generation and retry semantics with reverse-ETL and
    audience consumers; add scheduled expiry cleanup.
-2. Add an automatic background replay worker for failed webhook deliveries;
-   keep envelope v1 and the existing manual replay stable.
+2. Harden the background retry worker with cross-instance claiming and ordering
+   guarantees; keep envelope v1 and the existing manual replay stable.
 3. Publish a JSON Schema for webhook envelope v1 and contract-test it against
    MessageBirds when its schema is available.
 4. Add batch/upsert endpoints for reverse-ETL and audience sync.

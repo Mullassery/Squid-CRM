@@ -430,3 +430,12 @@ Requests carry `x-squid-event`, `x-squid-event-id`, `x-squid-schema-version`,
 HMAC-SHA256 over the exact request body using the webhook secret. Delivery is
 fire-and-forget with a 5-second timeout; retries and a dead-letter queue are not
 yet implemented.
+
+## Idempotent REST writes
+
+REST `POST` requests and GraphQL POSTs to `/graphql` may send `Idempotency-Key` (1-255 printable ASCII
+characters). A successful response is stored for 24 hours and replayed verbatim
+with `idempotency-replayed: true`. Reusing a key with a different
+method/path/body returns `409 Conflict`; concurrent identical requests return
+`409` until the first completes. `X-Correlation-Id`/`X-Request-Id` are accepted
+and echoed for log correlation.

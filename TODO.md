@@ -46,6 +46,7 @@
       task/note targets: raw-array response, `group_by`, `aggregate`,
       `include_records_sample`, `order_by_for_records`, `limit` (0 = all) and
       `viewId` filters (camelCase, ANDed with explicit `filter`).
+- [x] Replay-safe REST POSTs via `Idempotency-Key` and correlation IDs.
 - [x] Tighten the data API to API keys (or the session cookie); user access
       tokens are rejected on `/graphql` and `/rest`.
 - [x] Opaque refresh-token rotation, replay rejection, and access-token

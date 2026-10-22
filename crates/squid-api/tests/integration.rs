@@ -6812,6 +6812,51 @@ async fn webhook_target_must_be_http_or_https() {
 }
 
 #[tokio::test]
+async fn graphql_mutations_replay_with_idempotency_key() {
+    let app = test_app().await;
+    let (token, _) = signup(&app, &unique_email("graphql-idempotency")).await;
+    let body = json!({
+        "query": "mutation { createPerson(data: { name: { firstName: \"Idem\", lastName: \"Graph\" }, emails: { primaryEmail: \"idem-graph@example.com\" } }) { id } }"
+    })
+    .to_string();
+    let request = || {
+        Request::builder()
+            .method("POST")
+            .uri("/graphql")
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .header("idempotency-key", "graphql-create-person-1")
+            .body(Body::from(body.clone()))
+            .unwrap()
+    };
+    let first = app.clone().oneshot(request()).await.expect("first request");
+    assert_eq!(first.status(), StatusCode::OK);
+    let first_body = to_bytes(first.into_body(), usize::MAX).await.unwrap();
+    let first_json: Value = serde_json::from_slice(&first_body).unwrap();
+    let first_id = first_json["data"]["createPerson"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let second = app
+        .clone()
+        .oneshot(request())
+        .await
+        .expect("second request");
+    assert_eq!(second.status(), StatusCode::OK);
+    assert_eq!(
+        second
+            .headers()
+            .get("idempotency-replayed")
+            .and_then(|value| value.to_str().ok()),
+        Some("true")
+    );
+    let second_body = to_bytes(second.into_body(), usize::MAX).await.unwrap();
+    let second_json: Value = serde_json::from_slice(&second_body).unwrap();
+    assert_eq!(second_json["data"]["createPerson"]["id"], first_id);
+}
+
+#[tokio::test]
 async fn webhook_delivery_posts_record_events() {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Value>();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

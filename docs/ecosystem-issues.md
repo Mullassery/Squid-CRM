@@ -28,7 +28,7 @@ Status labels: **OPEN**, **FIXED IN WORKING TREE**, **BLOCKED**, **UNVERIFIED**,
 | CI smoke test fails because `scripts/smoke.sh` uses `mktemp -t squid-smoke` without an `XXXXXX` template. | FIXED IN WORKING TREE | GNU `mktemp` reports `too few X's in template 'squid-smoke'`. |
 | REST writes are not idempotent; retrying a create can duplicate records. | FIXED IN WORKING TREE | No `Idempotency-Key` handling or deduplication table at audit time. |
 | Webhook delivery is fire-and-forget with a single attempt. | FIXED IN WORKING TREE | `emit_webhooks` now retries with bounded backoff and records attempts in `core.webhook_deliveries`. |
-| Webhook failures are not observable and there is no dead-letter queue. | PARTIAL | Attempts, last status/error, terminal state and replayable bodies are stored in `core.webhook_deliveries`; admin listing/manual replay exist; automatic background replay remains absent. |
+| Webhook failures are not observable and there is no dead-letter queue. | PARTIAL | Attempts, last status/error, terminal state and replayable bodies are stored in `core.webhook_deliveries`; admin listing/manual replay and a background retry worker exist; ordering and retention policy remain open. |
 | No shared event-schema contract with MessageBirds. | BLOCKED | Squid envelope differs from MessageBirds/OCDS; a counterpart mapping decision is required. |
 | No PyReverseETL Squid adapter or mutually verified payload contract. | BLOCKED | PyReverseETL webhook payload and header support do not match Squid REST writes. |
 | README and About text describe Twenty API compatibility. | OPEN | Branding removal must preserve AGPL `NOTICE`/`LICENSE` attribution and generated fixture provenance. |

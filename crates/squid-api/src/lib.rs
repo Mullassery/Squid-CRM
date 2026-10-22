@@ -386,7 +386,8 @@ async fn idempotency_guard(
     request: Request,
     next: Next,
 ) -> Response {
-    if request.method() != Method::POST || !request.uri().path().starts_with("/rest/") {
+    let path = request.uri().path();
+    if request.method() != Method::POST || !(path.starts_with("/rest/") || path == "/graphql") {
         return next.run(request).await;
     }
     let Some(raw_key) = request
@@ -405,7 +406,7 @@ async fn idempotency_guard(
         .into_response();
     }
 
-    let path = request.uri().path().to_string();
+    let path = path.to_string();
     let (parts, body) = request.into_parts();
     let body_bytes = match to_bytes(body, 2 * 1024 * 1024).await {
         Ok(bytes) => bytes,
