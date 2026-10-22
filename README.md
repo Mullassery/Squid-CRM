@@ -5,11 +5,11 @@ PostgreSQL, GraphQL/OpenAPI) and the **existing React/TypeScript frontend**,
 derived from [Twenty](https://github.com/twentyhq/twenty) and preserving its API
 contract.
 
-> **Status: Phase 4 complete.** Auth, workspace bootstrap, eight standard
-> seeded objects (person, company, opportunity, task, note, task/note targets,
-> workspaceMember metadata), metadata/view writes and contract-aligned REST +
-> GraphQL surfaces are implemented and tested against real PostgreSQL. Dynamic
-> schema generation and role enforcement remain Phase 5 work — see
+> **Status: Phase 5 in progress.** Phase 4 is complete. Phase 5 has added nested
+> relation filters/ordering, view-based groupBy paging, ranked search,
+> metadata-backed built-in/custom roles with assignment, webhook CRUD and
+> admin guards on metadata writes. Dynamic schema generation, permission-flag
+> enforcement, webhook delivery, jobs and workflows remain — see
 > `docs/api-compatibility.md` and `docs/migration-matrix.md`.
 
 ## Quick start
