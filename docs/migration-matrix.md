@@ -33,7 +33,7 @@ Operation coverage: `docs/frontend-operation-map.md`, `docs/rest-route-map.md`.
 | Task/Note targets | `src/modules/task-target`, `note-target` | `squid-db`/`squid-api` | partial | target integration tests | CRUD/nested resolution; REST batch routes pending |
 | Timeline activities | `src/modules/timeline`, `timeline-activity-type` | — | not-started | | |
 | Search | `core-modules/search` | `squid-db`/`squid-api` | partial | `search_returns_ranked_records_with_object_filters` | GraphQL search over five searchable objects; filter input and export/import pending |
-| Record export / import | `core-modules/record-export`, `record-import` | `squid-api` | partial | REST CSV export/import test | CSV export for core objects and people import; other imports pending |
+| Record export / import | `core-modules/record-export`, `record-import` | `squid-api` | partial | REST CSV export/import test | CSV export/import for core objects; subscription export and other formats pending |
 | Files & upload | `core-modules/file`, `file-storage`, `src/modules/attachment` | `squid-db`/`squid-api` | partial | file/avatar integration test | local PostgreSQL storage, signed upload/download URLs, permission flags; S3 pending |
 | Email (Gmail/Graph/IMAP/SMTP) | `core-modules/email`, `messaging` | — | not-started | | |
 | Calendar | `core-modules/calendar`, `src/modules/calendar` | — | not-started | | |

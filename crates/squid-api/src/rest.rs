@@ -581,6 +581,156 @@ pub async fn import_people(
     Ok(Json(json!({ "imported": imported })))
 }
 
+fn csv_import_rows(body: &[u8]) -> AppResult<(Vec<String>, Vec<Vec<String>>)> {
+    let text = String::from_utf8(body.to_vec())
+        .map_err(|_| AppError::BadRequest("CSV must be UTF-8".to_string()))?;
+    let mut lines = text.lines().filter(|line| !line.trim().is_empty());
+    let header = lines
+        .next()
+        .ok_or_else(|| AppError::BadRequest("CSV header is required".to_string()))?;
+    let columns = parse_csv_line(header)
+        .into_iter()
+        .map(|column| column.trim().to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    let rows = lines.map(parse_csv_line).collect();
+    Ok((columns, rows))
+}
+
+fn csv_value(columns: &[String], values: &[String], name: &str) -> Option<String> {
+    columns
+        .iter()
+        .position(|column| column == name)
+        .and_then(|position| values.get(position))
+        .filter(|value| !value.is_empty())
+        .cloned()
+}
+
+pub async fn import_companies(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> AppResult<Json<serde_json::Value>> {
+    let auth = require_capability(&state, &headers, Capability::Update).await?;
+    let (columns, rows) = csv_import_rows(&body)?;
+    let mut imported = 0i64;
+    for values in rows {
+        let input = CreateCompanyInput {
+            name: csv_value(&columns, &values, "name"),
+            account_owner_id: csv_value(&columns, &values, "accountownerid")
+                .and_then(|value| Uuid::parse_str(&value).ok()),
+            ..Default::default()
+        };
+        if input.name.as_deref().unwrap_or_default().is_empty() {
+            continue;
+        }
+        state
+            .db
+            .create_company(auth.workspace_id, &input)
+            .await
+            .map_err(AppError::Internal)?;
+        imported += 1;
+    }
+    Ok(Json(json!({ "imported": imported })))
+}
+
+pub async fn import_opportunities(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> AppResult<Json<serde_json::Value>> {
+    let auth = require_capability(&state, &headers, Capability::Update).await?;
+    let (columns, rows) = csv_import_rows(&body)?;
+    let mut imported = 0i64;
+    for values in rows {
+        let input = CreateOpportunityInput {
+            name: csv_value(&columns, &values, "name"),
+            stage: csv_value(&columns, &values, "stage")
+                .and_then(|value| squid_core::OpportunityStage::parse(&value)),
+            close_date: csv_value(&columns, &values, "closedate")
+                .and_then(|value| chrono::DateTime::parse_from_rfc3339(&value).ok())
+                .map(|value| value.with_timezone(&chrono::Utc)),
+            company_id: csv_value(&columns, &values, "companyid")
+                .and_then(|value| Uuid::parse_str(&value).ok()),
+            point_of_contact_id: csv_value(&columns, &values, "pointofcontactid")
+                .and_then(|value| Uuid::parse_str(&value).ok()),
+            owner_id: csv_value(&columns, &values, "ownerid")
+                .and_then(|value| Uuid::parse_str(&value).ok()),
+            ..Default::default()
+        };
+        if input.name.as_deref().unwrap_or_default().is_empty() {
+            continue;
+        }
+        state
+            .db
+            .create_opportunity(auth.workspace_id, &input)
+            .await
+            .map_err(AppError::Internal)?;
+        imported += 1;
+    }
+    Ok(Json(json!({ "imported": imported })))
+}
+
+pub async fn import_tasks(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> AppResult<Json<serde_json::Value>> {
+    let auth = require_capability(&state, &headers, Capability::Update).await?;
+    let (columns, rows) = csv_import_rows(&body)?;
+    let mut imported = 0i64;
+    for values in rows {
+        let input = CreateTaskInput {
+            title: csv_value(&columns, &values, "title"),
+            status: csv_value(&columns, &values, "status")
+                .and_then(|value| squid_core::TaskStatus::parse(&value)),
+            due_at: csv_value(&columns, &values, "dueat")
+                .and_then(|value| chrono::DateTime::parse_from_rfc3339(&value).ok())
+                .map(|value| value.with_timezone(&chrono::Utc)),
+            assignee_id: csv_value(&columns, &values, "assigneeid")
+                .and_then(|value| Uuid::parse_str(&value).ok()),
+            position: None,
+            body_v2: None,
+        };
+        if input.title.as_deref().unwrap_or_default().is_empty() {
+            continue;
+        }
+        state
+            .db
+            .create_task(auth.workspace_id, &input)
+            .await
+            .map_err(AppError::Internal)?;
+        imported += 1;
+    }
+    Ok(Json(json!({ "imported": imported })))
+}
+
+pub async fn import_notes(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> AppResult<Json<serde_json::Value>> {
+    let auth = require_capability(&state, &headers, Capability::Update).await?;
+    let (columns, rows) = csv_import_rows(&body)?;
+    let mut imported = 0i64;
+    for values in rows {
+        let input = CreateNoteInput {
+            title: csv_value(&columns, &values, "title"),
+            position: None,
+            body_v2: None,
+        };
+        if input.title.as_deref().unwrap_or_default().is_empty() {
+            continue;
+        }
+        state
+            .db
+            .create_note(auth.workspace_id, &input)
+            .await
+            .map_err(AppError::Internal)?;
+        imported += 1;
+    }
+    Ok(Json(json!({ "imported": imported })))
+}
+
 pub async fn export_companies(
     State(state): State<AppState>,
     headers: HeaderMap,

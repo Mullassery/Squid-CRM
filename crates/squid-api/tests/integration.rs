@@ -6566,6 +6566,44 @@ async fn rest_export_returns_csv() {
 
     let list = send(&app, authorized("GET", "/rest/people", &token, None)).await;
     assert_eq!(list.body["totalCount"], 2);
+
+    let company_import = Request::builder()
+        .method("POST")
+        .uri("/rest/companies/import")
+        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+        .header(header::CONTENT_TYPE, "text/csv")
+        .body(Body::from("name,accountOwnerId\nImported Co,\n"))
+        .unwrap();
+    let company_import = app
+        .clone()
+        .oneshot(company_import)
+        .await
+        .expect("company import");
+    assert_eq!(company_import.status(), StatusCode::OK);
+    let company_body = to_bytes(company_import.into_body(), usize::MAX)
+        .await
+        .expect("company body");
+    assert_eq!(
+        serde_json::from_slice::<Value>(&company_body).unwrap()["imported"],
+        1
+    );
+
+    let task_import = Request::builder()
+        .method("POST")
+        .uri("/rest/tasks/import")
+        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+        .header(header::CONTENT_TYPE, "text/csv")
+        .body(Body::from("title,status\nImported Task,NEW\n"))
+        .unwrap();
+    let task_import = app.clone().oneshot(task_import).await.expect("task import");
+    assert_eq!(task_import.status(), StatusCode::OK);
+    let task_body = to_bytes(task_import.into_body(), usize::MAX)
+        .await
+        .expect("task body");
+    assert_eq!(
+        serde_json::from_slice::<Value>(&task_body).unwrap()["imported"],
+        1
+    );
 }
 
 #[tokio::test]
