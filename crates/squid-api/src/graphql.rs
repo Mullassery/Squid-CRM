@@ -32,7 +32,7 @@ use squid_core::{
     UpdateViewFieldGroupInput, UpdateViewFieldInput, UpdateViewFilterGroupInput,
     UpdateViewFilterInput, UpdateViewGroupInput, UpdateViewInput, UpdateViewSortInput,
     User as CoreUser, UuidOp, View, ViewField, ViewFieldGroup, ViewFilter, ViewFilterGroup,
-    ViewGroup, ViewSort, ViewType, WebhookRecord,
+    ViewGroup, ViewSort, ViewType, WebhookRecord, WorkspaceMember as CoreWorkspaceMember,
 };
 use squid_db::{OrderTerm, PersonColumn};
 use uuid::Uuid;
@@ -858,6 +858,7 @@ impl CompanyFilterInput {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, async_graphql::Enum)]
+#[graphql(rename_items = "PascalCase")]
 pub enum OrderByDirection {
     AscNullsFirst,
     AscNullsLast,
@@ -900,6 +901,40 @@ pub(crate) fn sort_companies(items: &mut [Company], terms: &[SortTerm]) {
     sort_records(items, terms, crate::sorting::company_value);
 }
 
+fn sort_companies_related(
+    items: &mut [Company],
+    terms: &[SortTerm],
+    members: &HashMap<Uuid, (CoreWorkspaceMember, CoreUser)>,
+) {
+    sort_records(items, terms, |company, field| {
+        crate::sorting::company_related_value(company, field, members)
+    });
+}
+
+fn sort_tasks_related(
+    items: &mut [Task],
+    terms: &[SortTerm],
+    members: &HashMap<Uuid, (CoreWorkspaceMember, CoreUser)>,
+) {
+    sort_records(items, terms, |task, field| {
+        crate::sorting::task_related_value(task, field, members)
+    });
+}
+
+async fn workspace_member_map(
+    state: &AppState,
+    workspace_id: Uuid,
+) -> async_graphql::Result<HashMap<Uuid, (CoreWorkspaceMember, CoreUser)>> {
+    Ok(state
+        .db
+        .list_workspace_members_with_users(workspace_id)
+        .await
+        .map_err(|e| gql_err(AppError::Internal(e.into())))?
+        .into_iter()
+        .map(|(member, user)| (member.user_id, (member, user)))
+        .collect())
+}
+
 fn sort_opportunities_related(
     items: &mut [Opportunity],
     terms: &[SortTerm],
@@ -931,6 +966,144 @@ pub(crate) fn sort_note_targets(items: &mut [NoteTarget], terms: &[SortTerm]) {
     sort_records(items, terms, crate::sorting::note_target_value);
 }
 
+async fn sort_task_targets_with_relations(
+    state: &AppState,
+    workspace_id: Uuid,
+    items: &mut [TaskTarget],
+    terms: &[SortTerm],
+) -> async_graphql::Result<()> {
+    let mut tasks = HashMap::new();
+    let mut companies = HashMap::new();
+    let mut opportunities = HashMap::new();
+    let mut people = HashMap::new();
+    for term in terms {
+        if term.field.starts_with("task.") && tasks.is_empty() {
+            tasks = state
+                .db
+                .list_tasks(workspace_id, 10_000, 0)
+                .await
+                .map_err(|e| gql_err(AppError::Internal(e)))?
+                .0
+                .into_iter()
+                .map(|task| (task.id, task))
+                .collect();
+        }
+        if term.field.starts_with("targetCompany.") && companies.is_empty() {
+            companies = state
+                .db
+                .list_companies(workspace_id, 10_000, 0)
+                .await
+                .map_err(|e| gql_err(AppError::Internal(e)))?
+                .0
+                .into_iter()
+                .map(|company| (company.id, company))
+                .collect();
+        }
+        if term.field.starts_with("targetOpportunity.") && opportunities.is_empty() {
+            opportunities = state
+                .db
+                .list_opportunities(workspace_id, 10_000, 0)
+                .await
+                .map_err(|e| gql_err(AppError::Internal(e)))?
+                .0
+                .into_iter()
+                .map(|opportunity| (opportunity.id, opportunity))
+                .collect();
+        }
+        if term.field.starts_with("targetPerson.") && people.is_empty() {
+            people = state
+                .db
+                .list_persons_page(workspace_id, 10_000, 0, None, None, &[], None)
+                .await
+                .map_err(|e| gql_err(AppError::Internal(e)))?
+                .persons
+                .into_iter()
+                .map(|person| (person.id, person))
+                .collect();
+        }
+    }
+    sort_records(items, terms, |target, field| {
+        crate::sorting::task_target_related_value(
+            target,
+            field,
+            &tasks,
+            &companies,
+            &opportunities,
+            &people,
+        )
+    });
+    Ok(())
+}
+
+async fn sort_note_targets_with_relations(
+    state: &AppState,
+    workspace_id: Uuid,
+    items: &mut [NoteTarget],
+    terms: &[SortTerm],
+) -> async_graphql::Result<()> {
+    let mut notes = HashMap::new();
+    let mut companies = HashMap::new();
+    let mut opportunities = HashMap::new();
+    let mut people = HashMap::new();
+    for term in terms {
+        if term.field.starts_with("note.") && notes.is_empty() {
+            notes = state
+                .db
+                .list_notes(workspace_id, 10_000, 0)
+                .await
+                .map_err(|e| gql_err(AppError::Internal(e)))?
+                .0
+                .into_iter()
+                .map(|note| (note.id, note))
+                .collect();
+        }
+        if term.field.starts_with("targetCompany.") && companies.is_empty() {
+            companies = state
+                .db
+                .list_companies(workspace_id, 10_000, 0)
+                .await
+                .map_err(|e| gql_err(AppError::Internal(e)))?
+                .0
+                .into_iter()
+                .map(|company| (company.id, company))
+                .collect();
+        }
+        if term.field.starts_with("targetOpportunity.") && opportunities.is_empty() {
+            opportunities = state
+                .db
+                .list_opportunities(workspace_id, 10_000, 0)
+                .await
+                .map_err(|e| gql_err(AppError::Internal(e)))?
+                .0
+                .into_iter()
+                .map(|opportunity| (opportunity.id, opportunity))
+                .collect();
+        }
+        if term.field.starts_with("targetPerson.") && people.is_empty() {
+            people = state
+                .db
+                .list_persons_page(workspace_id, 10_000, 0, None, None, &[], None)
+                .await
+                .map_err(|e| gql_err(AppError::Internal(e)))?
+                .persons
+                .into_iter()
+                .map(|person| (person.id, person))
+                .collect();
+        }
+    }
+    sort_records(items, terms, |target, field| {
+        crate::sorting::note_target_related_value(
+            target,
+            field,
+            &notes,
+            &companies,
+            &opportunities,
+            &people,
+        )
+    });
+    Ok(())
+}
+
 #[derive(Debug, InputObject)]
 pub struct FullNameOrderByInput {
     pub first_name: Option<OrderByDirection>,
@@ -950,6 +1123,17 @@ pub struct PersonOrderByInput {
     pub name: Option<FullNameOrderByInput>,
     pub emails: Option<EmailsOrderByInput>,
     pub job_title: Option<OrderByDirection>,
+    pub company: Option<CompanyOrderByInput>,
+}
+
+#[derive(Debug, Default, InputObject)]
+pub struct CompanyOrderByInput {
+    pub id: Option<OrderByDirection>,
+    pub created_at: Option<OrderByDirection>,
+    pub updated_at: Option<OrderByDirection>,
+    pub name: Option<OrderByDirection>,
+    pub position: Option<OrderByDirection>,
+    pub account_owner_id: Option<OrderByDirection>,
 }
 
 #[derive(Debug, InputObject)]
@@ -1759,6 +1943,11 @@ fn order_terms(input: &[PersonOrderByInput]) -> Vec<OrderTerm> {
             push(PersonColumn::PrimaryEmail, emails.primary_email);
         }
         push(PersonColumn::JobTitle, order.job_title);
+        if let Some(company) = &order.company {
+            push(PersonColumn::CompanyId, company.id);
+            push(PersonColumn::CompanyCreatedAt, company.created_at);
+            push(PersonColumn::CompanyName, company.name);
+        }
     }
     terms
 }
@@ -2783,7 +2972,17 @@ impl TaskGql {
                 )
                 && option_uuid_filter_matches(&filter.target_person_id, target.target_person_id)
         });
-        sort_task_targets(&mut targets, &order);
+        if order.iter().any(|term| {
+            term.field.starts_with("task.")
+                || term.field.starts_with("targetCompany.")
+                || term.field.starts_with("targetOpportunity.")
+                || term.field.starts_with("targetPerson.")
+        }) {
+            sort_task_targets_with_relations(state(ctx), auth.workspace_id, &mut targets, &order)
+                .await?;
+        } else {
+            sort_task_targets(&mut targets, &order);
+        }
         let total = targets.len() as i64;
         let (targets, page_info) =
             paginate_targets(targets, first, last, offset, before, after, |t| t.id)?;
@@ -2834,7 +3033,17 @@ impl NoteGql {
                 )
                 && option_uuid_filter_matches(&filter.target_person_id, target.target_person_id)
         });
-        sort_note_targets(&mut targets, &order);
+        if order.iter().any(|term| {
+            term.field.starts_with("note.")
+                || term.field.starts_with("targetCompany.")
+                || term.field.starts_with("targetOpportunity.")
+                || term.field.starts_with("targetPerson.")
+        }) {
+            sort_note_targets_with_relations(state(ctx), auth.workspace_id, &mut targets, &order)
+                .await?;
+        } else {
+            sort_note_targets(&mut targets, &order);
+        }
         let total = targets.len() as i64;
         let (targets, page_info) =
             paginate_targets(targets, first, last, offset, before, after, |t| t.id)?;
@@ -3683,7 +3892,15 @@ impl QueryRoot {
             .map_err(|e| gql_err(AppError::Internal(e)))?;
         let filter = filter.unwrap_or_default();
         all.retain(|company| company_matches(company, &filter));
-        sort_companies(&mut all, &order);
+        if order
+            .iter()
+            .any(|term| term.field.starts_with("accountOwner."))
+        {
+            let members = workspace_member_map(state(ctx), auth.workspace_id).await?;
+            sort_companies_related(&mut all, &order, &members);
+        } else {
+            sort_companies(&mut all, &order);
+        }
 
         let total = all.len() as i64;
         let limit = first
@@ -3938,7 +4155,12 @@ impl QueryRoot {
             .map_err(|e| gql_err(AppError::Internal(e)))?;
         let filter = filter.unwrap_or_default();
         all.retain(|task| task_matches(task, &filter));
-        sort_tasks(&mut all, &order);
+        if order.iter().any(|term| term.field.starts_with("assignee.")) {
+            let members = workspace_member_map(state(ctx), auth.workspace_id).await?;
+            sort_tasks_related(&mut all, &order, &members);
+        } else {
+            sort_tasks(&mut all, &order);
+        }
 
         let total = all.len() as i64;
         let limit = first
@@ -4026,7 +4248,17 @@ impl QueryRoot {
                 )
                 && option_uuid_filter_matches(&filter.target_person_id, target.target_person_id)
         });
-        sort_task_targets(&mut targets, &order);
+        if order.iter().any(|term| {
+            term.field.starts_with("task.")
+                || term.field.starts_with("targetCompany.")
+                || term.field.starts_with("targetOpportunity.")
+                || term.field.starts_with("targetPerson.")
+        }) {
+            sort_task_targets_with_relations(state(ctx), auth.workspace_id, &mut targets, &order)
+                .await?;
+        } else {
+            sort_task_targets(&mut targets, &order);
+        }
         let total = targets.len() as i64;
         let (targets, page_info) =
             paginate_targets(targets, first, last, offset, before, after, |t| t.id)?;
@@ -4109,7 +4341,17 @@ impl QueryRoot {
                 )
                 && option_uuid_filter_matches(&filter.target_person_id, target.target_person_id)
         });
-        sort_note_targets(&mut targets, &order);
+        if order.iter().any(|term| {
+            term.field.starts_with("note.")
+                || term.field.starts_with("targetCompany.")
+                || term.field.starts_with("targetOpportunity.")
+                || term.field.starts_with("targetPerson.")
+        }) {
+            sort_note_targets_with_relations(state(ctx), auth.workspace_id, &mut targets, &order)
+                .await?;
+        } else {
+            sort_note_targets(&mut targets, &order);
+        }
         let total = targets.len() as i64;
         let (targets, page_info) =
             paginate_targets(targets, first, last, offset, before, after, |t| t.id)?;

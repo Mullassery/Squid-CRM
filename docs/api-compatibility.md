@@ -377,11 +377,11 @@ Known remaining divergences (do not claim parity):
 | Data-API auth | API keys only | API keys or session cookie; access tokens rejected | aligned for the implemented surface |
 | Workspace bootstrap | `PENDING_CREATION` + `activateWorkspace` | atomic signup + immediate schema | document; add lifecycle |
 | Company filters | full `CompanyFilterInput` with relations | GraphQL `id`/`createdAt`/`updatedAt`/`name`/`accountOwnerId` + logic; REST scalar and dot-path `company.*` filters | nested `accountOwner` relation filters pending |
-| Company ordering | GraphQL `orderBy` + REST `order_by` | scalar fields applied in memory; nested relation ordering ignored | add relation ordering |
+| Company ordering | GraphQL `orderBy` + REST `order_by` | scalar fields plus `accountOwner.*` ordering | aligned for implemented fields |
 | Opportunity filters | full scalar + relation filters | GraphQL scalar fields plus nested `company`/`pointOfContact`; REST scalar and dot-path filters | nested `owner` filters and relation ordering pending |
 | Opportunity ordering | GraphQL `orderBy` + REST `order_by` | scalar fields plus nested `company.*`/`pointOfContact.*` ordering | other relation ordering pending |
-| Task/Note targets | full polymorphic relations + REST | GraphQL nested/root queries + CRUD/batches + `totalCount`; REST CRUD + scalar filter/order | relation ordering pending |
-| Task/Note ordering | GraphQL `orderBy` + REST `order_by` | scalar fields applied in memory; nested relation ordering ignored | add relation ordering |
+| Task/Note targets | full polymorphic relations + REST | GraphQL nested/root queries + CRUD/batches + `totalCount`; REST CRUD + scalar/relation filter/order | aligned for implemented relations |
+| Task/Note ordering | GraphQL `orderBy` + REST `order_by` | task `assignee.*` plus scalar fields; note scalar fields | aligned for implemented fields |
 | Workspace prefill | sample people/companies on activation | none (new workspace has 0 people) | implement prefill |
 | Filter coverage | all person fields/relations | scalar person fields plus nested `company`; REST dot-path `company.*` | other relations and nested relation ordering pending |
 | REST sort/filter errors | `FIELD_NOT_FOUND` for unknown fields | `400 BadRequestException` text | align error code |

@@ -139,7 +139,8 @@
       the view's sorts when `order_by_for_records` is omitted.
 - [x] Nested relation ordering for opportunities (`company.*`,
       `pointOfContact.*`) in GraphQL `orderBy` and REST `order_by`.
-- [ ] Nested relation ordering for the remaining objects.
+- [x] Nested relation ordering for people (`company.*`), companies
+      (`accountOwner.*`), tasks (`assignee.*`) and task/note targets.
 - [x] GraphQL `search` across person/company/opportunity/task/note with
       ranked `tsRankCD`/`tsRank`, cursors and include/exclude object filters.
 - [x] Search `ObjectRecordFilterInput` semantics (id/createdAt/updatedAt/

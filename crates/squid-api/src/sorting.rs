@@ -8,7 +8,11 @@
 use std::cmp::Ordering;
 
 use chrono::{DateTime, Utc};
-use squid_core::{Company, Note, NoteTarget, Opportunity, Person, Task, TaskTarget};
+use uuid::Uuid;
+
+use squid_core::{
+    Company, Note, NoteTarget, Opportunity, Person, Task, TaskTarget, User, WorkspaceMember,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SortValue {
@@ -105,6 +109,55 @@ pub fn sort_records<T>(
 
 fn text(value: impl ToString) -> SortValue {
     SortValue::Text(value.to_string())
+}
+
+fn split_name(email: &str) -> (String, String) {
+    let local = email.split('@').next().unwrap_or_default();
+    match local.split_once('.') {
+        Some((first, last)) => (first.to_string(), last.to_string()),
+        None => (local.to_string(), String::new()),
+    }
+}
+
+pub fn workspace_member_value(
+    member: &WorkspaceMember,
+    user: &User,
+    field: &str,
+) -> Option<SortValue> {
+    let (first, last) = split_name(&user.email);
+    match field {
+        "id" => Some(text(member.id)),
+        "userId" => Some(text(member.user_id)),
+        "userEmail" => Some(SortValue::Text(user.email.clone())),
+        "name.firstName" => Some(SortValue::Text(first)),
+        "name.lastName" => Some(SortValue::Text(last)),
+        "jobTitle" => None,
+        _ => None,
+    }
+}
+
+pub fn company_related_value(
+    company: &Company,
+    field: &str,
+    members: &std::collections::HashMap<Uuid, (WorkspaceMember, User)>,
+) -> Option<SortValue> {
+    if let Some(rest) = field.strip_prefix("accountOwner.") {
+        let (member, user) = members.get(&company.account_owner_id?)?;
+        return workspace_member_value(member, user, rest);
+    }
+    company_value(company, field)
+}
+
+pub fn task_related_value(
+    task: &Task,
+    field: &str,
+    members: &std::collections::HashMap<Uuid, (WorkspaceMember, User)>,
+) -> Option<SortValue> {
+    if let Some(rest) = field.strip_prefix("assignee.") {
+        let (member, user) = members.get(&task.assignee_id?)?;
+        return workspace_member_value(member, user, rest);
+    }
+    task_value(task, field)
 }
 
 pub fn company_value(company: &Company, field: &str) -> Option<SortValue> {
@@ -208,6 +261,52 @@ pub fn note_value(note: &Note, field: &str) -> Option<SortValue> {
         "searchVector" => note.search_vector.clone().map(SortValue::Text),
         _ => None,
     }
+}
+
+pub fn task_target_related_value(
+    target: &TaskTarget,
+    field: &str,
+    tasks: &std::collections::HashMap<Uuid, Task>,
+    companies: &std::collections::HashMap<Uuid, Company>,
+    opportunities: &std::collections::HashMap<Uuid, Opportunity>,
+    people: &std::collections::HashMap<Uuid, Person>,
+) -> Option<SortValue> {
+    if let Some(rest) = field.strip_prefix("task.") {
+        return task_value(tasks.get(&target.task_id)?, rest);
+    }
+    if let Some(rest) = field.strip_prefix("targetCompany.") {
+        return company_value(companies.get(&target.target_company_id?)?, rest);
+    }
+    if let Some(rest) = field.strip_prefix("targetOpportunity.") {
+        return opportunity_value(opportunities.get(&target.target_opportunity_id?)?, rest);
+    }
+    if let Some(rest) = field.strip_prefix("targetPerson.") {
+        return person_value(people.get(&target.target_person_id?)?, rest);
+    }
+    task_target_value(target, field)
+}
+
+pub fn note_target_related_value(
+    target: &NoteTarget,
+    field: &str,
+    notes: &std::collections::HashMap<Uuid, Note>,
+    companies: &std::collections::HashMap<Uuid, Company>,
+    opportunities: &std::collections::HashMap<Uuid, Opportunity>,
+    people: &std::collections::HashMap<Uuid, Person>,
+) -> Option<SortValue> {
+    if let Some(rest) = field.strip_prefix("note.") {
+        return note_value(notes.get(&target.note_id)?, rest);
+    }
+    if let Some(rest) = field.strip_prefix("targetCompany.") {
+        return company_value(companies.get(&target.target_company_id?)?, rest);
+    }
+    if let Some(rest) = field.strip_prefix("targetOpportunity.") {
+        return opportunity_value(opportunities.get(&target.target_opportunity_id?)?, rest);
+    }
+    if let Some(rest) = field.strip_prefix("targetPerson.") {
+        return person_value(people.get(&target.target_person_id?)?, rest);
+    }
+    note_target_value(target, field)
 }
 
 pub fn task_target_value(target: &TaskTarget, field: &str) -> Option<SortValue> {

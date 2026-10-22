@@ -1162,7 +1162,7 @@ impl Db {
                     "{}, id ASC",
                     order
                         .iter()
-                        .map(OrderTerm::sql)
+                        .map(|term| term.sql(&schema))
                         .collect::<Vec<_>>()
                         .join(", ")
                 )
@@ -7465,6 +7465,9 @@ pub enum PersonColumn {
     NameLast,
     PrimaryEmail,
     JobTitle,
+    CompanyId,
+    CompanyName,
+    CompanyCreatedAt,
 }
 
 impl PersonColumn {
@@ -7477,6 +7480,9 @@ impl PersonColumn {
             PersonColumn::NameLast => "name_last",
             PersonColumn::PrimaryEmail => "primary_email",
             PersonColumn::JobTitle => "job_title",
+            PersonColumn::CompanyId => "company_id",
+            PersonColumn::CompanyName => "company_name",
+            PersonColumn::CompanyCreatedAt => "company_created_at",
         }
     }
 }
@@ -7489,10 +7495,18 @@ pub struct OrderTerm {
 }
 
 impl OrderTerm {
-    fn sql(&self) -> String {
+    fn sql(&self, schema: &str) -> String {
+        let column = match self.column {
+            PersonColumn::CompanyName => {
+                format!("(SELECT name FROM {schema}.company WHERE id = company_id)")
+            }
+            PersonColumn::CompanyCreatedAt => {
+                format!("(SELECT created_at FROM {schema}.company WHERE id = company_id)")
+            }
+            column => column.sql().to_string(),
+        };
         format!(
-            "{} {} NULLS {}",
-            self.column.sql(),
+            "{column} {} NULLS {}",
             if self.descending { "DESC" } else { "ASC" },
             if self.nulls_first { "FIRST" } else { "LAST" }
         )

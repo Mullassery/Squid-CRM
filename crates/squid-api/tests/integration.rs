@@ -4017,6 +4017,49 @@ async fn relation_filters_match_nested_company_and_contact() {
         ordered_gql.body["data"]["opportunities"]["edges"][1]["node"]["name"],
         "Alpha Deal"
     );
+
+    let people_ordered_rest = send(
+        &app,
+        authorized(
+            "GET",
+            "/rest/people?order_by=company.name%5BAscNullsLast%5D",
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(
+        people_ordered_rest.status,
+        StatusCode::OK,
+        "body: {}",
+        people_ordered_rest.body
+    );
+    assert_eq!(
+        people_ordered_rest.body["data"]["people"][0]["name"]["firstName"],
+        "Ada"
+    );
+
+    let people_ordered_gql = send(
+        &app,
+        authorized(
+            "POST",
+            "/graphql",
+            &token,
+            Some(json!({
+                "query": "{ people(orderBy: [{ company: { name: AscNullsLast } }]) { edges { node { name { firstName } } } } }"
+            })),
+        ),
+    )
+    .await;
+    assert!(
+        people_ordered_gql.body["errors"].is_null(),
+        "errors: {}",
+        people_ordered_gql.body
+    );
+    assert_eq!(
+        people_ordered_gql.body["data"]["people"]["edges"][0]["node"]["name"]["firstName"],
+        "Ada"
+    );
 }
 
 #[tokio::test]

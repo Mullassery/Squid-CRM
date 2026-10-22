@@ -550,6 +550,11 @@ pub async fn list_companies(
             "name",
             "position",
             "accountOwnerId",
+            "accountOwner.id",
+            "accountOwner.userId",
+            "accountOwner.userEmail",
+            "accountOwner.name.firstName",
+            "accountOwner.name.lastName",
             "searchVector",
             "annualRevenue",
         ],
@@ -581,7 +586,17 @@ pub async fn list_companies(
             .retain(|company| filtering::matches(filter, &|field| company_value(company, field)));
     }
     let total = companies.len() as i64;
-    sort_companies(&mut companies, &order);
+    if order
+        .iter()
+        .any(|term| term.field.starts_with("accountOwner."))
+    {
+        let members = workspace_member_map(&state, auth.workspace_id).await?;
+        crate::sorting::sort_records(&mut companies, &order, |company, field| {
+            crate::sorting::company_related_value(company, field, &members)
+        });
+    } else {
+        sort_companies(&mut companies, &order);
+    }
 
     if let Some(after) = starting_after {
         if let Some(index) = companies.iter().position(|company| company.id == after) {
@@ -1104,6 +1119,11 @@ pub async fn list_tasks(
             "dueAt",
             "status",
             "assigneeId",
+            "assignee.id",
+            "assignee.userId",
+            "assignee.userEmail",
+            "assignee.name.firstName",
+            "assignee.name.lastName",
             "searchVector",
         ],
     )?;
@@ -1133,7 +1153,14 @@ pub async fn list_tasks(
         tasks.retain(|task| filtering::matches(filter, &|field| task_value(task, field)));
     }
     let total = tasks.len() as i64;
-    sort_tasks(&mut tasks, &order);
+    if order.iter().any(|term| term.field.starts_with("assignee.")) {
+        let members = workspace_member_map(&state, auth.workspace_id).await?;
+        crate::sorting::sort_records(&mut tasks, &order, |task, field| {
+            crate::sorting::task_related_value(task, field, &members)
+        });
+    } else {
+        sort_tasks(&mut tasks, &order);
+    }
     if let Some(after) = starting_after {
         if let Some(index) = tasks.iter().position(|row| row.id == after) {
             tasks.drain(..=index);
@@ -1556,6 +1583,19 @@ pub async fn list_task_targets(
             "targetCompanyId",
             "targetOpportunityId",
             "targetPersonId",
+            "task.id",
+            "task.title",
+            "task.status",
+            "targetCompany.id",
+            "targetCompany.name",
+            "targetCompany.createdAt",
+            "targetOpportunity.id",
+            "targetOpportunity.name",
+            "targetOpportunity.stage",
+            "targetPerson.id",
+            "targetPerson.name.firstName",
+            "targetPerson.name.lastName",
+            "targetPerson.emails.primaryEmail",
         ],
     )?;
     let limit = params
@@ -1581,7 +1621,58 @@ pub async fn list_task_targets(
         targets
             .retain(|target| filtering::matches(filter, &|field| task_target_value(target, field)));
     }
-    sort_task_targets(&mut targets, &order);
+    if order.iter().any(|term| {
+        term.field.starts_with("task.")
+            || term.field.starts_with("targetCompany.")
+            || term.field.starts_with("targetOpportunity.")
+            || term.field.starts_with("targetPerson.")
+    }) {
+        let (tasks, _) = state
+            .db
+            .list_tasks(auth.workspace_id, 10_000, 0)
+            .await
+            .map_err(AppError::Internal)?;
+        let tasks: HashMap<Uuid, Task> = tasks.into_iter().map(|task| (task.id, task)).collect();
+        let (companies, _) = state
+            .db
+            .list_companies(auth.workspace_id, 10_000, 0)
+            .await
+            .map_err(AppError::Internal)?;
+        let companies: HashMap<Uuid, Company> = companies
+            .into_iter()
+            .map(|company| (company.id, company))
+            .collect();
+        let (opportunities, _) = state
+            .db
+            .list_opportunities(auth.workspace_id, 10_000, 0)
+            .await
+            .map_err(AppError::Internal)?;
+        let opportunities: HashMap<Uuid, Opportunity> = opportunities
+            .into_iter()
+            .map(|opportunity| (opportunity.id, opportunity))
+            .collect();
+        let people: HashMap<Uuid, squid_core::Person> = state
+            .db
+            .list_persons_page(auth.workspace_id, 10_000, 0, None, None, &[], None)
+            .await
+            .map_err(AppError::Internal)?
+            .persons
+            .into_iter()
+            .map(|person| (person.id, person))
+            .collect();
+        crate::sorting::sort_records(&mut targets, &order, |target, field| {
+            crate::sorting::task_target_related_value(
+                target,
+                field,
+                &tasks,
+                &companies,
+                &opportunities,
+                &people,
+            )
+        });
+    } else {
+        sort_task_targets(&mut targets, &order);
+    }
     let total = targets.len() as i64;
     let (page, page_info) = list_target_page(
         targets,
@@ -1731,6 +1822,18 @@ pub async fn list_note_targets(
             "targetCompanyId",
             "targetOpportunityId",
             "targetPersonId",
+            "note.id",
+            "note.title",
+            "targetCompany.id",
+            "targetCompany.name",
+            "targetCompany.createdAt",
+            "targetOpportunity.id",
+            "targetOpportunity.name",
+            "targetOpportunity.stage",
+            "targetPerson.id",
+            "targetPerson.name.firstName",
+            "targetPerson.name.lastName",
+            "targetPerson.emails.primaryEmail",
         ],
     )?;
     let limit = params
@@ -1756,7 +1859,58 @@ pub async fn list_note_targets(
         targets
             .retain(|target| filtering::matches(filter, &|field| note_target_value(target, field)));
     }
-    sort_note_targets(&mut targets, &order);
+    if order.iter().any(|term| {
+        term.field.starts_with("note.")
+            || term.field.starts_with("targetCompany.")
+            || term.field.starts_with("targetOpportunity.")
+            || term.field.starts_with("targetPerson.")
+    }) {
+        let (notes, _) = state
+            .db
+            .list_notes(auth.workspace_id, 10_000, 0)
+            .await
+            .map_err(AppError::Internal)?;
+        let notes: HashMap<Uuid, Note> = notes.into_iter().map(|note| (note.id, note)).collect();
+        let (companies, _) = state
+            .db
+            .list_companies(auth.workspace_id, 10_000, 0)
+            .await
+            .map_err(AppError::Internal)?;
+        let companies: HashMap<Uuid, Company> = companies
+            .into_iter()
+            .map(|company| (company.id, company))
+            .collect();
+        let (opportunities, _) = state
+            .db
+            .list_opportunities(auth.workspace_id, 10_000, 0)
+            .await
+            .map_err(AppError::Internal)?;
+        let opportunities: HashMap<Uuid, Opportunity> = opportunities
+            .into_iter()
+            .map(|opportunity| (opportunity.id, opportunity))
+            .collect();
+        let people: HashMap<Uuid, squid_core::Person> = state
+            .db
+            .list_persons_page(auth.workspace_id, 10_000, 0, None, None, &[], None)
+            .await
+            .map_err(AppError::Internal)?
+            .persons
+            .into_iter()
+            .map(|person| (person.id, person))
+            .collect();
+        crate::sorting::sort_records(&mut targets, &order, |target, field| {
+            crate::sorting::note_target_related_value(
+                target,
+                field,
+                &notes,
+                &companies,
+                &opportunities,
+                &people,
+            )
+        });
+    } else {
+        sort_note_targets(&mut targets, &order);
+    }
     let total = targets.len() as i64;
     let (page, page_info) = list_target_page(
         targets,
@@ -1953,6 +2107,9 @@ fn parse_order_by(raw: Option<&str>) -> AppResult<Vec<OrderTerm>> {
             "name.lastName" => PersonColumn::NameLast,
             "emails.primaryEmail" => PersonColumn::PrimaryEmail,
             "jobTitle" => PersonColumn::JobTitle,
+            "companyId" => PersonColumn::CompanyId,
+            "company.name" => PersonColumn::CompanyName,
+            "company.createdAt" => PersonColumn::CompanyCreatedAt,
             _ => {
                 return Err(AppError::BadRequest(format!(
                     "Field \"{field}\" does not exist or is not sortable"
@@ -2009,6 +2166,20 @@ fn parse_generic_order_by(raw: Option<&str>, allowed: &[&str]) -> AppResult<Vec<
 
 /// Parse the REST filter mini-language, e.g.
 /// `createdAt[gte]:"2024-01-01",name.firstName[startsWith]:A`.
+async fn workspace_member_map(
+    state: &AppState,
+    workspace_id: Uuid,
+) -> AppResult<HashMap<Uuid, (squid_core::WorkspaceMember, squid_core::User)>> {
+    Ok(state
+        .db
+        .list_workspace_members_with_users(workspace_id)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?
+        .into_iter()
+        .map(|(member, user)| (member.user_id, (member, user)))
+        .collect())
+}
+
 fn opportunity_relation_value(
     opportunity: &Opportunity,
     field: &str,
