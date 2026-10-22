@@ -100,6 +100,17 @@ pub struct SessionRow {
 }
 
 #[derive(Debug, Clone)]
+pub struct SearchHit {
+    pub record_id: Uuid,
+    pub object_name_singular: String,
+    pub object_label_singular: String,
+    pub label: String,
+    pub image_url: Option<String>,
+    pub ts_rank_cd: f32,
+    pub ts_rank: f32,
+}
+
+#[derive(Debug, Clone)]
 pub struct RefreshTokenRow {
     pub id: Uuid,
     pub user_id: Uuid,
@@ -1217,6 +1228,109 @@ impl Db {
         }
         let rows = query.fetch_all(&self.pool).await?;
         Ok(rows.iter().map(|row| row.get("id")).collect())
+    }
+
+    pub async fn search_records(
+        &self,
+        workspace_id: Uuid,
+        search_input: &str,
+        included_object_name_singulars: Option<&[String]>,
+        excluded_object_name_singulars: Option<&[String]>,
+    ) -> anyhow::Result<Vec<SearchHit>> {
+        self.ensure_standard_metadata(workspace_id).await?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let pattern = format!(
+            "%{}%",
+            search_input
+                .replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_")
+        );
+        let query_text = search_input.replace(['%', '_'], " ");
+
+        let definitions: &[(&str, &str, &str)] = &[
+            (
+                "person",
+                "Person",
+                &format!(
+                    "SELECT 'person'::text AS object_name_singular, 'Person'::text AS object_label_singular, id AS record_id, concat_ws(' ', name_first, name_last) AS label, avatar_url AS image_url, ts_rank_cd(to_tsvector('simple', coalesce(search_vector, '')), plainto_tsquery('simple', $2)) AS ts_rank_cd, ts_rank(to_tsvector('simple', coalesce(search_vector, '')), plainto_tsquery('simple', $2)) AS ts_rank FROM {schema}.person WHERE deleted_at IS NULL AND search_vector ILIKE $1"
+                ),
+            ),
+            (
+                "company",
+                "Company",
+                &format!(
+                    "SELECT 'company'::text, 'Company'::text, id, coalesce(name, ''), NULL::text, ts_rank_cd(to_tsvector('simple', coalesce(search_vector, '')), plainto_tsquery('simple', $2)), ts_rank(to_tsvector('simple', coalesce(search_vector, '')), plainto_tsquery('simple', $2)) FROM {schema}.company WHERE deleted_at IS NULL AND search_vector ILIKE $1"
+                ),
+            ),
+            (
+                "opportunity",
+                "Opportunity",
+                &format!(
+                    "SELECT 'opportunity'::text, 'Opportunity'::text, id, coalesce(name, ''), NULL::text, ts_rank_cd(to_tsvector('simple', coalesce(search_vector, '')), plainto_tsquery('simple', $2)), ts_rank(to_tsvector('simple', coalesce(search_vector, '')), plainto_tsquery('simple', $2)) FROM {schema}.opportunity WHERE deleted_at IS NULL AND search_vector ILIKE $1"
+                ),
+            ),
+            (
+                "task",
+                "Task",
+                &format!(
+                    "SELECT 'task'::text, 'Task'::text, id, coalesce(title, ''), NULL::text, ts_rank_cd(to_tsvector('simple', coalesce(search_vector, '')), plainto_tsquery('simple', $2)), ts_rank(to_tsvector('simple', coalesce(search_vector, '')), plainto_tsquery('simple', $2)) FROM {schema}.task WHERE deleted_at IS NULL AND search_vector ILIKE $1"
+                ),
+            ),
+            (
+                "note",
+                "Note",
+                &format!(
+                    "SELECT 'note'::text, 'Note'::text, id, coalesce(title, ''), NULL::text, ts_rank_cd(to_tsvector('simple', coalesce(search_vector, '')), plainto_tsquery('simple', $2)), ts_rank(to_tsvector('simple', coalesce(search_vector, '')), plainto_tsquery('simple', $2)) FROM {schema}.note WHERE deleted_at IS NULL AND search_vector ILIKE $1"
+                ),
+            ),
+        ];
+
+        let included: Option<std::collections::HashSet<&str>> = included_object_name_singulars
+            .filter(|names| !names.is_empty())
+            .map(|names| names.iter().map(String::as_str).collect());
+        let excluded: std::collections::HashSet<&str> = excluded_object_name_singulars
+            .unwrap_or_default()
+            .iter()
+            .map(String::as_str)
+            .collect();
+
+        let parts: Vec<&str> = definitions
+            .iter()
+            .filter(|(name, _, _)| {
+                included
+                    .as_ref()
+                    .is_none_or(|included| included.contains(name))
+                    && !excluded.contains(name)
+            })
+            .map(|(_, _, sql)| *sql)
+            .collect();
+        if parts.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let sql = format!(
+            "SELECT * FROM ({}) hits ORDER BY ts_rank_cd DESC, ts_rank DESC, record_id ASC LIMIT 1000",
+            parts.join(" UNION ALL ")
+        );
+        let rows = sqlx::query(&sql)
+            .bind(&pattern)
+            .bind(&query_text)
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows
+            .iter()
+            .map(|row| SearchHit {
+                record_id: row.get("record_id"),
+                object_name_singular: row.get("object_name_singular"),
+                object_label_singular: row.get("object_label_singular"),
+                label: row.get("label"),
+                image_url: row.get("image_url"),
+                ts_rank_cd: row.get("ts_rank_cd"),
+                ts_rank: row.get("ts_rank"),
+            })
+            .collect())
     }
 
     pub async fn get_person(

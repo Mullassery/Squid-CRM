@@ -3888,6 +3888,181 @@ async fn relation_filters_match_nested_company_and_contact() {
 }
 
 #[tokio::test]
+async fn search_returns_ranked_records_with_object_filters() {
+    let app = test_app().await;
+    let email = unique_email("search");
+    let (token, _workspace) = signup(&app, &email).await;
+
+    let company = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/companies",
+            &token,
+            Some(json!({ "name": "Searchable Acme" })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        company.status,
+        StatusCode::CREATED,
+        "body: {}",
+        company.body
+    );
+
+    let person = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/people",
+            &token,
+            Some(person_body("Zed", "Searchable", "zed-search@example.com")),
+        ),
+    )
+    .await;
+    assert_eq!(person.status, StatusCode::CREATED, "body: {}", person.body);
+
+    let query = r#"
+        query($searchInput: String!, $limit: Int!, $after: String, $included: [String!], $excluded: [String!]) {
+          search(searchInput: $searchInput, limit: $limit, after: $after,
+                 includedObjectNameSingulars: $included,
+                 excludedObjectNameSingulars: $excluded) {
+            edges {
+              node { recordId objectNameSingular objectLabelSingular label imageUrl tsRankCD tsRank }
+              cursor
+            }
+            pageInfo { hasNextPage endCursor }
+          }
+        }
+    "#;
+
+    let all = send(
+        &app,
+        authorized(
+            "POST",
+            "/graphql",
+            &token,
+            Some(json!({
+                "query": query,
+                "variables": { "searchInput": "Searchable", "limit": 10 }
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(all.status, StatusCode::OK, "body: {}", all.body);
+    assert!(all.body["errors"].is_null(), "errors: {}", all.body);
+    let edges = all.body["data"]["search"]["edges"].as_array().unwrap();
+    assert_eq!(edges.len(), 2);
+    let objects: Vec<&str> = edges
+        .iter()
+        .map(|edge| edge["node"]["objectNameSingular"].as_str().unwrap())
+        .collect();
+    assert!(objects.contains(&"company"));
+    assert!(objects.contains(&"person"));
+    assert!(edges[0]["node"]["tsRankCD"].as_f64().unwrap() > 0.0);
+
+    let people_only = send(
+        &app,
+        authorized(
+            "POST",
+            "/graphql",
+            &token,
+            Some(json!({
+                "query": query,
+                "variables": { "searchInput": "Searchable", "limit": 10, "included": ["person"] }
+            })),
+        ),
+    )
+    .await;
+    assert!(
+        people_only.body["errors"].is_null(),
+        "errors: {}",
+        people_only.body
+    );
+    let person_edges = people_only.body["data"]["search"]["edges"]
+        .as_array()
+        .unwrap();
+    assert_eq!(person_edges.len(), 1);
+    assert_eq!(person_edges[0]["node"]["objectNameSingular"], "person");
+
+    let no_company = send(
+        &app,
+        authorized(
+            "POST",
+            "/graphql",
+            &token,
+            Some(json!({
+                "query": query,
+                "variables": { "searchInput": "Searchable", "limit": 10, "excluded": ["company"] }
+            })),
+        ),
+    )
+    .await;
+    assert!(
+        no_company.body["errors"].is_null(),
+        "errors: {}",
+        no_company.body
+    );
+    let remaining = no_company.body["data"]["search"]["edges"]
+        .as_array()
+        .unwrap();
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0]["node"]["objectNameSingular"], "person");
+
+    let first_page = send(
+        &app,
+        authorized(
+            "POST",
+            "/graphql",
+            &token,
+            Some(json!({
+                "query": query,
+                "variables": { "searchInput": "Searchable", "limit": 1 }
+            })),
+        ),
+    )
+    .await;
+    assert!(
+        first_page.body["errors"].is_null(),
+        "errors: {}",
+        first_page.body
+    );
+    assert_eq!(
+        first_page.body["data"]["search"]["pageInfo"]["hasNextPage"],
+        true
+    );
+    let cursor = first_page.body["data"]["search"]["pageInfo"]["endCursor"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let second_page = send(
+        &app,
+        authorized(
+            "POST",
+            "/graphql",
+            &token,
+            Some(json!({
+                "query": query,
+                "variables": { "searchInput": "Searchable", "limit": 1, "after": cursor }
+            })),
+        ),
+    )
+    .await;
+    assert!(
+        second_page.body["errors"].is_null(),
+        "errors: {}",
+        second_page.body
+    );
+    assert_eq!(
+        second_page.body["data"]["search"]["edges"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
 async fn rest_filter_grammar_for_companies_and_tasks() {
     let app = test_app().await;
     let email = unique_email("rest-filters");

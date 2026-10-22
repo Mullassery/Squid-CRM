@@ -96,6 +96,56 @@ impl async_graphql::ScalarType for Cursor {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct ObjectRecordFilterInputValue(pub serde_json::Value);
+
+#[async_graphql::Scalar(name = "ObjectRecordFilterInput")]
+impl async_graphql::ScalarType for ObjectRecordFilterInputValue {
+    fn parse(value: async_graphql::Value) -> async_graphql::InputValueResult<Self> {
+        let json = serde_json::to_value(&value)
+            .map_err(|_| async_graphql::InputValueError::custom("invalid filter"))?;
+        Ok(Self(json))
+    }
+
+    fn to_value(&self) -> async_graphql::Value {
+        async_graphql::Value::Null
+    }
+}
+
+#[derive(Debug, SimpleObject)]
+#[graphql(name = "SearchRecord")]
+pub struct SearchRecord {
+    pub record_id: Uuid,
+    pub object_name_singular: String,
+    pub object_label_singular: String,
+    pub label: String,
+    pub image_url: Option<String>,
+    #[graphql(name = "tsRankCD")]
+    pub ts_rank_cd: f64,
+    pub ts_rank: f64,
+}
+
+#[derive(Debug, SimpleObject)]
+#[graphql(name = "SearchResultEdge")]
+pub struct SearchResultEdge {
+    pub node: SearchRecord,
+    pub cursor: Cursor,
+}
+
+#[derive(Debug, SimpleObject)]
+#[graphql(name = "SearchResultPageInfo")]
+pub struct SearchResultPageInfo {
+    pub has_next_page: bool,
+    pub end_cursor: Option<Cursor>,
+}
+
+#[derive(Debug, SimpleObject)]
+#[graphql(name = "SearchResultConnection")]
+pub struct SearchResultConnection {
+    pub edges: Vec<SearchResultEdge>,
+    pub page_info: SearchResultPageInfo,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, async_graphql::Enum)]
 pub enum RecordShareAccessLevelEnum {
     Read,
@@ -2783,6 +2833,66 @@ fn state<'a>(ctx: &'a Context<'_>) -> &'a AppState {
 
 #[Object]
 impl QueryRoot {
+    #[allow(clippy::too_many_arguments)]
+    async fn search(
+        &self,
+        ctx: &Context<'_>,
+        search_input: String,
+        limit: i64,
+        after: Option<String>,
+        excluded_object_name_singulars: Option<Vec<String>>,
+        included_object_name_singulars: Option<Vec<String>>,
+        _filter: Option<ObjectRecordFilterInputValue>,
+    ) -> async_graphql::Result<SearchResultConnection> {
+        let auth = require_auth(ctx)?;
+        let mut hits = state(ctx)
+            .db
+            .search_records(
+                auth.workspace_id,
+                &search_input,
+                included_object_name_singulars.as_deref(),
+                excluded_object_name_singulars.as_deref(),
+            )
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        if let Some(after) = after
+            .as_deref()
+            .map(crate::rest::decode_cursor)
+            .transpose()
+            .map_err(gql_err)?
+        {
+            if let Some(index) = hits.iter().position(|hit| hit.record_id == after) {
+                hits.drain(..=index);
+            }
+        }
+        let limit = limit.clamp(1, state(ctx).config.max_page_size) as usize;
+        let has_next_page = hits.len() > limit;
+        hits.truncate(limit);
+        let edges = hits
+            .into_iter()
+            .map(|hit| SearchResultEdge {
+                cursor: Cursor(crate::rest::encode_cursor(hit.record_id)),
+                node: SearchRecord {
+                    record_id: hit.record_id,
+                    object_name_singular: hit.object_name_singular,
+                    object_label_singular: hit.object_label_singular,
+                    label: hit.label,
+                    image_url: hit.image_url,
+                    ts_rank_cd: hit.ts_rank_cd as f64,
+                    ts_rank: hit.ts_rank as f64,
+                },
+            })
+            .collect::<Vec<_>>();
+        let end_cursor = edges.last().map(|edge| edge.cursor.clone());
+        Ok(SearchResultConnection {
+            edges,
+            page_info: SearchResultPageInfo {
+                has_next_page,
+                end_cursor,
+            },
+        })
+    }
+
     async fn current_user(&self, ctx: &Context<'_>) -> async_graphql::Result<Option<User>> {
         let Some(auth) = ctx_data(ctx).auth.as_ref() else {
             return Ok(None);

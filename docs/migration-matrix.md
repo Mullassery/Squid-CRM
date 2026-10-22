@@ -32,7 +32,7 @@ Operation coverage: `docs/frontend-operation-map.md`, `docs/rest-route-map.md`.
 | Notes | `src/modules/note` | `squid-db`/`squid-api` | partial | object integration tests | CRUD, targets, filters, ordering |
 | Task/Note targets | `src/modules/task-target`, `note-target` | `squid-db`/`squid-api` | partial | target integration tests | CRUD/nested resolution; REST batch routes pending |
 | Timeline activities | `src/modules/timeline`, `timeline-activity-type` | — | not-started | | |
-| Search | `core-modules/search` | — | not-started | | `searchVector` stored, no search query |
+| Search | `core-modules/search` | `squid-db`/`squid-api` | partial | `search_returns_ranked_records_with_object_filters` | GraphQL search over five searchable objects; filter input and export/import pending |
 | Record export / import | `core-modules/record-export`, `record-import` | — | not-started | | CRUD itself is covered per object |
 | Files & upload | `core-modules/file`, `file-storage`, `src/modules/attachment` | `squid-db`/`squid-api` | partial | file/avatar integration test | local PostgreSQL storage, upload handshake and `avatarFile` writes; S3/signed URLs pending |
 | Email (Gmail/Graph/IMAP/SMTP) | `core-modules/email`, `messaging` | — | not-started | | |

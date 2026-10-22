@@ -127,8 +127,11 @@
 - [x] View-based groupBy paging: `offsetForRecords` and default record order from
       the view's sorts when `order_by_for_records` is omitted.
 - [ ] Nested relation ordering and remaining view semantics.
-- [ ] Search, export/import; local file upload exists for attachments/avatars
-      but no object-storage backend.
+- [x] GraphQL `search` across person/company/opportunity/task/note with
+      ranked `tsRankCD`/`tsRank`, cursors and include/exclude object filters.
+- [ ] Search filter input (`ObjectRecordFilterInput`) semantics, export/import;
+      local file upload exists for attachments/avatars but no object-storage
+      backend.
 - [ ] Jobs/cron, webhooks, workflows, integrations.
 
 ## Phase 6-8
