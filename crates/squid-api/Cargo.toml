@@ -25,6 +25,7 @@ uuid.workspace = true
 chrono.workspace = true
 chrono-tz.workspace = true
 http.workspace = true
+reqwest.workspace = true
 
 [dev-dependencies]
 tower = { workspace = true, features = ["util"] }

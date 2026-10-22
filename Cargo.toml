@@ -43,4 +43,5 @@ hex = "0.4"
 base64 = "0.22"
 regex = "1"
 http = "1"
+reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
 async-trait = "0.1"

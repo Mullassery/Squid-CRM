@@ -463,6 +463,13 @@ pub async fn create_person(
 
     let mut body = json!({ "data": { "createPerson": person } });
     shape.project(&mut body["data"]["createPerson"], "person", PERSON_FIELDS)?;
+    emit_webhooks(
+        &state,
+        auth.workspace_id,
+        "person.created",
+        body["data"]["createPerson"].clone(),
+    )
+    .await;
     Ok((axum::http::StatusCode::CREATED, Json(body)))
 }
 
@@ -485,6 +492,13 @@ pub async fn update_person(
 
     let mut body = json!({ "data": { "updatePerson": person } });
     shape.project(&mut body["data"]["updatePerson"], "person", PERSON_FIELDS)?;
+    emit_webhooks(
+        &state,
+        auth.workspace_id,
+        "person.updated",
+        body["data"]["updatePerson"].clone(),
+    )
+    .await;
     Ok(Json(body))
 }
 
@@ -524,6 +538,17 @@ pub async fn delete_person(
         return Err(AppError::NotFound("Record not found".to_string()));
     }
 
+    emit_webhooks(
+        &state,
+        auth.workspace_id,
+        if params.soft_delete {
+            "person.soft_deleted"
+        } else {
+            "person.deleted"
+        },
+        json!({ "id": id }),
+    )
+    .await;
     Ok(Json(json!({ "data": { "deletePerson": { "id": id } } })))
 }
 
@@ -2320,6 +2345,37 @@ async fn role_can(
         squid_core::Role::Owner | squid_core::Role::Admin => true,
         squid_core::Role::Member => !matches!(cap, Capability::Destroy),
     })
+}
+
+async fn emit_webhooks(
+    state: &AppState,
+    workspace_id: Uuid,
+    operation: &str,
+    payload: serde_json::Value,
+) {
+    let Ok(hooks) = state.db.list_webhooks(workspace_id).await else {
+        return;
+    };
+    let operation = operation.to_string();
+    for hook in hooks {
+        if !hook
+            .operations
+            .iter()
+            .any(|value| value == &operation || value == "*")
+        {
+            continue;
+        }
+        let body = serde_json::json!({ "event": operation, "data": payload });
+        tokio::spawn(async move {
+            let _ = reqwest::Client::new()
+                .post(&hook.target_url)
+                .header("x-webhook-secret", hook.secret)
+                .timeout(std::time::Duration::from_secs(5))
+                .json(&body)
+                .send()
+                .await;
+        });
+    }
 }
 
 async fn require_capability(

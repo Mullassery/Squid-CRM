@@ -6505,6 +6505,89 @@ async fn webhook_crud_matches_metadata_contract() {
 }
 
 #[tokio::test]
+async fn webhook_delivery_posts_record_events() {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Value>();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let receiver = Router::new().route(
+        "/hook",
+        axum::routing::post(move |axum::Json(value): axum::Json<Value>| {
+            let tx = tx.clone();
+            async move {
+                tx.send(value).ok();
+                StatusCode::OK
+            }
+        }),
+    );
+    tokio::spawn(async move {
+        axum::serve(listener, receiver).await.ok();
+    });
+
+    let app = test_app().await;
+    let email = unique_email("webhook-delivery");
+    let (token, _workspace) = signup(&app, &email).await;
+
+    let created = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/people",
+            &token,
+            Some(person_body("Hook", "Receiver", "hook@example.com")),
+        ),
+    )
+    .await;
+    // Register after the person so the event has a deterministic receiver.
+    let _ = created;
+
+    let webhook = send(
+        &app,
+        authorized(
+            "POST",
+            "/metadata",
+            &token,
+            Some(json!({
+                "query": "mutation($input: CreateWebhookInput!) { createWebhook(input: $input) { id } }",
+                "variables": {
+                    "input": {
+                        "targetUrl": format!("http://{address}/hook"),
+                        "operations": ["person.created"]
+                    }
+                }
+            })),
+        ),
+    )
+    .await;
+    assert!(
+        webhook.body["errors"].is_null(),
+        "webhook errors: {}",
+        webhook.body
+    );
+
+    let person = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/people",
+            &token,
+            Some(person_body("Web", "Hook", "webhook-event@example.com")),
+        ),
+    )
+    .await;
+    assert_eq!(person.status, StatusCode::CREATED, "body: {}", person.body);
+
+    let received = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+        .await
+        .expect("webhook delivery timed out")
+        .expect("webhook payload");
+    assert_eq!(received["event"], "person.created");
+    assert_eq!(
+        received["data"]["name"]["firstName"], "Web",
+        "payload: {received}"
+    );
+}
+
+#[tokio::test]
 async fn role_assignment_uses_metadata_roles() {
     let app = test_app().await;
     let email = unique_email("roles");
