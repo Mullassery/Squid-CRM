@@ -2299,6 +2299,190 @@ async fn require_capability(
     }
 }
 
+fn capitalize(value: &str) -> String {
+    let mut chars = value.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => String::new(),
+    }
+}
+
+fn query_value(query: Option<&str>, key: &str) -> Option<String> {
+    query?.split('&').find_map(|pair| {
+        let (name, value) = pair.split_once('=')?;
+        (name == key).then(|| value.replace("+", " ").replace("%20", " ").to_string())
+    })
+}
+
+fn custom_values(
+    object: &squid_core::ObjectMetadata,
+    body: &serde_json::Value,
+) -> Vec<(String, squid_core::FieldMetadataType, serde_json::Value)> {
+    let Some(map) = body.as_object() else {
+        return Vec::new();
+    };
+    object
+        .fields
+        .iter()
+        .filter(|field| {
+            !field.is_system
+                && !matches!(
+                    field.field_type,
+                    squid_core::FieldMetadataType::Relation
+                        | squid_core::FieldMetadataType::MorphRelation
+                )
+        })
+        .filter_map(|field| {
+            map.get(&field.name)
+                .cloned()
+                .map(|value| (field.name.clone(), field.field_type, value))
+        })
+        .collect()
+}
+
+pub async fn custom_rest_fallback(
+    State(state): State<AppState>,
+    method: axum::http::Method,
+    axum::extract::OriginalUri(uri): axum::extract::OriginalUri,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> AppResult<axum::response::Response> {
+    use axum::response::IntoResponse;
+
+    let path = uri.path().trim_start_matches('/');
+    let Some(rest) = path.strip_prefix("rest/") else {
+        return Err(AppError::NotFound("Route not found".to_string()));
+    };
+    let mut segments = rest.split('/').filter(|segment| !segment.is_empty());
+    let Some(object_name) = segments.next() else {
+        return Err(AppError::NotFound("Route not found".to_string()));
+    };
+    let id_segment = segments.next();
+    if segments.next().is_some() {
+        return Err(AppError::NotFound("Route not found".to_string()));
+    }
+    if object_name.ends_with("groupBy") {
+        return Err(AppError::NotFound("Route not found".to_string()));
+    }
+
+    let auth = require(&state, &headers).await?;
+    let object = state
+        .db
+        .find_object_by_name(auth.workspace_id, object_name)
+        .await
+        .map_err(AppError::Internal)?
+        .ok_or_else(|| AppError::NotFound("Object not found".to_string()))?;
+    if object.is_system {
+        return Err(AppError::NotFound("Object not found".to_string()));
+    }
+
+    let id = id_segment
+        .map(|value| {
+            Uuid::parse_str(value).map_err(|_| AppError::BadRequest("Invalid id".to_string()))
+        })
+        .transpose()?;
+    let query = uri.query();
+
+    match (method, id) {
+        (axum::http::Method::GET, None) => {
+            let auth = require_capability(&state, &headers, Capability::Read).await?;
+            let limit = query_value(query, "limit")
+                .and_then(|value| value.parse::<i64>().ok())
+                .unwrap_or(20)
+                .clamp(1, state.config.max_page_size);
+            let offset = query_value(query, "offset")
+                .and_then(|value| value.parse::<i64>().ok())
+                .unwrap_or(0)
+                .max(0);
+            let (records, total) = state
+                .db
+                .list_custom_records(auth.workspace_id, &object.name_singular, limit, offset)
+                .await
+                .map_err(AppError::Internal)?;
+            let mut data = BTreeMap::new();
+            data.insert(object.name_plural.clone(), records);
+            Ok(Json(serde_json::json!({
+                "data": data,
+                "totalCount": total,
+                "pageInfo": {
+                    "hasNextPage": offset + limit < total,
+                    "hasPreviousPage": offset > 0
+                }
+            }))
+            .into_response())
+        }
+        (axum::http::Method::GET, Some(id)) => {
+            let auth = require_capability(&state, &headers, Capability::Read).await?;
+            let record = state
+                .db
+                .get_custom_record(auth.workspace_id, &object.name_singular, id)
+                .await
+                .map_err(AppError::Internal)?
+                .ok_or_else(|| AppError::NotFound("Record not found".to_string()))?;
+            Ok(Json(serde_json::json!({
+                "data": { object.name_singular.clone(): record }
+            }))
+            .into_response())
+        }
+        (axum::http::Method::POST, None) => {
+            let auth = require_capability(&state, &headers, Capability::Update).await?;
+            let payload: serde_json::Value = serde_json::from_slice(&body)
+                .map_err(|_| AppError::BadRequest("Invalid JSON body".to_string()))?;
+            let values = custom_values(&object, &payload);
+            if values.is_empty() {
+                return Err(AppError::BadRequest(
+                    "No writable fields supplied".to_string(),
+                ));
+            }
+            let record = state
+                .db
+                .create_custom_record(auth.workspace_id, &object.name_singular, &values)
+                .await
+                .map_err(AppError::Internal)?;
+            let key = format!("create{}", capitalize(&object.name_singular));
+            Ok((
+                axum::http::StatusCode::CREATED,
+                Json(serde_json::json!({ "data": { key: record } })),
+            )
+                .into_response())
+        }
+        (axum::http::Method::PATCH, Some(id)) => {
+            let auth = require_capability(&state, &headers, Capability::Update).await?;
+            let payload: serde_json::Value = serde_json::from_slice(&body)
+                .map_err(|_| AppError::BadRequest("Invalid JSON body".to_string()))?;
+            let values = custom_values(&object, &payload);
+            let record = state
+                .db
+                .update_custom_record(auth.workspace_id, &object.name_singular, id, &values)
+                .await
+                .map_err(AppError::Internal)?
+                .ok_or_else(|| AppError::NotFound("Record not found".to_string()))?;
+            let key = format!("update{}", capitalize(&object.name_singular));
+            Ok(Json(serde_json::json!({ "data": { key: record } })).into_response())
+        }
+        (axum::http::Method::DELETE, Some(id)) => {
+            let soft = query_value(query, "soft_delete").as_deref() == Some("true");
+            let capability = if soft {
+                Capability::SoftDelete
+            } else {
+                Capability::Destroy
+            };
+            let auth = require_capability(&state, &headers, capability).await?;
+            let deleted = state
+                .db
+                .delete_custom_record(auth.workspace_id, &object.name_singular, id, soft)
+                .await
+                .map_err(AppError::Internal)?;
+            if !deleted {
+                return Err(AppError::NotFound("Record not found".to_string()));
+            }
+            let key = format!("delete{}", capitalize(&object.name_singular));
+            Ok(Json(serde_json::json!({ "data": { key: { "id": id } } })).into_response())
+        }
+        _ => Err(AppError::NotFound("Route not found".to_string())),
+    }
+}
+
 fn opportunity_relation_value(
     opportunity: &Opportunity,
     field: &str,

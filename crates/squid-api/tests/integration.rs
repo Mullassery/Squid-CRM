@@ -4537,6 +4537,97 @@ async fn metadata_object_and_field_writes() {
         .to_string();
     assert_eq!(field.body["data"]["createOneField"]["type"], "TEXT");
 
+    let custom_create = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/projects",
+            &token,
+            Some(json!({ "name": "Apollo", "description": "Moon mission" })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        custom_create.status,
+        StatusCode::CREATED,
+        "body: {}",
+        custom_create.body
+    );
+    let custom_id = custom_create.body["data"]["createProject"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        custom_create.body["data"]["createProject"]["name"],
+        "Apollo"
+    );
+
+    let custom_list = send(&app, authorized("GET", "/rest/projects", &token, None)).await;
+    assert_eq!(
+        custom_list.status,
+        StatusCode::OK,
+        "body: {}",
+        custom_list.body
+    );
+    assert_eq!(custom_list.body["totalCount"], 1);
+    assert_eq!(custom_list.body["data"]["projects"][0]["name"], "Apollo");
+
+    let custom_get = send(
+        &app,
+        authorized("GET", &format!("/rest/projects/{custom_id}"), &token, None),
+    )
+    .await;
+    assert_eq!(
+        custom_get.status,
+        StatusCode::OK,
+        "body: {}",
+        custom_get.body
+    );
+    assert_eq!(
+        custom_get.body["data"]["project"]["description"],
+        "Moon mission"
+    );
+
+    let custom_update = send(
+        &app,
+        authorized(
+            "PATCH",
+            &format!("/rest/projects/{custom_id}"),
+            &token,
+            Some(json!({ "description": "Lunar mission" })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        custom_update.status,
+        StatusCode::OK,
+        "body: {}",
+        custom_update.body
+    );
+    assert_eq!(
+        custom_update.body["data"]["updateProject"]["description"],
+        "Lunar mission"
+    );
+
+    let custom_delete = send(
+        &app,
+        authorized(
+            "DELETE",
+            &format!("/rest/projects/{custom_id}?soft_delete=true"),
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(
+        custom_delete.status,
+        StatusCode::OK,
+        "body: {}",
+        custom_delete.body
+    );
+    let custom_empty = send(&app, authorized("GET", "/rest/projects", &token, None)).await;
+    assert_eq!(custom_empty.body["totalCount"], 0);
+
     let updated_field = send(
         &app,
         json_request(

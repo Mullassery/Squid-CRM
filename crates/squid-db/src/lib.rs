@@ -4119,6 +4119,177 @@ impl Db {
         Ok(objects)
     }
 
+    pub async fn find_object_by_name(
+        &self,
+        workspace_id: Uuid,
+        name: &str,
+    ) -> anyhow::Result<Option<ObjectMetadata>> {
+        self.ensure_standard_metadata(workspace_id).await?;
+        let object_id: Option<Uuid> = sqlx::query_scalar(
+            "SELECT id FROM core.object_metadata
+             WHERE workspace_id = $1 AND (name_singular = $2 OR name_plural = $2)
+             LIMIT 1",
+        )
+        .bind(workspace_id)
+        .bind(name)
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some(object_id) = object_id else {
+            return Ok(None);
+        };
+        self.get_object(workspace_id, object_id).await
+    }
+
+    pub async fn list_custom_records(
+        &self,
+        workspace_id: Uuid,
+        object_name: &str,
+        limit: i64,
+        offset: i64,
+    ) -> anyhow::Result<(Vec<serde_json::Value>, i64)> {
+        assert_valid_identifier(object_name)?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let table = quote_identifier(object_name);
+        let total: i64 = sqlx::query_scalar(&format!(
+            "SELECT count(*) FROM {schema}.{table} WHERE deleted_at IS NULL"
+        ))
+        .fetch_one(&self.pool)
+        .await?;
+        let rows = sqlx::query(&format!(
+            "SELECT to_jsonb(t) AS record FROM {schema}.{table} t
+             WHERE deleted_at IS NULL ORDER BY created_at ASC, id ASC LIMIT $1 OFFSET $2"
+        ))
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok((rows.iter().map(|row| row.get("record")).collect(), total))
+    }
+
+    pub async fn get_custom_record(
+        &self,
+        workspace_id: Uuid,
+        object_name: &str,
+        id: Uuid,
+    ) -> anyhow::Result<Option<serde_json::Value>> {
+        assert_valid_identifier(object_name)?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let table = quote_identifier(object_name);
+        let row = sqlx::query(&format!(
+            "SELECT to_jsonb(t) AS record FROM {schema}.{table} t
+             WHERE id = $1 AND deleted_at IS NULL"
+        ))
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|row| row.get("record")))
+    }
+
+    pub async fn create_custom_record(
+        &self,
+        workspace_id: Uuid,
+        object_name: &str,
+        values: &[(String, FieldMetadataType, serde_json::Value)],
+    ) -> anyhow::Result<serde_json::Value> {
+        assert_valid_identifier(object_name)?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let table = quote_identifier(object_name);
+        let mut columns = Vec::new();
+        let mut expressions = Vec::new();
+        let mut binds = Vec::new();
+        for (index, (name, field_type, value)) in values.iter().enumerate() {
+            assert_valid_identifier(name)?;
+            columns.push(quote_identifier(name));
+            let placeholder = format!("${}", index + 1);
+            expressions.push(custom_field_expression(&placeholder, *field_type));
+            binds.push(value.to_string());
+        }
+        if columns.is_empty() {
+            anyhow::bail!("no fields supplied");
+        }
+        let sql = format!(
+            "INSERT INTO {schema}.{table} ({}) VALUES ({}) RETURNING to_jsonb({table}) AS record",
+            columns.join(", "),
+            expressions.join(", ")
+        );
+        let mut query = sqlx::query(&sql);
+        for bind in binds {
+            query = query.bind(bind);
+        }
+        let row = query.fetch_one(&self.pool).await?;
+        Ok(row.get("record"))
+    }
+
+    pub async fn update_custom_record(
+        &self,
+        workspace_id: Uuid,
+        object_name: &str,
+        id: Uuid,
+        values: &[(String, FieldMetadataType, serde_json::Value)],
+    ) -> anyhow::Result<Option<serde_json::Value>> {
+        assert_valid_identifier(object_name)?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let table = quote_identifier(object_name);
+        if values.is_empty() {
+            return self.get_custom_record(workspace_id, object_name, id).await;
+        }
+        let mut assignments = Vec::new();
+        let mut binds = Vec::new();
+        for (index, (name, field_type, value)) in values.iter().enumerate() {
+            assert_valid_identifier(name)?;
+            let placeholder = format!("${}", index + 2);
+            assignments.push(format!(
+                "{} = {}",
+                quote_identifier(name),
+                custom_field_expression(&placeholder, *field_type)
+            ));
+            binds.push(value.to_string());
+        }
+        let sql = format!(
+            "UPDATE {schema}.{table} SET {}, updated_at = now()
+             WHERE id = $1 AND deleted_at IS NULL RETURNING to_jsonb({table}) AS record",
+            assignments.join(", ")
+        );
+        let mut query = sqlx::query(&sql).bind(id);
+        for bind in binds {
+            query = query.bind(bind);
+        }
+        let row = query.fetch_optional(&self.pool).await?;
+        Ok(row.map(|row| row.get("record")))
+    }
+
+    pub async fn delete_custom_record(
+        &self,
+        workspace_id: Uuid,
+        object_name: &str,
+        id: Uuid,
+        soft: bool,
+    ) -> anyhow::Result<bool> {
+        assert_valid_identifier(object_name)?;
+        let schema = Self::workspace_schema_name(workspace_id);
+        assert_valid_schema(&schema)?;
+        let table = quote_identifier(object_name);
+        let result = if soft {
+            sqlx::query(&format!(
+                "UPDATE {schema}.{table} SET deleted_at = now(), updated_at = now()
+                 WHERE id = $1 AND deleted_at IS NULL"
+            ))
+            .bind(id)
+            .execute(&self.pool)
+            .await?
+        } else {
+            sqlx::query(&format!("DELETE FROM {schema}.{table} WHERE id = $1"))
+                .bind(id)
+                .execute(&self.pool)
+                .await?
+        };
+        Ok(result.rows_affected() > 0)
+    }
+
     pub async fn get_object(
         &self,
         workspace_id: Uuid,
@@ -7760,6 +7931,42 @@ fn assert_valid_identifier(identifier: &str) -> anyhow::Result<()> {
 
 fn quote_identifier(identifier: &str) -> String {
     format!("\"{}\"", identifier.replace('"', "\"\""))
+}
+
+fn custom_field_expression(placeholder: &str, field_type: FieldMetadataType) -> String {
+    match field_type {
+        FieldMetadataType::Uuid
+        | FieldMetadataType::Relation
+        | FieldMetadataType::MorphRelation => {
+            format!("({placeholder}::jsonb #>> '{{}}')::uuid")
+        }
+        FieldMetadataType::Boolean => format!("({placeholder}::jsonb #>> '{{}}')::boolean"),
+        FieldMetadataType::DateTime => {
+            format!("({placeholder}::jsonb #>> '{{}}')::timestamptz")
+        }
+        FieldMetadataType::Date => format!("({placeholder}::jsonb #>> '{{}}')::date"),
+        FieldMetadataType::Number | FieldMetadataType::Numeric | FieldMetadataType::Rating => {
+            format!("({placeholder}::jsonb #>> '{{}}')::numeric")
+        }
+        FieldMetadataType::Position => {
+            format!("({placeholder}::jsonb #>> '{{}}')::double precision")
+        }
+        FieldMetadataType::Text | FieldMetadataType::Select | FieldMetadataType::TsVector => {
+            format!("({placeholder}::jsonb #>> '{{}}')::text")
+        }
+        FieldMetadataType::Actor
+        | FieldMetadataType::Address
+        | FieldMetadataType::Array
+        | FieldMetadataType::Currency
+        | FieldMetadataType::Emails
+        | FieldMetadataType::Files
+        | FieldMetadataType::FullName
+        | FieldMetadataType::Links
+        | FieldMetadataType::MultiSelect
+        | FieldMetadataType::Phones
+        | FieldMetadataType::RawJson
+        | FieldMetadataType::RichText => format!("{placeholder}::jsonb"),
+    }
 }
 
 fn field_column_type(field_type: FieldMetadataType) -> &'static str {

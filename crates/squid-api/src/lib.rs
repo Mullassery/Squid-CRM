@@ -317,6 +317,7 @@ pub fn app(state: AppState) -> Router {
         .layer(RequestBodyLimitLayer::new(2 * 1024 * 1024))
         .layer(TraceLayer::new_for_http())
         .layer(cors)
+        .fallback(rest::custom_rest_fallback)
         .with_state(state)
 }
 

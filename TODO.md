@@ -121,8 +121,9 @@
       generation.
 - [x] Custom-object physical tables and scalar column DDL: create table on
       object creation, add/rename/drop columns on field writes.
-- [ ] Metadata-generated GraphQL/REST routes and relation-field DDL for custom
-      objects.
+- [x] Generic REST CRUD for custom objects (`/rest/{object}` fallback routes).
+- [ ] Metadata-generated GraphQL types/routes and relation-field DDL for
+      custom objects.
 - [x] `currentUser`/`currentWorkspace` full frontend boot fragment (ADR 0005;
       enterprise surfaces are explicit empty/static defaults).
 - [x] `workspaceMembers`/`workspaceMember` GraphQL queries with filters,
@@ -169,8 +170,8 @@
 ## Known limitations (current)
 - Static schema for the eight seeded standard objects (including task/note
   targets and workspaceMember). Custom-object metadata writes now create
-  physical tables and scalar columns, but there are no generated GraphQL/REST
-  types/routes and relation-field creation is still rejected.
+  physical tables and scalar columns plus generic REST CRUD, but there are no
+  generated GraphQL types and relation-field creation is still rejected.
 - Cursor pagination, `order_by`, and scalar/composite filters implemented for
   whitelisted person columns including `companyId`; nested `company` filters
   are implemented; nested relation ordering is not.
