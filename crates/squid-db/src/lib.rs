@@ -4342,6 +4342,17 @@ impl Db {
                 )
             })
             .collect();
+        let field_summaries: std::collections::HashMap<(Uuid, Uuid), FieldSummary> = field_rows
+            .iter()
+            .map(|row| {
+                let object_id: Uuid = row.get("object_metadata_id");
+                let field = FieldSummary {
+                    id: row.get("id"),
+                    name: row.get("name"),
+                };
+                ((object_id, field.id), field)
+            })
+            .collect();
 
         let mut reverse_relations: std::collections::HashMap<(Uuid, Uuid), RelationMetadata> =
             std::collections::HashMap::new();
@@ -4408,6 +4419,69 @@ impl Db {
                 if let Some(relation) = reverse_relations.get(&(object.id, field.id)) {
                     field.relation = Some(relation.clone());
                 }
+            }
+        }
+
+        for object in objects.iter_mut() {
+            let Some(source_summary) = summaries.get(&object.name_singular).cloned() else {
+                continue;
+            };
+            for field in object.fields.iter_mut() {
+                if field.field_type != FieldMetadataType::Relation {
+                    continue;
+                }
+                let Some(settings) = field
+                    .settings
+                    .as_ref()
+                    .and_then(|value| value.0.as_object())
+                else {
+                    continue;
+                };
+                let Some(target_object_id) = settings
+                    .get("targetObjectMetadataId")
+                    .and_then(|value| value.as_str())
+                    .and_then(|value| Uuid::parse_str(value).ok())
+                else {
+                    continue;
+                };
+                let Some(target_field_id) = settings
+                    .get("targetFieldMetadataId")
+                    .and_then(|value| value.as_str())
+                    .and_then(|value| Uuid::parse_str(value).ok())
+                else {
+                    continue;
+                };
+                let Some(target_summary) = summaries
+                    .values()
+                    .find(|summary| summary.id == target_object_id)
+                    .cloned()
+                else {
+                    continue;
+                };
+                let Some(target_field) = field_summaries
+                    .get(&(target_object_id, target_field_id))
+                    .cloned()
+                else {
+                    continue;
+                };
+                let relation_type = match settings
+                    .get("relationType")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("MANY_TO_ONE")
+                {
+                    "ONE_TO_MANY" => RelationType::OneToMany,
+                    _ => RelationType::ManyToOne,
+                };
+                field.relation = Some(RelationMetadata {
+                    relation_type,
+                    source_object_metadata: source_summary.clone(),
+                    target_object_metadata: target_summary,
+                    source_field_metadata: FieldSummary {
+                        id: field.id,
+                        name: field.name.clone(),
+                    },
+                    target_field_metadata: target_field,
+                });
             }
         }
 
@@ -5020,6 +5094,24 @@ impl Db {
             }
         }
         self.get_field(workspace_id, id).await
+    }
+
+    pub async fn set_field_settings(
+        &self,
+        workspace_id: Uuid,
+        id: Uuid,
+        settings: &serde_json::Value,
+    ) -> anyhow::Result<()> {
+        sqlx::query(
+            "UPDATE core.field_metadata SET settings = $3::text::jsonb, updated_at = now()
+             WHERE workspace_id = $1 AND id = $2",
+        )
+        .bind(workspace_id)
+        .bind(id)
+        .bind(settings.to_string())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     pub async fn delete_metadata_field(

@@ -5376,21 +5376,18 @@ impl MutationRoot {
     ) -> async_graphql::Result<FieldMetadata> {
         let auth = require_admin(ctx)?;
         let state = state(ctx);
-        let field = input.field;
+        let mut field = input.field;
         if field.name.trim().is_empty() {
             return Err(gql_err(AppError::BadRequest(
                 "Field name cannot be empty".to_string(),
             )));
         }
-        if matches!(
-            field.field_type,
-            squid_core::FieldMetadataType::Relation | squid_core::FieldMetadataType::MorphRelation
-        ) {
+        if field.field_type == squid_core::FieldMetadataType::MorphRelation {
             return Err(gql_err(AppError::BadRequest(
-                "Relation field creation is not supported yet".to_string(),
+                "Morph relation field creation is not supported yet".to_string(),
             )));
         }
-        state
+        let source_object = state
             .db
             .get_object(auth.workspace_id, field.object_metadata_id)
             .await
@@ -5409,11 +5406,153 @@ impl MutationRoot {
                 "A field with this name already exists".to_string(),
             )));
         }
-        state
+
+        let mut relation = None;
+        if field.field_type == squid_core::FieldMetadataType::Relation {
+            let payload = field
+                .relation_creation_payload
+                .as_ref()
+                .map(|value| value.0.clone())
+                .ok_or_else(|| {
+                    gql_err(AppError::BadRequest(
+                        "relationCreationPayload is required".to_string(),
+                    ))
+                })?;
+            let target_object_id = payload
+                .get("targetObjectMetadataId")
+                .and_then(|value| value.as_str())
+                .ok_or_else(|| {
+                    gql_err(AppError::BadRequest(
+                        "relationCreationPayload.targetObjectMetadataId is required".to_string(),
+                    ))
+                })?
+                .parse::<Uuid>()
+                .map_err(|_| {
+                    gql_err(AppError::BadRequest(
+                        "Invalid targetObjectMetadataId".to_string(),
+                    ))
+                })?;
+            let target_field_label = payload
+                .get("targetFieldLabel")
+                .and_then(|value| value.as_str())
+                .unwrap_or("Related records")
+                .to_string();
+            let target_field_icon = payload
+                .get("targetFieldIcon")
+                .and_then(|value| value.as_str())
+                .unwrap_or("IconRelationManyToOne")
+                .to_string();
+            let relation_type = payload
+                .get("type")
+                .and_then(|value| value.as_str())
+                .unwrap_or("MANY_TO_ONE");
+            if relation_type != "MANY_TO_ONE" {
+                return Err(gql_err(AppError::BadRequest(
+                    "Only MANY_TO_ONE relation fields are supported".to_string(),
+                )));
+            }
+            let target_object = state
+                .db
+                .get_object(auth.workspace_id, target_object_id)
+                .await
+                .map_err(|e| gql_err(AppError::Internal(e)))?
+                .ok_or_else(|| {
+                    gql_err(AppError::NotFound("Target object not found".to_string()))
+                })?;
+            let reverse_name = source_object.name_plural.clone();
+            let target_fields = state
+                .db
+                .list_fields(auth.workspace_id, Some(target_object_id))
+                .await
+                .map_err(|e| gql_err(AppError::Internal(e)))?;
+            if target_fields
+                .iter()
+                .any(|candidate| candidate.name == reverse_name)
+            {
+                return Err(gql_err(AppError::BadRequest(
+                    "Reverse relation field already exists".to_string(),
+                )));
+            }
+            relation = Some((
+                target_object,
+                target_field_label,
+                target_field_icon,
+                reverse_name,
+            ));
+            field.settings = Some(GqlJson(serde_json::json!({
+                "relationType": "MANY_TO_ONE",
+                "targetObjectMetadataId": target_object_id,
+            })));
+        }
+
+        let created = state
             .db
             .create_metadata_field(auth.workspace_id, &field)
             .await
-            .map_err(|e| gql_err(AppError::Internal(e)))
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+
+        if let Some((target_object, target_field_label, target_field_icon, reverse_name)) = relation
+        {
+            let reverse = squid_core::CreateFieldMetadataInput {
+                field_type: squid_core::FieldMetadataType::Relation,
+                name: reverse_name,
+                label: target_field_label,
+                description: None,
+                icon: Some(target_field_icon),
+                is_active: Some(true),
+                is_system: Some(false),
+                is_ui_editable: Some(true),
+                is_ui_read_only: None,
+                is_nullable: Some(true),
+                is_unique: Some(false),
+                is_searchable: Some(false),
+                is_audit_logged: Some(true),
+                default_value: None,
+                options: None,
+                settings: Some(GqlJson(serde_json::json!({
+                    "relationType": "ONE_TO_MANY",
+                    "targetObjectMetadataId": source_object.id,
+                    "targetFieldMetadataId": created.id,
+                }))),
+                object_metadata_id: target_object.id,
+                is_label_synced_with_name: Some(false),
+                is_remote_creation: None,
+                relation_creation_payload: None,
+                morph_relations_creation_payload: None,
+            };
+            let reverse_created = state
+                .db
+                .create_metadata_field(auth.workspace_id, &reverse)
+                .await
+                .map_err(|e| gql_err(AppError::Internal(e)))?;
+            state
+                .db
+                .set_field_settings(
+                    auth.workspace_id,
+                    created.id,
+                    &serde_json::json!({
+                        "relationType": "MANY_TO_ONE",
+                        "targetObjectMetadataId": target_object.id,
+                        "targetFieldMetadataId": reverse_created.id,
+                    }),
+                )
+                .await
+                .map_err(|e| gql_err(AppError::Internal(e)))?;
+            return state
+                .db
+                .get_object(auth.workspace_id, source_object.id)
+                .await
+                .map_err(|e| gql_err(AppError::Internal(e)))?
+                .and_then(|object| {
+                    object
+                        .fields
+                        .into_iter()
+                        .find(|field| field.id == created.id)
+                })
+                .ok_or_else(|| gql_err(AppError::NotFound("Field not found".to_string())));
+        }
+
+        Ok(created)
     }
 
     async fn update_one_field(

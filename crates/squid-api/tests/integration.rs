@@ -4469,6 +4469,14 @@ async fn metadata_object_and_field_writes() {
         .and_then(|field| field["id"].as_str())
         .expect("person name field")
         .to_string();
+    let company_object_id = objects.body["data"]["objects"]["edges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|edge| edge["node"]["nameSingular"] == "company")
+        .and_then(|edge| edge["node"]["id"].as_str())
+        .expect("company object id")
+        .to_string();
 
     let created = send(
         &app,
@@ -4537,13 +4545,87 @@ async fn metadata_object_and_field_writes() {
         .to_string();
     assert_eq!(field.body["data"]["createOneField"]["type"], "TEXT");
 
+    let relation_field = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "mutation($input: CreateOneFieldMetadataInput!) { createOneField(input: $input) { id name type settings relation { type targetObjectMetadata { nameSingular } targetFieldMetadata { name } } } }",
+                "variables": {
+                    "input": {
+                        "field": {
+                            "type": "RELATION",
+                            "name": "company",
+                            "label": "Company",
+                            "objectMetadataId": object_id,
+                            "relationCreationPayload": {
+                                "targetObjectMetadataId": company_object_id,
+                                "targetFieldLabel": "Projects",
+                                "targetFieldIcon": "IconBuildingSkyscraper",
+                                "type": "MANY_TO_ONE"
+                            }
+                        }
+                    }
+                }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(
+        relation_field.status,
+        StatusCode::OK,
+        "body: {}",
+        relation_field.body
+    );
+    assert!(
+        relation_field.body["errors"].is_null(),
+        "errors: {}",
+        relation_field.body
+    );
+    let relation = &relation_field.body["data"]["createOneField"]["relation"];
+    assert_eq!(
+        relation["type"], "MANY_TO_ONE",
+        "body: {}",
+        relation_field.body
+    );
+    assert_eq!(relation["targetObjectMetadata"]["nameSingular"], "company");
+    assert_eq!(relation["targetFieldMetadata"]["name"], "projects");
+
+    let company_rel = send(
+        &app,
+        json_request(
+            "POST",
+            "/graphql",
+            json!({
+                "query": "query($id: UUID!) { object(id: $id) { fieldsList { name type relation { type targetFieldMetadata { name } } } } }",
+                "variables": { "id": company_object_id }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    let company_projects = company_rel.body["data"]["object"]["fieldsList"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|field| field["name"] == "projects")
+        .expect("company.projects reverse field");
+    assert_eq!(company_projects["type"], "RELATION");
+    assert_eq!(company_projects["relation"]["type"], "ONE_TO_MANY");
+    assert_eq!(
+        company_projects["relation"]["targetFieldMetadata"]["name"],
+        "company"
+    );
+
     let custom_create = send(
         &app,
         authorized(
             "POST",
             "/rest/projects",
             &token,
-            Some(json!({ "name": "Apollo", "description": "Moon mission" })),
+            Some(json!({ "name": "Apollo", "description": "Moon mission", "company": company_object_id })),
         ),
     )
     .await;

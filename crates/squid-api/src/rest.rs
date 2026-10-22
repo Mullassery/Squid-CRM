@@ -2325,12 +2325,7 @@ fn custom_values(
         .fields
         .iter()
         .filter(|field| {
-            !field.is_system
-                && !matches!(
-                    field.field_type,
-                    squid_core::FieldMetadataType::Relation
-                        | squid_core::FieldMetadataType::MorphRelation
-                )
+            !field.is_system && field.field_type != squid_core::FieldMetadataType::MorphRelation
         })
         .filter_map(|field| {
             map.get(&field.name)
