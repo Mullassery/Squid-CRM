@@ -1483,6 +1483,8 @@ async fn graphql_soft_delete_restore_and_destroy() {
 trait WithBearer {
     fn with_bearer(self, token: &str) -> Request<Body>;
     fn with_cookie(self, cookie: &str) -> Request<Body>;
+    fn with_idempotency_key(self, key: &str) -> Request<Body>;
+    fn with_correlation_id(self, value: &str) -> Request<Body>;
 }
 
 impl WithBearer for Request<Body> {
@@ -1491,6 +1493,24 @@ impl WithBearer for Request<Body> {
         self.headers_mut().insert(
             header::AUTHORIZATION,
             HeaderValue::from_str(&format!("Bearer {token}")).unwrap(),
+        );
+        self
+    }
+
+    fn with_idempotency_key(mut self, key: &str) -> Request<Body> {
+        use axum::http::HeaderValue;
+        self.headers_mut().insert(
+            axum::http::HeaderName::from_static("idempotency-key"),
+            HeaderValue::from_str(key).unwrap(),
+        );
+        self
+    }
+
+    fn with_correlation_id(mut self, value: &str) -> Request<Body> {
+        use axum::http::HeaderValue;
+        self.headers_mut().insert(
+            axum::http::HeaderName::from_static("x-correlation-id"),
+            HeaderValue::from_str(value).unwrap(),
         );
         self
     }
@@ -6607,6 +6627,191 @@ async fn rest_export_returns_csv() {
 }
 
 #[tokio::test]
+async fn idempotency_key_replays_create_and_rejects_different_body() {
+    let app = test_app().await;
+    let email = unique_email("idempotency");
+    let (token, _workspace) = signup(&app, &email).await;
+    let key = format!("person-create-{}", uuid::Uuid::new_v4().simple());
+
+    let first = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/people",
+            &token,
+            Some(person_body("Idem", "Potent", "idem@example.com")),
+        )
+        .with_idempotency_key(&key),
+    )
+    .await;
+    assert_eq!(first.status, StatusCode::CREATED, "body: {}", first.body);
+    let person_id = first.body["data"]["createPerson"]["id"]
+        .as_str()
+        .expect("person id")
+        .to_string();
+    assert!(first.headers.get("idempotency-replayed").is_none());
+
+    let replay = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/people",
+            &token,
+            Some(person_body("Idem", "Potent", "idem@example.com")),
+        )
+        .with_idempotency_key(&key),
+    )
+    .await;
+    assert_eq!(replay.status, StatusCode::CREATED, "body: {}", replay.body);
+    assert_eq!(replay.headers["idempotency-replayed"], "true");
+    assert_eq!(replay.body["data"]["createPerson"]["id"], person_id);
+
+    let listed = send(
+        &app,
+        authorized("GET", "/rest/people?limit=10", &token, None),
+    )
+    .await;
+    assert_eq!(listed.body["totalCount"], 1, "body: {}", listed.body);
+
+    let conflict = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/people",
+            &token,
+            Some(person_body("Different", "Body", "different@example.com")),
+        )
+        .with_idempotency_key(&key),
+    )
+    .await;
+    assert_eq!(
+        conflict.status,
+        StatusCode::CONFLICT,
+        "body: {}",
+        conflict.body
+    );
+    assert_eq!(conflict.body["error"], "ConflictException");
+}
+
+#[tokio::test]
+async fn idempotency_key_is_scoped_to_one_workspace() {
+    let app = test_app().await;
+    let (token_a, _) = signup(&app, &unique_email("idem-tenant-a")).await;
+    let (token_b, _) = signup(&app, &unique_email("idem-tenant-b")).await;
+    let key = format!("shared-{}", uuid::Uuid::new_v4().simple());
+
+    let first = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/people",
+            &token_a,
+            Some(person_body("Tenant", "A", "tenant-a@example.com")),
+        )
+        .with_idempotency_key(&key),
+    )
+    .await;
+    let second = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/people",
+            &token_b,
+            Some(person_body("Tenant", "B", "tenant-b@example.com")),
+        )
+        .with_idempotency_key(&key),
+    )
+    .await;
+
+    assert_eq!(first.status, StatusCode::CREATED, "body: {}", first.body);
+    assert_eq!(second.status, StatusCode::CREATED, "body: {}", second.body);
+    assert_ne!(
+        first.body["data"]["createPerson"]["id"],
+        second.body["data"]["createPerson"]["id"]
+    );
+}
+
+#[tokio::test]
+async fn failed_idempotent_request_can_be_retried() {
+    let app = test_app().await;
+    let (token, _) = signup(&app, &unique_email("idem-retry")).await;
+    let key = format!("retry-{}", uuid::Uuid::new_v4().simple());
+
+    let invalid = send(
+        &app,
+        authorized("POST", "/rest/people", &token, Some(json!({}))).with_idempotency_key(&key),
+    )
+    .await;
+    assert!(
+        invalid.status.is_client_error(),
+        "unexpected status: {} body: {}",
+        invalid.status,
+        invalid.body
+    );
+
+    let valid = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/people",
+            &token,
+            Some(person_body("Retry", "Works", "retry@example.com")),
+        )
+        .with_idempotency_key(&key),
+    )
+    .await;
+    assert_eq!(valid.status, StatusCode::CREATED, "body: {}", valid.body);
+    assert!(valid.headers.get("idempotency-replayed").is_none());
+}
+
+#[tokio::test]
+async fn correlation_id_is_echoed() {
+    let app = test_app().await;
+    let (token, _) = signup(&app, &unique_email("correlation")).await;
+
+    let response = send(
+        &app,
+        authorized("GET", "/rest/people", &token, None).with_correlation_id("run-123"),
+    )
+    .await;
+    assert_eq!(response.status, StatusCode::OK);
+    assert_eq!(response.headers["x-correlation-id"], "run-123");
+}
+
+#[tokio::test]
+async fn webhook_target_must_be_http_or_https() {
+    let app = test_app().await;
+    let (token, _) = signup(&app, &unique_email("webhook-url")).await;
+
+    let response = send(
+        &app,
+        authorized(
+            "POST",
+            "/metadata",
+            &token,
+            Some(json!({
+                "query": "mutation($input: CreateWebhookInput!) { createWebhook(input: $input) { id } }",
+                "variables": {
+                    "input": {
+                        "targetUrl": "file:///etc/passwd",
+                        "operations": ["person.created"]
+                    }
+                }
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(response.status, StatusCode::OK);
+    assert!(
+        response.body["errors"]
+            .as_array()
+            .is_some_and(|errors| !errors.is_empty()),
+        "body: {}",
+        response.body
+    );
+}
+
+#[tokio::test]
 async fn webhook_delivery_posts_record_events() {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Value>();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -6683,10 +6888,112 @@ async fn webhook_delivery_posts_record_events() {
         .expect("webhook delivery timed out")
         .expect("webhook payload");
     assert_eq!(received["event"], "person.created");
+    assert_eq!(received["type"], "person.created");
+    assert_eq!(received["schemaVersion"], "1.0");
+    assert!(received["id"].as_str().is_some());
+    assert!(received["workspaceId"].as_str().is_some());
+    assert!(received["occurredAt"].as_str().is_some());
     assert_eq!(
         received["data"]["name"]["firstName"], "Web",
         "payload: {received}"
     );
+}
+
+#[tokio::test]
+async fn webhook_retries_transient_failure_with_stable_event_id() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(axum::body::Bytes, HeaderMap)>();
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let receiver_attempts = attempts.clone();
+    let receiver = Router::new().route(
+        "/hook",
+        axum::routing::post(move |headers: HeaderMap, body: axum::body::Bytes| {
+            let tx = tx.clone();
+            let attempt = receiver_attempts.fetch_add(1, Ordering::SeqCst) + 1;
+            async move {
+                tx.send((body, headers)).ok();
+                if attempt == 1 {
+                    StatusCode::SERVICE_UNAVAILABLE
+                } else {
+                    StatusCode::OK
+                }
+            }
+        }),
+    );
+    tokio::spawn(async move {
+        axum::serve(listener, receiver).await.ok();
+    });
+
+    let app = test_app().await;
+    let (token, _) = signup(&app, &unique_email("webhook-retry")).await;
+    let secret = "webhook-retry-secret";
+
+    let webhook = send(
+        &app,
+        authorized(
+            "POST",
+            "/metadata",
+            &token,
+            Some(json!({
+                "query": "mutation($input: CreateWebhookInput!) { createWebhook(input: $input) { id } }",
+                "variables": {
+                    "input": {
+                        "targetUrl": format!("http://{address}/hook"),
+                        "operations": ["person.created"],
+                        "secret": secret
+                    }
+                }
+            })),
+        ),
+    )
+    .await;
+    assert!(
+        webhook.body["errors"].is_null(),
+        "webhook errors: {}",
+        webhook.body
+    );
+
+    let person = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/people",
+            &token,
+            Some(person_body("Retry", "Hook", "retry-hook@example.com")),
+        ),
+    )
+    .await;
+    assert_eq!(person.status, StatusCode::CREATED, "body: {}", person.body);
+
+    let first = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+        .await
+        .expect("first delivery timed out")
+        .expect("first webhook payload");
+    let second = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+        .await
+        .expect("retry delivery timed out")
+        .expect("retry webhook payload");
+
+    assert_eq!(attempts.load(Ordering::SeqCst), 2);
+    let first_body: Value = serde_json::from_slice(&first.0).expect("first json");
+    let second_body: Value = serde_json::from_slice(&second.0).expect("second json");
+    assert_eq!(first_body["id"], second_body["id"]);
+    assert_eq!(first.1["x-squid-attempt"], "1");
+    assert_eq!(second.1["x-squid-attempt"], "2");
+    assert_eq!(first.1["idempotency-key"], second.1["idempotency-key"]);
+
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+    let expected = {
+        let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes()).unwrap();
+        mac.update(&first.0);
+        format!("sha256={}", hex::encode(mac.finalize().into_bytes()))
+    };
+    assert_eq!(first.1["x-squid-signature"], expected);
 }
 
 #[tokio::test]

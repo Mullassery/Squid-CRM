@@ -8,7 +8,7 @@ cd "$ROOT"
 DATABASE_URL="${TEST_DATABASE_URL:-postgres://postgres:postgres@127.0.0.1:5432/squid_test}"
 PORT="${SMOKE_PORT:-3901}"
 BASE="http://127.0.0.1:${PORT}"
-LOG="$(mktemp -t squid-smoke)"
+LOG="$(mktemp "${TMPDIR:-/tmp}/squid-smoke.XXXXXX")"
 
 cargo build -q -p squid-server
 

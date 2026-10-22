@@ -12,16 +12,19 @@ pub mod sorting;
 
 use std::sync::Arc;
 
+use axum::body::{to_bytes, Body};
 use axum::extract::{Request, State};
-use axum::http::{HeaderMap, HeaderValue, Method};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post};
 use axum::Router;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use squid_auth::{hash_token, AuthContext, TokenKind, TokenService, SESSION_COOKIE_NAME};
 use squid_core::{AppError, Config};
 use squid_db::Db;
+use squid_db::IdempotencyClaim;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::trace::TraceLayer;
@@ -197,6 +200,13 @@ pub fn app(state: AppState) -> Router {
             axum::http::header::ACCEPT,
             axum::http::header::COOKIE,
             axum::http::HeaderName::from_static("x-requested-with"),
+            axum::http::HeaderName::from_static("idempotency-key"),
+            axum::http::HeaderName::from_static("x-correlation-id"),
+            axum::http::HeaderName::from_static("x-request-id"),
+        ])
+        .expose_headers([
+            axum::http::HeaderName::from_static("idempotency-replayed"),
+            axum::http::HeaderName::from_static("x-correlation-id"),
         ]);
 
     Router::new()
@@ -329,12 +339,208 @@ pub fn app(state: AppState) -> Router {
             "/metadata",
             post(graphql::graphql_handler).get(graphql::graphql_playground),
         )
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            idempotency_guard,
+        ))
         .layer(middleware::from_fn_with_state(state.clone(), csrf_guard))
         .layer(RequestBodyLimitLayer::new(2 * 1024 * 1024))
         .layer(TraceLayer::new_for_http())
         .layer(cors)
+        .layer(middleware::from_fn(correlation_id))
         .fallback(rest::custom_rest_fallback)
         .with_state(state)
+}
+
+/// Propagate a caller-supplied request/correlation id, or generate one. The
+/// id is returned on every response so logs and downstream calls can be joined.
+async fn correlation_id(mut request: Request, next: Next) -> Response {
+    let incoming = request
+        .headers()
+        .get("x-correlation-id")
+        .or_else(|| request.headers().get("x-request-id"))
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| valid_request_id(value))
+        .map(str::to_string);
+    let correlation = incoming.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let mut response = next.run(request).await;
+    if let Ok(value) = HeaderValue::from_str(&correlation) {
+        response.headers_mut().insert(
+            axum::http::HeaderName::from_static("x-correlation-id"),
+            value,
+        );
+    }
+    response
+}
+
+fn valid_request_id(value: &str) -> bool {
+    !value.is_empty() && value.len() <= 128 && value.bytes().all(|byte| byte.is_ascii_graphic())
+}
+
+/// Replay-safe REST POSTs. A caller may supply `Idempotency-Key`; the first
+/// successful response is stored per workspace and returned verbatim on retry.
+/// Reusing the same key with a different method/path/body is rejected.
+async fn idempotency_guard(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if request.method() != Method::POST || !request.uri().path().starts_with("/rest/") {
+        return next.run(request).await;
+    }
+    let Some(raw_key) = request
+        .headers()
+        .get("idempotency-key")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .map(str::to_string)
+    else {
+        return next.run(request).await;
+    };
+    if !valid_idempotency_key(&raw_key) {
+        return AppError::BadRequest(
+            "Idempotency-Key must be 1-255 printable ASCII characters".to_string(),
+        )
+        .into_response();
+    }
+
+    let path = request.uri().path().to_string();
+    let (parts, body) = request.into_parts();
+    let body_bytes = match to_bytes(body, 2 * 1024 * 1024).await {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            return AppError::BadRequest("Request body could not be read".to_string())
+                .into_response()
+        }
+    };
+
+    let Some(auth) = resolve_auth(&state, &parts.headers).await else {
+        return next
+            .run(Request::from_parts(parts, Body::from(body_bytes)))
+            .await;
+    };
+
+    let request_hash = hex::encode(Sha256::digest(&body_bytes));
+    let claim = match state
+        .db
+        .claim_idempotency(
+            auth.workspace_id,
+            &raw_key,
+            parts.method.as_str(),
+            &path,
+            &request_hash,
+        )
+        .await
+    {
+        Ok(claim) => claim,
+        Err(error) => {
+            return AppError::Internal(anyhow::anyhow!(error)).into_response();
+        }
+    };
+
+    match claim {
+        IdempotencyClaim::Replay {
+            status,
+            content_type,
+            body,
+        } => {
+            let status = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+            return Response::builder()
+                .status(status)
+                .header(axum::http::header::CONTENT_TYPE, content_type)
+                .header("idempotency-replayed", "true")
+                .header("idempotency-key", raw_key)
+                .body(Body::from(body))
+                .unwrap_or_else(|_| {
+                    AppError::Internal(anyhow::anyhow!("invalid replayed response")).into_response()
+                });
+        }
+        IdempotencyClaim::Conflict => {
+            return AppError::Conflict(
+                "Idempotency-Key was already used for a different request".to_string(),
+            )
+            .into_response();
+        }
+        IdempotencyClaim::InProgress => {
+            return AppError::Conflict(
+                "An identical request is still in progress; retry shortly".to_string(),
+            )
+            .into_response();
+        }
+        IdempotencyClaim::Claimed => {}
+    }
+
+    let response = next
+        .run(Request::from_parts(parts, Body::from(body_bytes)))
+        .await;
+    if !response.status().is_success() {
+        let _ = state
+            .db
+            .release_idempotency(auth.workspace_id, &raw_key)
+            .await;
+        return response;
+    }
+
+    let (parts, body) = response.into_parts();
+    let content_type = parts
+        .headers
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("application/json")
+        .to_string();
+    let bytes = match to_bytes(body, usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            let _ = state
+                .db
+                .release_idempotency(auth.workspace_id, &raw_key)
+                .await;
+            return AppError::Internal(anyhow::anyhow!(error)).into_response();
+        }
+    };
+    if bytes.len() > 1024 * 1024 {
+        let _ = state
+            .db
+            .release_idempotency(auth.workspace_id, &raw_key)
+            .await;
+        tracing::warn!(
+            path = %path,
+            status = parts.status.as_u16(),
+            "response too large to persist for idempotency replay"
+        );
+        return Response::from_parts(parts, Body::from(bytes));
+    }
+
+    if let Err(error) = state
+        .db
+        .complete_idempotency(
+            auth.workspace_id,
+            &raw_key,
+            parts.status.as_u16(),
+            &content_type,
+            &bytes,
+        )
+        .await
+    {
+        tracing::warn!(%error, %path, "failed to persist idempotent response");
+        let _ = state
+            .db
+            .release_idempotency(auth.workspace_id, &raw_key)
+            .await;
+    }
+
+    let mut response = Response::from_parts(parts, Body::from(bytes));
+    if let Ok(value) = HeaderValue::from_str(&raw_key) {
+        response.headers_mut().insert(
+            axum::http::HeaderName::from_static("idempotency-key"),
+            value,
+        );
+    }
+    response
+}
+
+fn valid_idempotency_key(value: &str) -> bool {
+    !value.is_empty() && value.len() <= 255 && value.bytes().all(|byte| byte.is_ascii_graphic())
 }
 
 /// Cookie-authenticated state-changing requests must come from the configured

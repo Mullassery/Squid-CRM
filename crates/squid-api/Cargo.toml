@@ -25,6 +25,9 @@ uuid.workspace = true
 chrono.workspace = true
 chrono-tz.workspace = true
 http.workspace = true
+hmac.workspace = true
+hex.workspace = true
+sha2.workspace = true
 reqwest.workspace = true
 
 [dev-dependencies]

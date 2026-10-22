@@ -164,7 +164,8 @@
       create/update/delete events (fire-and-forget HTTP with the stored secret).
 - [x] Webhook delivery for GraphQL create/update/delete/destroy/restore events
       on person/company/opportunity/task/note.
-- [x] Webhook delivery for task/note target events.
+- [x] Webhook delivery for task/note target events with a versioned envelope
+      and HMAC-SHA256 signature (`x-squid-signature`).
 - [ ] Jobs/cron, workflows and integrations.
 
 ## Phase 6-8

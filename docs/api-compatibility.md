@@ -408,3 +408,25 @@ Known remaining divergences (do not claim parity):
 - Rust integration tests assert the implemented subset against real PostgreSQL.
 - Divergences above are asserted as **known**; tests must not claim parity for
   them. No performance claims are made.
+
+## Webhook events
+
+Outbound webhooks use schema version `1.0`:
+
+```json
+{
+  "id": "<uuid>",
+  "type": "person.created",
+  "event": "person.created",
+  "schemaVersion": "1.0",
+  "workspaceId": "<uuid>",
+  "occurredAt": "<rfc3339>",
+  "data": {}
+}
+```
+
+Requests carry `x-squid-event`, `x-squid-event-id`, `x-squid-schema-version`,
+`x-squid-workspace-id` and `x-squid-signature: sha256=<hex>`. The signature is
+HMAC-SHA256 over the exact request body using the webhook secret. Delivery is
+fire-and-forget with a 5-second timeout; retries and a dead-letter queue are not
+yet implemented.

@@ -12,8 +12,10 @@ use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
 use axum::Json;
 use base64::Engine;
+use hmac::{Hmac, Mac};
 use serde::Deserialize;
 use serde_json::json;
+use sha2::Sha256;
 use squid_core::{
     AppError, AppResult, Company, CreateCompanyInput, CreateNoteInput, CreateNoteTargetInput,
     CreateOpportunityInput, CreatePersonInput, CreateTaskInput, CreateTaskTargetInput, DateOp,
@@ -2880,6 +2882,9 @@ async fn role_can(
     })
 }
 
+const WEBHOOK_MAX_ATTEMPTS: u32 = 4;
+const WEBHOOK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 pub(crate) async fn emit_webhooks(
     state: &AppState,
     workspace_id: Uuid,
@@ -2889,26 +2894,181 @@ pub(crate) async fn emit_webhooks(
     let Ok(hooks) = state.db.list_webhooks(workspace_id).await else {
         return;
     };
-    let operation = operation.to_string();
+    let client = match reqwest::Client::builder()
+        .timeout(WEBHOOK_TIMEOUT)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+    {
+        Ok(client) => client,
+        Err(error) => {
+            tracing::error!(%error, "failed to build webhook HTTP client");
+            return;
+        }
+    };
+
     for hook in hooks {
         if !hook
             .operations
             .iter()
-            .any(|value| value == &operation || value == "*")
+            .any(|value| value == operation || value == "*")
         {
             continue;
         }
-        let body = serde_json::json!({ "event": operation, "data": payload });
+        let event_id = Uuid::new_v4();
+        let occurred_at = chrono::Utc::now();
+        let body = serde_json::json!({
+            "id": event_id,
+            "event": operation,
+            "type": operation,
+            "schemaVersion": "1.0",
+            "workspaceId": workspace_id,
+            "occurredAt": occurred_at.to_rfc3339(),
+            "data": payload,
+        });
+        let body_bytes = match serde_json::to_vec(&body) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                tracing::error!(%error, webhook_id = %hook.id, "failed to serialize webhook event");
+                continue;
+            }
+        };
+        let mut mac = Hmac::<Sha256>::new_from_slice(hook.secret.as_bytes())
+            .expect("HMAC accepts any key length");
+        mac.update(&body_bytes);
+        let signature = format!("sha256={}", hex::encode(mac.finalize().into_bytes()));
+        let event = operation.to_string();
+        let hook_id = hook.id;
+        let target_url = hook.target_url.clone();
+        let client = client.clone();
         tokio::spawn(async move {
-            let _ = reqwest::Client::new()
-                .post(&hook.target_url)
-                .header("x-webhook-secret", hook.secret)
-                .timeout(std::time::Duration::from_secs(5))
-                .json(&body)
-                .send()
-                .await;
+            deliver_webhook(
+                &client,
+                hook_id,
+                workspace_id,
+                &target_url,
+                &event,
+                event_id,
+                &body_bytes,
+                &signature,
+            )
+            .await;
         });
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn deliver_webhook(
+    client: &reqwest::Client,
+    hook_id: Uuid,
+    workspace_id: Uuid,
+    target_url: &str,
+    event: &str,
+    event_id: Uuid,
+    body: &[u8],
+    signature: &str,
+) {
+    for attempt in 1..=WEBHOOK_MAX_ATTEMPTS {
+        let response = client
+            .post(target_url)
+            .header("user-agent", "squid-crm-webhook/1.0")
+            .header("content-type", "application/json")
+            .header("x-squid-event", event)
+            .header("x-squid-event-id", event_id.to_string())
+            .header("x-squid-schema-version", "1.0")
+            .header("x-squid-workspace-id", workspace_id.to_string())
+            .header("x-squid-signature", signature)
+            .header("idempotency-key", event_id.to_string())
+            .header("x-squid-attempt", attempt.to_string())
+            .body(body.to_vec())
+            .send()
+            .await;
+
+        match response {
+            Ok(response) => {
+                let status = response.status();
+                if status.is_success() {
+                    tracing::debug!(
+                        webhook_id = %hook_id,
+                        event_id = %event_id,
+                        attempt,
+                        "webhook delivered"
+                    );
+                    return;
+                }
+
+                let retry_after = response
+                    .headers()
+                    .get(reqwest::header::RETRY_AFTER)
+                    .and_then(|value| value.to_str().ok())
+                    .and_then(parse_retry_after);
+                if is_retryable_status(status) && attempt < WEBHOOK_MAX_ATTEMPTS {
+                    let delay = webhook_backoff(attempt, retry_after);
+                    tracing::warn!(
+                        webhook_id = %hook_id,
+                        event_id = %event_id,
+                        attempt,
+                        %status,
+                        ?delay,
+                        "webhook delivery failed; retrying"
+                    );
+                    tokio::time::sleep(delay).await;
+                    continue;
+                }
+
+                tracing::warn!(
+                    webhook_id = %hook_id,
+                    event_id = %event_id,
+                    attempt,
+                    %status,
+                    "webhook delivery failed permanently"
+                );
+                return;
+            }
+            Err(error) => {
+                if attempt < WEBHOOK_MAX_ATTEMPTS {
+                    let delay = webhook_backoff(attempt, None);
+                    tracing::warn!(
+                        webhook_id = %hook_id,
+                        event_id = %event_id,
+                        attempt,
+                        %error,
+                        ?delay,
+                        "webhook transport error; retrying"
+                    );
+                    tokio::time::sleep(delay).await;
+                    continue;
+                }
+                tracing::warn!(
+                    webhook_id = %hook_id,
+                    event_id = %event_id,
+                    attempt,
+                    %error,
+                    "webhook transport error; giving up"
+                );
+                return;
+            }
+        }
+    }
+}
+
+fn is_retryable_status(status: reqwest::StatusCode) -> bool {
+    matches!(status.as_u16(), 408 | 425 | 429 | 500..=599)
+}
+
+fn parse_retry_after(value: &str) -> Option<std::time::Duration> {
+    value
+        .trim()
+        .parse::<u64>()
+        .ok()
+        .map(|seconds| std::time::Duration::from_secs(seconds.min(30)))
+}
+
+fn webhook_backoff(attempt: u32, retry_after: Option<std::time::Duration>) -> std::time::Duration {
+    if let Some(delay) = retry_after {
+        return delay;
+    }
+    let millis = 250_u64.saturating_mul(1_u64 << (attempt.saturating_sub(1).min(4)));
+    std::time::Duration::from_millis(millis.min(5_000))
 }
 
 async fn require_capability(

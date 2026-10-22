@@ -91,6 +91,8 @@ const CORE_ROLES_SQL: &str = include_str!("../migrations/core/0008_roles.sql");
 const CORE_WEBHOOKS_SQL: &str = include_str!("../migrations/core/0009_webhooks.sql");
 const CORE_ROLE_PERMISSION_FLAGS_SQL: &str =
     include_str!("../migrations/core/0010_role_permission_flags.sql");
+const CORE_IDEMPOTENCY_KEYS_SQL: &str =
+    include_str!("../migrations/core/0011_idempotency_keys.sql");
 
 #[derive(Clone)]
 pub struct Db {
@@ -139,6 +141,22 @@ pub struct SessionRow {
     pub user_id: Uuid,
     pub workspace_id: Uuid,
     pub expires_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+pub enum IdempotencyClaim {
+    /// The caller owns the key and must execute the request.
+    Claimed,
+    /// A completed response exists for the same request.
+    Replay {
+        status: u16,
+        content_type: String,
+        body: Vec<u8>,
+    },
+    /// The key exists for a different request.
+    Conflict,
+    /// Another request with the same key is still running.
+    InProgress,
 }
 
 #[derive(Debug, Clone)]
@@ -443,6 +461,7 @@ impl Db {
             CORE_ROLES_SQL,
             CORE_WEBHOOKS_SQL,
             CORE_ROLE_PERMISSION_FLAGS_SQL,
+            CORE_IDEMPOTENCY_KEYS_SQL,
         ] {
             result = sqlx::raw_sql(ddl).execute(&mut *conn).await.map(|_| ());
             if result.is_err() {
@@ -456,6 +475,129 @@ impl Db {
             .await;
 
         result?;
+        Ok(())
+    }
+
+    // ----- idempotency ---------------------------------------------------
+
+    /// Claim a replay key, replay a completed response, or reject reuse with
+    /// a different request. In-progress claims expire after two minutes so a
+    /// crashed process cannot hold a key forever.
+    pub async fn claim_idempotency(
+        &self,
+        workspace_id: Uuid,
+        key: &str,
+        method: &str,
+        path: &str,
+        request_hash: &str,
+    ) -> anyhow::Result<IdempotencyClaim> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            "DELETE FROM core.idempotency_keys
+             WHERE workspace_id = $1 AND key = $2 AND expires_at <= now()",
+        )
+        .bind(workspace_id)
+        .bind(key)
+        .execute(&mut *tx)
+        .await?;
+
+        let inserted = sqlx::query(
+            "INSERT INTO core.idempotency_keys
+                (workspace_id, key, method, path, request_hash, state, expires_at)
+             VALUES ($1, $2, $3, $4, $5, 'in_progress', now() + interval '2 minutes')
+             ON CONFLICT (workspace_id, key) DO NOTHING
+             RETURNING key",
+        )
+        .bind(workspace_id)
+        .bind(key)
+        .bind(method)
+        .bind(path)
+        .bind(request_hash)
+        .fetch_optional(&mut *tx)
+        .await?;
+
+        if inserted.is_some() {
+            tx.commit().await?;
+            return Ok(IdempotencyClaim::Claimed);
+        }
+
+        let row = sqlx::query(
+            "SELECT method, path, request_hash, state, response_status,
+                    response_content_type, response_body
+             FROM core.idempotency_keys
+             WHERE workspace_id = $1 AND key = $2
+             FOR UPDATE",
+        )
+        .bind(workspace_id)
+        .bind(key)
+        .fetch_optional(&mut *tx)
+        .await?;
+        tx.commit().await?;
+
+        let Some(row) = row else {
+            // Lost a race with expiry cleanup; let the caller retry the
+            // request with the same key rather than treating it as success.
+            return Ok(IdempotencyClaim::InProgress);
+        };
+
+        let same_request = row.get::<String, _>("method") == method
+            && row.get::<String, _>("path") == path
+            && row.get::<String, _>("request_hash") == request_hash;
+        if !same_request {
+            return Ok(IdempotencyClaim::Conflict);
+        }
+
+        if row.get::<String, _>("state") == "completed" {
+            let status = row.get::<Option<i16>, _>("response_status");
+            let body = row.get::<Option<Vec<u8>>, _>("response_body");
+            if let (Some(status), Some(body)) = (status, body) {
+                return Ok(IdempotencyClaim::Replay {
+                    status: status as u16,
+                    content_type: row
+                        .get::<Option<String>, _>("response_content_type")
+                        .unwrap_or_else(|| "application/json".to_string()),
+                    body,
+                });
+            }
+        }
+
+        Ok(IdempotencyClaim::InProgress)
+    }
+
+    pub async fn complete_idempotency(
+        &self,
+        workspace_id: Uuid,
+        key: &str,
+        status: u16,
+        content_type: &str,
+        body: &[u8],
+    ) -> anyhow::Result<()> {
+        sqlx::query(
+            "UPDATE core.idempotency_keys
+             SET state = 'completed', response_status = $3,
+                 response_content_type = $4, response_body = $5,
+                 completed_at = now(), expires_at = now() + interval '24 hours'
+             WHERE workspace_id = $1 AND key = $2 AND state = 'in_progress'",
+        )
+        .bind(workspace_id)
+        .bind(key)
+        .bind(status as i16)
+        .bind(content_type)
+        .bind(body)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn release_idempotency(&self, workspace_id: Uuid, key: &str) -> anyhow::Result<()> {
+        sqlx::query(
+            "DELETE FROM core.idempotency_keys
+             WHERE workspace_id = $1 AND key = $2 AND state = 'in_progress'",
+        )
+        .bind(workspace_id)
+        .bind(key)
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 

@@ -3340,6 +3340,32 @@ fn gql_err(error: AppError) -> async_graphql::Error {
     })
 }
 
+fn validate_webhook_target(value: &str) -> Result<(), AppError> {
+    if value.len() > 2048 {
+        return Err(AppError::BadRequest(
+            "Webhook target URL is too long".to_string(),
+        ));
+    }
+    let url = reqwest::Url::parse(value)
+        .map_err(|_| AppError::BadRequest("Webhook target URL is invalid".to_string()))?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err(AppError::BadRequest(
+            "Webhook target URL must use http or https".to_string(),
+        ));
+    }
+    if url.host_str().is_none() {
+        return Err(AppError::BadRequest(
+            "Webhook target URL must include a host".to_string(),
+        ));
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err(AppError::BadRequest(
+            "Webhook target URL must not include credentials".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 fn state<'a>(ctx: &'a Context<'_>) -> &'a AppState {
     &ctx_data(ctx).state
 }
@@ -5858,6 +5884,7 @@ impl MutationRoot {
                 "Insufficient permissions".to_string(),
             )));
         }
+        validate_webhook_target(&input.target_url).map_err(gql_err)?;
         state(ctx)
             .db
             .create_webhook(
@@ -5882,6 +5909,9 @@ impl MutationRoot {
             return Err(gql_err(AppError::Forbidden(
                 "Insufficient permissions".to_string(),
             )));
+        }
+        if let Some(target_url) = input.update.target_url.as_deref() {
+            validate_webhook_target(target_url).map_err(gql_err)?;
         }
         state(ctx)
             .db
