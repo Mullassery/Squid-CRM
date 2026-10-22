@@ -120,10 +120,10 @@
       ordering and pageInfo; boot `workspaceMembers` now lists every member.
 - [x] Admin guard on object/field metadata writes and role/webhook settings
       mutations (non-admin callers receive `FORBIDDEN`).
+- [x] `ApiKey.role` exposes the upstream `Role` object, resolved from the
+      assigned metadata role.
 - [ ] Permission-flag enforcement across views/files/data operations,
-      billing/SSO data, feature flags, and `ApiKey.role` as the upstream `Role`
-      object (built-in role queries and assignment exist; `ApiKey.role` remains
-      the legacy enum).
+      billing/SSO data and feature flags.
 - [x] REST target routes, target updates/batches, and nested target record resolution (`TaskTarget.targetCompany` etc.).
 - [x] Scalar ordering parity (`orderBy` + REST `order_by`) for company,
       opportunity, task, note and task/note targets; relation ordering pending.

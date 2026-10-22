@@ -352,13 +352,15 @@ fn bind_filter_scalar<'a>(mut query: PgScalarQuery<'a>, binds: &[Bind]) -> PgSca
     query
 }
 
-const API_KEY_SELECT: &str = "id, name, role, expires_at, revoked_at, created_at, updated_at";
+const API_KEY_SELECT: &str =
+    "id, name, role, role_id, expires_at, revoked_at, created_at, updated_at";
 
 fn row_to_api_key(row: &sqlx::postgres::PgRow) -> ApiKey {
     ApiKey {
         id: row.get("id"),
         name: row.get("name"),
         role: Role::parse(row.get("role")).unwrap_or(Role::Member),
+        role_id: row.get("role_id"),
         expires_at: row.get("expires_at"),
         revoked_at: row.get("revoked_at"),
         created_at: row.get("created_at"),

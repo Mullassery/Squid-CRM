@@ -63,6 +63,39 @@ pub enum CookieAction {
 }
 
 #[derive(Debug, SimpleObject)]
+#[graphql(name = "ApiKey")]
+pub struct ApiKeyGql {
+    pub id: Uuid,
+    pub name: String,
+    pub expires_at: DateTime<Utc>,
+    pub revoked_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub role: current_user::RoleGql,
+}
+
+fn api_key_gql(
+    key: ApiKey,
+    workspace_id: Uuid,
+    roles: &HashMap<Uuid, current_user::RoleGql>,
+) -> ApiKeyGql {
+    let role = key
+        .role_id
+        .and_then(|id| roles.get(&id))
+        .cloned()
+        .unwrap_or_else(|| current_user::role_gql(workspace_id, key.role));
+    ApiKeyGql {
+        id: key.id,
+        name: key.name,
+        expires_at: key.expires_at,
+        revoked_at: key.revoked_at,
+        created_at: key.created_at,
+        updated_at: key.updated_at,
+        role,
+    }
+}
+
+#[derive(Debug, SimpleObject)]
 pub struct AuthPayload {
     pub tokens: AuthTokenPair,
     pub user: User,
@@ -3436,26 +3469,32 @@ impl QueryRoot {
         Ok(connection_from_page(page))
     }
 
-    async fn api_keys(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<ApiKey>> {
+    async fn api_keys(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<ApiKeyGql>> {
         let auth = require_auth(ctx)?;
-        state(ctx)
+        let roles = role_map(state(ctx), auth.workspace_id).await?;
+        Ok(state(ctx)
             .db
             .list_api_keys(auth.workspace_id)
             .await
-            .map_err(|e| gql_err(AppError::Internal(anyhow::anyhow!(e))))
+            .map_err(|e| gql_err(AppError::Internal(anyhow::anyhow!(e))))?
+            .into_iter()
+            .map(|key| api_key_gql(key, auth.workspace_id, &roles))
+            .collect())
     }
 
     async fn api_key(
         &self,
         ctx: &Context<'_>,
         input: GetApiKeyInput,
-    ) -> async_graphql::Result<Option<ApiKey>> {
+    ) -> async_graphql::Result<Option<ApiKeyGql>> {
         let auth = require_auth(ctx)?;
-        state(ctx)
+        let roles = role_map(state(ctx), auth.workspace_id).await?;
+        Ok(state(ctx)
             .db
             .get_api_key(auth.workspace_id, input.id)
             .await
-            .map_err(|e| gql_err(AppError::Internal(anyhow::anyhow!(e))))
+            .map_err(|e| gql_err(AppError::Internal(anyhow::anyhow!(e))))?
+            .map(|key| api_key_gql(key, auth.workspace_id, &roles)))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -5178,7 +5217,7 @@ impl MutationRoot {
         &self,
         ctx: &Context<'_>,
         input: CreateApiKeyInput,
-    ) -> async_graphql::Result<ApiKey> {
+    ) -> async_graphql::Result<ApiKeyGql> {
         let auth = require_auth(ctx)?;
         let Some(user_id) = auth.user_id else {
             return Err(gql_err(AppError::Forbidden(
@@ -5192,7 +5231,7 @@ impl MutationRoot {
         }
         let expires_at = parse_expiry(&input.expires_at).map_err(gql_err)?;
 
-        state(ctx)
+        let key = state(ctx)
             .db
             .create_api_key(
                 auth.workspace_id,
@@ -5202,7 +5241,27 @@ impl MutationRoot {
                 expires_at,
             )
             .await
-            .map_err(|e| gql_err(AppError::Internal(anyhow::anyhow!(e))))
+            .map_err(|e| gql_err(AppError::Internal(anyhow::anyhow!(e))))?;
+        if state(ctx)
+            .db
+            .get_role(auth.workspace_id, input.role_id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .is_some()
+        {
+            let _ = state(ctx)
+                .db
+                .assign_role_to_api_key(auth.workspace_id, key.id, input.role_id)
+                .await;
+        }
+        let roles = role_map(state(ctx), auth.workspace_id).await?;
+        let key = state(ctx)
+            .db
+            .get_api_key(auth.workspace_id, key.id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(anyhow::anyhow!(e))))?
+            .unwrap_or(key);
+        Ok(api_key_gql(key, auth.workspace_id, &roles))
     }
 
     async fn generate_api_key_token(
@@ -5482,13 +5541,15 @@ impl MutationRoot {
         &self,
         ctx: &Context<'_>,
         input: RevokeApiKeyInput,
-    ) -> async_graphql::Result<Option<ApiKey>> {
+    ) -> async_graphql::Result<Option<ApiKeyGql>> {
         let auth = require_auth(ctx)?;
-        state(ctx)
+        let roles = role_map(state(ctx), auth.workspace_id).await?;
+        Ok(state(ctx)
             .db
             .revoke_api_key(auth.workspace_id, input.id)
             .await
-            .map_err(|e| gql_err(AppError::Internal(anyhow::anyhow!(e))))
+            .map_err(|e| gql_err(AppError::Internal(anyhow::anyhow!(e))))?
+            .map(|key| api_key_gql(key, auth.workspace_id, &roles)))
     }
 
     async fn create_people(

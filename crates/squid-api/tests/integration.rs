@@ -1185,7 +1185,7 @@ async fn api_key_lifecycle_authenticates_data_api() {
             "POST",
             "/metadata",
             json!({
-                "query": "mutation($input: CreateApiKeyInput!) { createApiKey(input:$input) { id name expiresAt role } }",
+                "query": "mutation($input: CreateApiKeyInput!) { createApiKey(input:$input) { id name expiresAt role { label } } }",
                 "variables": {
                     "input": {
                         "name": "CI key",

@@ -392,7 +392,7 @@ Known remaining divergences (do not claim parity):
 | `avatarFile` | `[FileObject]` | `[FileObject]`/null; writes resolve stored file IDs and return `400 File not found: <id>` | aligned for reads and writes |
 | REST `fields`/`depth` | supported | implemented for five objects | aligned |
 | `viewId`/groupBy | supported | implemented for seven standard object routes; in-memory evaluation and Monday week buckets | aligned for captured granularities and aggregates |
-| API-key roles | metadata role entity | built-in roles metadata-backed; `assignRoleToApiKey` updates the role id and legacy enum; custom roles and enforcement absent | extend role engine |
+| API-key roles | metadata role entity | `ApiKey.role` returns the assigned `Role` object; built-in/custom role assignment exists; permission enforcement absent | extend role engine |
 | Error `code` for auth | `NO_AUTHENTICATION_CONTEXT` on data API | `UNAUTHENTICATED` GraphQL error / `403` REST | align exact error code/message |
 
 ## 10. Verification method

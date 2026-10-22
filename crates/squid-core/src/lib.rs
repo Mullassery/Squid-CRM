@@ -103,6 +103,7 @@ pub struct ApiKey {
     pub id: Uuid,
     pub name: String,
     pub role: Role,
+    pub role_id: Option<Uuid>,
     pub expires_at: chrono::DateTime<chrono::Utc>,
     pub revoked_at: Option<chrono::DateTime<chrono::Utc>>,
     pub created_at: chrono::DateTime<chrono::Utc>,
