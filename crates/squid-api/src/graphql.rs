@@ -2045,6 +2045,54 @@ fn require_auth<'a>(ctx: &'a Context<'_>) -> async_graphql::Result<&'a AuthConte
     })
 }
 
+#[derive(Debug, Clone, Copy)]
+enum DataCapability {
+    Read,
+    Update,
+    SoftDelete,
+    Destroy,
+}
+
+async fn role_can_data(
+    state: &AppState,
+    auth: &AuthContext,
+    cap: DataCapability,
+) -> async_graphql::Result<bool> {
+    if let Some(role_id) = auth.role_id {
+        if let Some(role) = state
+            .db
+            .get_role(auth.workspace_id, role_id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+        {
+            return Ok(match cap {
+                DataCapability::Read => role.can_read_all_object_records,
+                DataCapability::Update => role.can_update_all_object_records,
+                DataCapability::SoftDelete => role.can_soft_delete_all_object_records,
+                DataCapability::Destroy => role.can_destroy_all_object_records,
+            });
+        }
+    }
+    Ok(match auth.role {
+        Role::Owner | Role::Admin => true,
+        Role::Member => !matches!(cap, DataCapability::Destroy),
+    })
+}
+
+async fn require_data_capability<'a>(
+    ctx: &'a Context<'_>,
+    cap: DataCapability,
+) -> async_graphql::Result<&'a AuthContext> {
+    let auth = require_auth(ctx)?;
+    if role_can_data(state(ctx), auth, cap).await? {
+        Ok(auth)
+    } else {
+        Err(gql_err(AppError::Forbidden(
+            "Insufficient permissions".to_string(),
+        )))
+    }
+}
+
 async fn has_permission(
     state: &AppState,
     auth: &AuthContext,
@@ -2990,7 +3038,7 @@ impl TaskGql {
         order_by: Option<Vec<serde_json::Value>>,
     ) -> async_graphql::Result<TaskTargetConnection> {
         let order = json_order_terms(order_by.as_deref().unwrap_or_default());
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::Read).await?;
         let filter = filter.unwrap_or_default();
         let mut targets = state(ctx)
             .db
@@ -3051,7 +3099,7 @@ impl NoteGql {
         order_by: Option<Vec<serde_json::Value>>,
     ) -> async_graphql::Result<NoteTargetConnection> {
         let order = json_order_terms(order_by.as_deref().unwrap_or_default());
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::Read).await?;
         let filter = filter.unwrap_or_default();
         let mut targets = state(ctx)
             .db
@@ -3100,7 +3148,7 @@ impl NoteGql {
 #[ComplexObject]
 impl TaskTargetGql {
     async fn task(&self, ctx: &Context<'_>) -> async_graphql::Result<Option<TaskGql>> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::Read).await?;
         Ok(state(ctx)
             .db
             .get_task(auth.workspace_id, self.task_id)
@@ -3152,7 +3200,7 @@ impl TaskTargetGql {
 #[ComplexObject]
 impl NoteTargetGql {
     async fn note(&self, ctx: &Context<'_>) -> async_graphql::Result<Option<NoteGql>> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::Read).await?;
         Ok(state(ctx)
             .db
             .get_note(auth.workspace_id, self.note_id)
@@ -3730,7 +3778,7 @@ impl QueryRoot {
         filter: Option<PersonFilterInput>,
         order_by: Option<Vec<PersonOrderByInput>>,
     ) -> async_graphql::Result<PersonConnection> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::Read).await?;
         let state = state(ctx);
         let limit = first
             .or(last)
@@ -3918,7 +3966,7 @@ impl QueryRoot {
         filter: Option<CompanyFilterInput>,
         order_by: Option<Vec<serde_json::Value>>,
     ) -> async_graphql::Result<CompanyConnection> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::Read).await?;
         let order = json_order_terms(order_by.as_deref().unwrap_or_default());
         let (mut all, _) = state(ctx)
             .db
@@ -4000,7 +4048,7 @@ impl QueryRoot {
         ctx: &Context<'_>,
         filter: CompanyFilterInput,
     ) -> async_graphql::Result<Option<Company>> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::Read).await?;
         if filter.id.is_none() && filter.name.is_none() {
             return Err(gql_err(AppError::BadRequest(
                 "company requires a non-empty filter".to_string(),
@@ -4028,7 +4076,7 @@ impl QueryRoot {
         filter: Option<OpportunityFilterInput>,
         order_by: Option<Vec<serde_json::Value>>,
     ) -> async_graphql::Result<OpportunityConnection> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::Read).await?;
         let order = json_order_terms(order_by.as_deref().unwrap_or_default());
         let (mut all, _) = state(ctx)
             .db
@@ -4132,7 +4180,7 @@ impl QueryRoot {
         ctx: &Context<'_>,
         filter: OpportunityFilterInput,
     ) -> async_graphql::Result<Option<Opportunity>> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::Read).await?;
         let (opportunities, _) = state(ctx)
             .db
             .list_opportunities(auth.workspace_id, 10_000, 0)
@@ -4181,7 +4229,7 @@ impl QueryRoot {
         filter: Option<TaskFilterInput>,
         order_by: Option<Vec<serde_json::Value>>,
     ) -> async_graphql::Result<TaskConnection> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::Read).await?;
         let order = json_order_terms(order_by.as_deref().unwrap_or_default());
         let (mut all, _) = state(ctx)
             .db
@@ -4468,7 +4516,7 @@ impl QueryRoot {
         filter: Option<NoteFilterInput>,
         order_by: Option<Vec<serde_json::Value>>,
     ) -> async_graphql::Result<NoteConnection> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::Read).await?;
         let order = json_order_terms(order_by.as_deref().unwrap_or_default());
         let (mut all, _) = state(ctx)
             .db
@@ -4557,7 +4605,7 @@ impl QueryRoot {
         ctx: &Context<'_>,
         filter: PersonFilterInput,
     ) -> async_graphql::Result<Option<Person>> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::Read).await?;
         let filter = filter.to_expr().ok_or_else(|| {
             gql_err(AppError::BadRequest(
                 "person requires a non-empty filter".to_string(),
@@ -6113,7 +6161,7 @@ impl MutationRoot {
         #[graphql(default)] _upsert: bool,
         _share_with: Option<Vec<ShareWithInput>>,
     ) -> async_graphql::Result<Person> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::Update).await?;
         let state = state(ctx);
         let input: CreatePersonInput = data.into();
 
@@ -6136,7 +6184,7 @@ impl MutationRoot {
         id: uuid::Uuid,
         data: PersonUpdateInputGql,
     ) -> async_graphql::Result<Person> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::Update).await?;
         let input: UpdatePersonInput = data.into();
         state(ctx)
             .db
@@ -6151,7 +6199,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         id: uuid::Uuid,
     ) -> async_graphql::Result<Person> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::Destroy).await?;
         let state = state(ctx);
         let person = state
             .db
@@ -6174,7 +6222,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         id: uuid::Uuid,
     ) -> async_graphql::Result<Person> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::Update).await?;
         state(ctx)
             .db
             .restore_person(auth.workspace_id, id)
@@ -6188,7 +6236,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         id: uuid::Uuid,
     ) -> async_graphql::Result<Person> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::SoftDelete).await?;
         let state = state(ctx);
         let person = state
             .db
@@ -6213,7 +6261,7 @@ impl MutationRoot {
         #[graphql(default)] _upsert: bool,
         _share_with: Option<Vec<ShareWithInput>>,
     ) -> async_graphql::Result<Company> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::Update).await?;
         let input: CreateCompanyInput = data.into();
         state(ctx)
             .db
@@ -6228,7 +6276,7 @@ impl MutationRoot {
         id: Uuid,
         data: UpdateCompanyInputGql,
     ) -> async_graphql::Result<Company> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::Update).await?;
         let input: UpdateCompanyInput = data.into();
         state(ctx)
             .db
@@ -6239,7 +6287,7 @@ impl MutationRoot {
     }
 
     async fn delete_company(&self, ctx: &Context<'_>, id: Uuid) -> async_graphql::Result<Company> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::SoftDelete).await?;
         let state = state(ctx);
         let company = state
             .db
@@ -6256,7 +6304,7 @@ impl MutationRoot {
     }
 
     async fn destroy_company(&self, ctx: &Context<'_>, id: Uuid) -> async_graphql::Result<Company> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::Destroy).await?;
         let state = state(ctx);
         let company = state
             .db
@@ -6273,7 +6321,7 @@ impl MutationRoot {
     }
 
     async fn restore_company(&self, ctx: &Context<'_>, id: Uuid) -> async_graphql::Result<Company> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::Update).await?;
         state(ctx)
             .db
             .restore_company(auth.workspace_id, id)
@@ -6289,7 +6337,7 @@ impl MutationRoot {
         #[graphql(default)] _upsert: bool,
         _share_with: Option<Vec<ShareWithInput>>,
     ) -> async_graphql::Result<Opportunity> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::Update).await?;
         let input: CreateOpportunityInput = data.into();
         state(ctx)
             .db
@@ -6304,7 +6352,7 @@ impl MutationRoot {
         id: Uuid,
         data: UpdateOpportunityInputGql,
     ) -> async_graphql::Result<Opportunity> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::Update).await?;
         let input: UpdateOpportunityInput = data.into();
         state(ctx)
             .db
@@ -6319,7 +6367,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         id: Uuid,
     ) -> async_graphql::Result<Opportunity> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::SoftDelete).await?;
         let state = state(ctx);
         let opportunity = state
             .db
@@ -6340,7 +6388,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         id: Uuid,
     ) -> async_graphql::Result<Opportunity> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::Destroy).await?;
         let state = state(ctx);
         let opportunity = state
             .db
@@ -6361,7 +6409,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         id: Uuid,
     ) -> async_graphql::Result<Opportunity> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::Update).await?;
         state(ctx)
             .db
             .restore_opportunity(auth.workspace_id, id)
@@ -6377,7 +6425,7 @@ impl MutationRoot {
         #[graphql(default)] _upsert: bool,
         _share_with: Option<Vec<ShareWithInput>>,
     ) -> async_graphql::Result<TaskGql> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::Update).await?;
         let input: CreateTaskInput = data.into();
         state(ctx)
             .db
@@ -6393,7 +6441,7 @@ impl MutationRoot {
         id: Uuid,
         data: UpdateTaskInputGql,
     ) -> async_graphql::Result<TaskGql> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::Update).await?;
         let input: UpdateTaskInput = data.into();
         state(ctx)
             .db
@@ -6405,7 +6453,7 @@ impl MutationRoot {
     }
 
     async fn delete_task(&self, ctx: &Context<'_>, id: Uuid) -> async_graphql::Result<TaskGql> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::SoftDelete).await?;
         let state = state(ctx);
         let task = state
             .db
@@ -6422,7 +6470,7 @@ impl MutationRoot {
     }
 
     async fn destroy_task(&self, ctx: &Context<'_>, id: Uuid) -> async_graphql::Result<TaskGql> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::Destroy).await?;
         let state = state(ctx);
         let task = state
             .db
@@ -6439,7 +6487,7 @@ impl MutationRoot {
     }
 
     async fn restore_task(&self, ctx: &Context<'_>, id: Uuid) -> async_graphql::Result<TaskGql> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::Update).await?;
         state(ctx)
             .db
             .restore_task(auth.workspace_id, id)
@@ -6456,7 +6504,7 @@ impl MutationRoot {
         #[graphql(default)] _upsert: bool,
         _share_with: Option<Vec<ShareWithInput>>,
     ) -> async_graphql::Result<NoteGql> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::Update).await?;
         let input: CreateNoteInput = data.into();
         state(ctx)
             .db
@@ -6472,7 +6520,7 @@ impl MutationRoot {
         id: Uuid,
         data: UpdateNoteInputGql,
     ) -> async_graphql::Result<NoteGql> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::Update).await?;
         let input: UpdateNoteInput = data.into();
         state(ctx)
             .db
@@ -6484,7 +6532,7 @@ impl MutationRoot {
     }
 
     async fn delete_note(&self, ctx: &Context<'_>, id: Uuid) -> async_graphql::Result<NoteGql> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::SoftDelete).await?;
         let state = state(ctx);
         let note = state
             .db
@@ -6501,7 +6549,7 @@ impl MutationRoot {
     }
 
     async fn destroy_note(&self, ctx: &Context<'_>, id: Uuid) -> async_graphql::Result<NoteGql> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::Destroy).await?;
         let state = state(ctx);
         let note = state
             .db
@@ -6518,7 +6566,7 @@ impl MutationRoot {
     }
 
     async fn restore_note(&self, ctx: &Context<'_>, id: Uuid) -> async_graphql::Result<NoteGql> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::Update).await?;
         state(ctx)
             .db
             .restore_note(auth.workspace_id, id)
@@ -6533,7 +6581,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         data: CreateTaskTargetInputGql,
     ) -> async_graphql::Result<TaskTargetGql> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::Update).await?;
         let input: CreateTaskTargetInput = data.into();
         if input.target_company_id.is_none()
             && input.target_opportunity_id.is_none()
@@ -6556,7 +6604,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         id: Uuid,
     ) -> async_graphql::Result<TaskTargetGql> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::SoftDelete).await?;
         let state = state(ctx);
         let target = state
             .db
@@ -6577,7 +6625,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         data: CreateNoteTargetInputGql,
     ) -> async_graphql::Result<NoteTargetGql> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::Update).await?;
         let input: CreateNoteTargetInput = data.into();
         if input.target_company_id.is_none()
             && input.target_opportunity_id.is_none()
@@ -6600,7 +6648,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         id: Uuid,
     ) -> async_graphql::Result<NoteTargetGql> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::SoftDelete).await?;
         let state = state(ctx);
         let target = state
             .db
@@ -6622,7 +6670,7 @@ impl MutationRoot {
         id: Uuid,
         data: UpdateTaskTargetInputGql,
     ) -> async_graphql::Result<TaskTargetGql> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::Update).await?;
         let input: squid_core::UpdateTaskTargetInput = data.into();
         state(ctx)
             .db
@@ -6659,7 +6707,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         id: Uuid,
     ) -> async_graphql::Result<TaskTargetGql> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::Update).await?;
         state(ctx)
             .db
             .restore_task_target(auth.workspace_id, id)
@@ -6845,7 +6893,7 @@ impl MutationRoot {
         id: Uuid,
         data: UpdateNoteTargetInputGql,
     ) -> async_graphql::Result<NoteTargetGql> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::Update).await?;
         let input: squid_core::UpdateNoteTargetInput = data.into();
         state(ctx)
             .db
@@ -6882,7 +6930,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         id: Uuid,
     ) -> async_graphql::Result<NoteTargetGql> {
-        let auth = require_auth(ctx)?;
+        let auth = require_data_capability(ctx, DataCapability::Update).await?;
         state(ctx)
             .db
             .restore_note_target(auth.workspace_id, id)
