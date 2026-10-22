@@ -165,7 +165,9 @@ SQUID_WEBHOOK_SECRET='the-webhook-secret' \
 - **Custom-object GraphQL**: generic REST CRUD exists; metadata-generated
   GraphQL types are not implemented.
 - **S3 storage**: local PostgreSQL file bytes only.
-- **Jobs/cron/workflows/integrations**: not implemented.
+- **Jobs/cron/workflows/integrations**: background webhook-retry and hourly
+  maintenance workers exist; a general job queue/cron scheduler, workflows and
+  integrations are still missing.
 
 Required counterpart decisions:
 

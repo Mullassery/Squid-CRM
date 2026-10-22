@@ -3268,6 +3268,25 @@ pub(crate) async fn requeue_webhook_delivery(
     Ok(())
 }
 
+pub async fn run_maintenance_worker(state: AppState) {
+    let mut ticker = tokio::time::interval(std::time::Duration::from_secs(3600));
+    loop {
+        ticker.tick().await;
+        match state.db.prune_expired_state().await {
+            Ok((idempotency, deliveries)) => {
+                if idempotency > 0 || deliveries > 0 {
+                    tracing::info!(
+                        idempotency_keys = idempotency,
+                        webhook_deliveries = deliveries,
+                        "pruned expired integration state"
+                    );
+                }
+            }
+            Err(error) => tracing::warn!(%error, "maintenance worker failed"),
+        }
+    }
+}
+
 pub async fn run_webhook_replay_worker(state: AppState) {
     let mut ticker = tokio::time::interval(std::time::Duration::from_secs(60));
     loop {

@@ -8,7 +8,7 @@ pub mod graphql;
 pub mod group_by;
 pub mod rate_limit;
 pub mod rest;
-pub use rest::run_webhook_replay_worker;
+pub use rest::{run_maintenance_worker, run_webhook_replay_worker};
 pub mod sorting;
 
 use std::sync::Arc;

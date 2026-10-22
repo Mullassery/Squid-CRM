@@ -167,7 +167,9 @@
       on person/company/opportunity/task/note.
 - [x] Webhook delivery with envelope v1, HMAC signatures, bounded retries,
       durable delivery log, admin listing/replay and a background retry worker.
-- [ ] Jobs/cron, workflows and integrations.
+- [x] Background webhook retry and hourly maintenance workers (idempotency and
+      delivery-log retention).
+- [ ] General job queue/cron scheduler, workflows and integrations.
 
 ## Phase 6-8
 - [ ] Threat model (`docs/threat-model.md`).

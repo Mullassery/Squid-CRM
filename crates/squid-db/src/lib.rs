@@ -2305,6 +2305,22 @@ impl Db {
         Ok(row.as_ref().map(row_to_webhook_delivery))
     }
 
+    pub async fn prune_expired_state(&self) -> anyhow::Result<(u64, u64)> {
+        let idempotency =
+            sqlx::query("DELETE FROM core.idempotency_keys WHERE expires_at <= now()")
+                .execute(&self.pool)
+                .await?
+                .rows_affected();
+        let deliveries = sqlx::query(
+            "DELETE FROM core.webhook_deliveries
+             WHERE state IN ('succeeded', 'failed') AND updated_at < now() - interval '30 days'",
+        )
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
+        Ok((idempotency, deliveries))
+    }
+
     pub async fn ensure_roles(&self, workspace_id: Uuid) -> anyhow::Result<()> {
         for (role, label) in [
             (Role::Owner, "Owner"),
