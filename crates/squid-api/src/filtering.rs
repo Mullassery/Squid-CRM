@@ -37,6 +37,16 @@ pub fn parse_generic_filter(raw: &str, allowed: &[&str]) -> AppResult<FilterNode
     Ok(expr)
 }
 
+pub fn references_prefix(node: &FilterNode, prefix: &str) -> bool {
+    match node {
+        FilterNode::And(items) | FilterNode::Or(items) => {
+            items.iter().any(|item| references_prefix(item, prefix))
+        }
+        FilterNode::Not(item) => references_prefix(item, prefix),
+        FilterNode::Leaf { field, .. } => field.starts_with(prefix),
+    }
+}
+
 pub fn matches(node: &FilterNode, value: &impl Fn(&str) -> Option<SortValue>) -> bool {
     match node {
         FilterNode::And(items) => items.iter().all(|item| matches(item, value)),

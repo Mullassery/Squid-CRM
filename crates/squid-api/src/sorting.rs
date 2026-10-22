@@ -8,7 +8,7 @@
 use std::cmp::Ordering;
 
 use chrono::{DateTime, Utc};
-use squid_core::{Company, Note, NoteTarget, Opportunity, Task, TaskTarget};
+use squid_core::{Company, Note, NoteTarget, Opportunity, Person, Task, TaskTarget};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SortValue {
@@ -121,6 +121,23 @@ pub fn company_value(company: &Company, field: &str) -> Option<SortValue> {
             .annual_revenue
             .amount_micros
             .map(|value| SortValue::Number(value as f64)),
+        _ => None,
+    }
+}
+
+pub fn person_value(person: &Person, field: &str) -> Option<SortValue> {
+    match field {
+        "id" => Some(text(person.id)),
+        "createdAt" => Some(SortValue::Time(person.created_at)),
+        "updatedAt" => Some(SortValue::Time(person.updated_at)),
+        "deletedAt" => person.deleted_at.map(SortValue::Time),
+        "name.firstName" => Some(SortValue::Text(person.name.first_name.clone())),
+        "name.lastName" => Some(SortValue::Text(person.name.last_name.clone())),
+        "emails.primaryEmail" => Some(SortValue::Text(person.emails.primary_email.clone())),
+        "jobTitle" => person.job_title.clone().map(SortValue::Text),
+        "companyId" => person.company_id.map(text),
+        "position" => Some(SortValue::Number(person.position)),
+        "searchVector" => person.search_vector.clone().map(SortValue::Text),
         _ => None,
     }
 }

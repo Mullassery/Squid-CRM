@@ -123,9 +123,9 @@ struct FilterSql {
     binds: Vec<Bind>,
 }
 
-fn compile_filter(expr: &FilterExpr, start: usize) -> FilterSql {
+fn compile_filter(expr: &FilterExpr, schema: &str, start: usize) -> FilterSql {
     let mut binds = Vec::new();
-    let sql = compile_expr(expr, &mut binds, start);
+    let sql = compile_expr(expr, schema, &mut binds, start);
     FilterSql { sql, binds }
 }
 
@@ -134,7 +134,7 @@ fn placeholder(binds: &mut Vec<Bind>, value: Bind, start: usize) -> String {
     format!("${}", start + binds.len() - 1)
 }
 
-fn compile_expr(expr: &FilterExpr, binds: &mut Vec<Bind>, start: usize) -> String {
+fn compile_expr(expr: &FilterExpr, schema: &str, binds: &mut Vec<Bind>, start: usize) -> String {
     match expr {
         FilterExpr::Id(op) => compile_uuid("id", op, binds, start),
         FilterExpr::CreatedAt(op) => compile_date("created_at", op, binds, start),
@@ -144,9 +144,23 @@ fn compile_expr(expr: &FilterExpr, binds: &mut Vec<Bind>, start: usize) -> Strin
         FilterExpr::PrimaryEmail(op) => compile_string("primary_email", op, binds, start),
         FilterExpr::JobTitle(op) => compile_string("job_title", op, binds, start),
         FilterExpr::CompanyId(op) => compile_uuid("company_id", op, binds, start),
-        FilterExpr::And(exprs) => compile_join("AND", exprs, "TRUE", binds, start),
-        FilterExpr::Or(exprs) => compile_join("OR", exprs, "FALSE", binds, start),
-        FilterExpr::Not(expr) => format!("NOT ({})", compile_expr(expr, binds, start)),
+        FilterExpr::CompanyName(op) => compile_string("name", op, binds, start),
+        FilterExpr::CompanyCreatedAt(op) => compile_date("created_at", op, binds, start),
+        FilterExpr::CompanyUpdatedAt(op) => compile_date("updated_at", op, binds, start),
+        FilterExpr::CompanyAccountOwnerId(op) => {
+            compile_uuid("account_owner_id", op, binds, start)
+        }
+        FilterExpr::RelatedCompany(inner) => format!(
+            "company_id IN (SELECT id FROM {schema}.company WHERE deleted_at IS NULL AND ({}))",
+            compile_expr(inner, schema, binds, start)
+        ),
+        FilterExpr::RelatedPerson(inner) => format!(
+            "point_of_contact_id IN (SELECT id FROM {schema}.person WHERE deleted_at IS NULL AND ({}))",
+            compile_expr(inner, schema, binds, start)
+        ),
+        FilterExpr::And(exprs) => compile_join("AND", exprs, "TRUE", schema, binds, start),
+        FilterExpr::Or(exprs) => compile_join("OR", exprs, "FALSE", schema, binds, start),
+        FilterExpr::Not(expr) => format!("NOT ({})", compile_expr(expr, schema, binds, start)),
     }
 }
 
@@ -154,6 +168,7 @@ fn compile_join(
     operator: &str,
     exprs: &[FilterExpr],
     empty: &str,
+    schema: &str,
     binds: &mut Vec<Bind>,
     start: usize,
 ) -> String {
@@ -162,7 +177,7 @@ fn compile_join(
     }
     let parts: Vec<String> = exprs
         .iter()
-        .map(|expr| compile_expr(expr, binds, start))
+        .map(|expr| compile_expr(expr, schema, binds, start))
         .collect();
     format!("({})", parts.join(&format!(" {operator} ")))
 }
@@ -1027,7 +1042,7 @@ impl Db {
         let has_previous_page;
         let mut rows = if let Some(cursor_id) = starting_after {
             let cursor_created_at = self.person_created_at(&schema, cursor_id).await?;
-            let filter = filter.map(|filter| compile_filter(filter, 3));
+            let filter = filter.map(|filter| compile_filter(filter, &schema, 3));
             let filter_sql = filter
                 .as_ref()
                 .map(|filter| format!(" AND ({})", filter.sql))
@@ -1049,7 +1064,7 @@ impl Db {
             rows
         } else if let Some(cursor_id) = ending_before {
             let cursor_created_at = self.person_created_at(&schema, cursor_id).await?;
-            let filter = filter.map(|filter| compile_filter(filter, 3));
+            let filter = filter.map(|filter| compile_filter(filter, &schema, 3));
             let filter_sql = filter
                 .as_ref()
                 .map(|filter| format!(" AND ({})", filter.sql))
@@ -1072,7 +1087,7 @@ impl Db {
             rows.reverse();
             rows
         } else {
-            let filter = filter.map(|filter| compile_filter(filter, 1));
+            let filter = filter.map(|filter| compile_filter(filter, &schema, 1));
             let filter_sql = filter
                 .as_ref()
                 .map(|filter| format!(" AND ({})", filter.sql))
@@ -1144,7 +1159,7 @@ impl Db {
     ) -> anyhow::Result<i64> {
         let schema = Self::workspace_schema_name(workspace_id);
         assert_valid_schema(&schema)?;
-        let filter = filter.map(|filter| compile_filter(filter, 1));
+        let filter = filter.map(|filter| compile_filter(filter, &schema, 1));
         let filter_sql = filter
             .as_ref()
             .map(|filter| format!(" AND ({})", filter.sql))
@@ -1183,7 +1198,7 @@ impl Db {
     ) -> anyhow::Result<Vec<Uuid>> {
         let schema = Self::workspace_schema_name(workspace_id);
         assert_valid_schema(&schema)?;
-        let filter = filter.map(|filter| compile_filter(filter, 1));
+        let filter = filter.map(|filter| compile_filter(filter, &schema, 1));
         let filter_sql = filter
             .as_ref()
             .map(|filter| format!(" AND ({})", filter.sql))

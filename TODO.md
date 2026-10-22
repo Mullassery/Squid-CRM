@@ -122,7 +122,9 @@
 - [x] REST filter grammar (`eq`/`neq`/`in`/`contains`/`startsWith`/`endsWith`/
       `like`/`ilike`/ranges/`is`, `and`/`or`/`not`) for company, opportunity,
       task, note and task/note targets.
-- [ ] Views parity: relation filters and view-based paging semantics.
+- [x] Relation filters: nested `company` for people, nested `company` and
+      `pointOfContact` for opportunities (GraphQL + REST dot-path).
+- [ ] Views parity: view-based paging semantics and nested relation ordering.
 - [ ] Search, export/import; local file upload exists for attachments/avatars
       but no object-storage backend.
 - [ ] Jobs/cron, webhooks, workflows, integrations.
@@ -140,14 +142,16 @@
   generate physical tables or dynamic GraphQL/REST types for custom objects
   (relation field creation is rejected).
 - Cursor pagination, `order_by`, and scalar/composite filters implemented for
-  whitelisted person columns including `companyId`; nested relation filters and
-  view-based paging are not.
+  whitelisted person columns including `companyId`; nested `company` filters
+  are implemented, nested relation ordering and view-based paging are not.
 - `WorkspaceMember` queries expose the core profile fields; position/calendar
   and date/time/number-format filters and connection aggregates are absent.
-- Company GraphQL filters are limited to `id`/`name`; REST filters cover scalar
-  fields. Relation filters and nested relation ordering are not implemented.
-- Opportunity relation filters are not implemented; scalar REST filters and
-  ordering are applied. GraphQL scalar filter coverage matches the object slice.
+- Company GraphQL filters cover `id`/`createdAt`/`updatedAt`/`name`/
+  `accountOwnerId` plus `and`/`or`/`not`; nested `accountOwner` relation filters
+  and relation ordering are not implemented.
+- Opportunity filters support nested `company` and `pointOfContact` in GraphQL
+  and REST dot-path syntax; nested `owner` filters and relation ordering are not
+  implemented.
 - Task/Note target REST filters and ordering cover scalar fields.
 - Task/Note GraphQL and REST filters cover scalar fields
   (id/title/status/dueAt/assigneeId); relation filters and nested ordering are not.

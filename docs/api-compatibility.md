@@ -192,8 +192,9 @@ It is a `TABLE`/`INDEX` view named "All people" with five visible view fields
 groups are empty by default. `createView`/`updateView`/`deleteView`/`destroyView`
 and view field/filter/sort/group create/update/delete/destroy plus the batch
 create/update mutations and view field/filter group writes are implemented;
-relation filters, roles and `minimalMetadata` remain unimplemented (see
-`TODO.md`).
+nested relation filters for people (`company`) and opportunities (`company`,
+`pointOfContact`), roles and `minimalMetadata` remain partially unimplemented
+(see `TODO.md`).
 
 The frontend boot document (`GetCurrentUser` / `UserQueryFragment`) is served:
 identity, workspace members, current workspace and workspace URLs are live.
@@ -351,10 +352,10 @@ Alignment completed and covered by tests:
 | Delete semantics | default hard delete, `soft_delete=true` soft, restore endpoint | aligned |
 | GraphQL lifecycle | `deletePerson`, `destroyPerson`, `restorePerson` | aligned |
 | GraphQL `people` | `PersonConnection` with `edges`/`pageInfo` | aligned |
-| GraphQL filters | `and`/`or`/`not`, composite name/emails, dates, `companyId` | aligned for scalar person fields; nested relation filters absent |
+| GraphQL filters | `and`/`or`/`not`, composite name/emails, dates, `companyId`, `company` | aligned for scalar person fields and nested `company`; other relations absent |
 | GraphQL batch mutations | `createPeople`, `updatePeople`, `deletePeople`, `destroyPeople`, `restorePeople`, `mergePeople` | aligned; merge re-points opportunities and task/note targets and supports `dryRun` |
 | Metadata API | `objects`/`object`/`fields`/`field` + object/field/index/role reads and writes | reads for eight standard objects; object/field writes; index CRUD; built-in roles and permission flags; search-field, relation and morph metadata incl. task/note target collections and workspace-member reverse fields; no dynamic schema |
-| Views API | `getViews`/`getView`/`getViewFields`/`getViewFilters`/`getViewSorts`/`getViewGroups`/`getViewFieldGroups`/`getViewFilterGroups`, `createView`/`updateView`/`deleteView`/`destroyView`, view field/filter/sort/group/field-group/filter-group CRUD + batch mutations | aligned for standard views; relation filters and view-based paging semantics are not implemented |
+| Views API | `getViews`/`getView`/`getViewFields`/`getViewFilters`/`getViewSorts`/`getViewGroups`/`getViewFieldGroups`/`getViewFilterGroups`, `createView`/`updateView`/`deleteView`/`destroyView`, view field/filter/sort/group/field-group/filter-group CRUD + batch mutations | aligned for standard views; view-based paging semantics and nested relation ordering are not implemented |
 | Workspace members | `workspaceMembers`/`workspaceMember` (filters, ordering, pageInfo) | aligned for core profile fields; position/format filters, profile writes and aggregates are absent |
 | Frontend boot | `currentUser`/`currentWorkspace` full fragment | shape aligned; roles/permissions/billing/SSO are static or empty defaults |
 | API key role | upstream `Role` object | internal enum serialised as `WorkspaceRole`; no role engine yet |
@@ -371,14 +372,14 @@ Known remaining divergences (do not claim parity):
 | GraphQL auth host | `/metadata` | `/metadata`, plus `/graphql` and `/auth` aliases | tighten later |
 | Data-API auth | API keys only | API keys or session cookie; access tokens rejected | aligned for the implemented surface |
 | Workspace bootstrap | `PENDING_CREATION` + `activateWorkspace` | atomic signup + immediate schema | document; add lifecycle |
-| Company filters | full `CompanyFilterInput` with relations | GraphQL `id`/`name`; REST scalar filter grammar | extend as company relations land |
+| Company filters | full `CompanyFilterInput` with relations | GraphQL `id`/`createdAt`/`updatedAt`/`name`/`accountOwnerId` + logic; REST scalar and dot-path `company.*` filters | nested `accountOwner` relation filters pending |
 | Company ordering | GraphQL `orderBy` + REST `order_by` | scalar fields applied in memory; nested relation ordering ignored | add relation ordering |
-| Opportunity filters | full scalar + relation filters | GraphQL scalar `id`/`name`/`stage`/`closeDate`/`companyId`/`pointOfContactId`/`ownerId`; REST scalar grammar | add relation filters |
+| Opportunity filters | full scalar + relation filters | GraphQL scalar fields plus nested `company`/`pointOfContact`; REST scalar and dot-path filters | nested `owner` filters and relation ordering pending |
 | Opportunity ordering | GraphQL `orderBy` + REST `order_by` | scalar fields applied in memory; nested relation ordering ignored | add relation ordering |
 | Task/Note targets | full polymorphic relations + REST | GraphQL nested/root queries + CRUD/batches + `totalCount`; REST CRUD + scalar filter/order | relation ordering pending |
 | Task/Note ordering | GraphQL `orderBy` + REST `order_by` | scalar fields applied in memory; nested relation ordering ignored | add relation ordering |
 | Workspace prefill | sample people/companies on activation | none (new workspace has 0 people) | implement prefill |
-| Filter coverage | all person fields/relations | scalar person fields (`id`, name, email, jobTitle, timestamps, `companyId`); nested relation filters absent | expand as metadata lands |
+| Filter coverage | all person fields/relations | scalar person fields plus nested `company`; REST dot-path `company.*` | other relations and nested relation ordering pending |
 | REST sort/filter errors | `FIELD_NOT_FOUND` for unknown fields | `400 BadRequestException` text | align error code |
 | GraphQL nullability | `name`/`emails`/`linkedinLink`/`phones`/`avatarUrl` nullable | non-null | align schema |
 | GraphQL scalars | `Position`, `TSVector`, `ConnectionCursor` | `Float`, `String`, `Cursor` | add scalar types |

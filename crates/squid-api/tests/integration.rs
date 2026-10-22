@@ -3654,6 +3654,240 @@ async fn person_company_filter_matches_scalar_contract() {
 }
 
 #[tokio::test]
+async fn relation_filters_match_nested_company_and_contact() {
+    let app = test_app().await;
+    let email = unique_email("relation-filters");
+    let (token, _workspace) = signup(&app, &email).await;
+
+    let company = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/companies",
+            &token,
+            Some(json!({ "name": "Relation Corp" })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        company.status,
+        StatusCode::CREATED,
+        "body: {}",
+        company.body
+    );
+    let company_id = company.body["data"]["createCompany"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let other_company = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/companies",
+            &token,
+            Some(json!({ "name": "Other Corp" })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        other_company.status,
+        StatusCode::CREATED,
+        "body: {}",
+        other_company.body
+    );
+
+    let mut attached = person_body("Ada", "Lovelace", "ada-relation@example.com");
+    attached["companyId"] = json!(company_id);
+    let person = send(
+        &app,
+        authorized("POST", "/rest/people", &token, Some(attached)),
+    )
+    .await;
+    assert_eq!(person.status, StatusCode::CREATED, "body: {}", person.body);
+    let person_id = person.body["data"]["createPerson"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let mut detached = person_body("Alan", "Turing", "alan-relation@example.com");
+    detached["companyId"] = json!(null);
+    let other_person = send(
+        &app,
+        authorized("POST", "/rest/people", &token, Some(detached)),
+    )
+    .await;
+    assert_eq!(
+        other_person.status,
+        StatusCode::CREATED,
+        "body: {}",
+        other_person.body
+    );
+
+    let opportunity = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/opportunities",
+            &token,
+            Some(json!({
+                "name": "Relation Deal",
+                "companyId": company_id,
+                "pointOfContactId": person_id,
+                "stage": "NEW"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        opportunity.status,
+        StatusCode::CREATED,
+        "body: {}",
+        opportunity.body
+    );
+
+    let other_opportunity = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/opportunities",
+            &token,
+            Some(json!({ "name": "Detached Deal", "stage": "NEW" })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        other_opportunity.status,
+        StatusCode::CREATED,
+        "body: {}",
+        other_opportunity.body
+    );
+
+    let people_rest = send(
+        &app,
+        authorized(
+            "GET",
+            "/rest/people?filter=company.name%5Beq%5D:Relation%20Corp",
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(
+        people_rest.status,
+        StatusCode::OK,
+        "body: {}",
+        people_rest.body
+    );
+    assert_eq!(people_rest.body["totalCount"], 1);
+    assert_eq!(
+        people_rest.body["data"]["people"][0]["name"]["firstName"],
+        "Ada"
+    );
+
+    let people_gql = send(
+        &app,
+        authorized(
+            "POST",
+            "/graphql",
+            &token,
+            Some(json!({
+                "query": "{ people(filter: { company: { name: { eq: \"Relation Corp\" } } }) { totalCount edges { node { name { firstName } } } } }"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        people_gql.status,
+        StatusCode::OK,
+        "body: {}",
+        people_gql.body
+    );
+    assert!(
+        people_gql.body["errors"].is_null(),
+        "errors: {}",
+        people_gql.body
+    );
+    assert_eq!(people_gql.body["data"]["people"]["totalCount"], 1);
+    assert_eq!(
+        people_gql.body["data"]["people"]["edges"][0]["node"]["name"]["firstName"],
+        "Ada"
+    );
+
+    let opportunities_rest = send(
+        &app,
+        authorized(
+            "GET",
+            "/rest/opportunities?filter=company.name%5Beq%5D:Relation%20Corp",
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(
+        opportunities_rest.status,
+        StatusCode::OK,
+        "body: {}",
+        opportunities_rest.body
+    );
+    assert_eq!(opportunities_rest.body["totalCount"], 1);
+    assert_eq!(
+        opportunities_rest.body["data"]["opportunities"][0]["name"],
+        "Relation Deal"
+    );
+
+    let contacts_rest = send(
+        &app,
+        authorized(
+            "GET",
+            "/rest/opportunities?filter=pointOfContact.name.firstName%5Beq%5D:Ada",
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(
+        contacts_rest.status,
+        StatusCode::OK,
+        "body: {}",
+        contacts_rest.body
+    );
+    assert_eq!(contacts_rest.body["totalCount"], 1);
+
+    let opportunities_gql = send(
+        &app,
+        authorized(
+            "POST",
+            "/graphql",
+            &token,
+            Some(json!({
+                "query": "{ opportunities(filter: { company: { name: { ilike: \"%relation%\" } }, pointOfContact: { name: { firstName: { eq: \"Ada\" } } } }) { totalCount edges { node { name } } } }"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        opportunities_gql.status,
+        StatusCode::OK,
+        "body: {}",
+        opportunities_gql.body
+    );
+    assert!(
+        opportunities_gql.body["errors"].is_null(),
+        "errors: {}",
+        opportunities_gql.body
+    );
+    assert_eq!(
+        opportunities_gql.body["data"]["opportunities"]["totalCount"],
+        1
+    );
+    assert_eq!(
+        opportunities_gql.body["data"]["opportunities"]["edges"][0]["node"]["name"],
+        "Relation Deal"
+    );
+}
+
+#[tokio::test]
 async fn rest_filter_grammar_for_companies_and_tasks() {
     let app = test_app().await;
     let email = unique_email("rest-filters");

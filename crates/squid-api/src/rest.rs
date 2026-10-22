@@ -6,7 +6,7 @@
 //!   delete -> { data: { deletePerson: { id } } }
 //!   error  -> { statusCode, error, messages, code? }
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
@@ -30,8 +30,8 @@ use crate::graphql::{
     sort_tasks,
 };
 use crate::sorting::{
-    company_value, note_target_value, note_value, opportunity_value, task_target_value, task_value,
-    SortTerm,
+    company_value, note_target_value, note_value, opportunity_value, person_value,
+    task_target_value, task_value, SortTerm, SortValue,
 };
 use crate::{resolve_auth_with_policy, AppState};
 
@@ -777,7 +777,21 @@ pub async fn list_opportunities(
                     "stage",
                     "position",
                     "companyId",
+                    "company.id",
+                    "company.createdAt",
+                    "company.updatedAt",
+                    "company.name",
+                    "company.position",
+                    "company.accountOwnerId",
                     "pointOfContactId",
+                    "pointOfContact.id",
+                    "pointOfContact.createdAt",
+                    "pointOfContact.updatedAt",
+                    "pointOfContact.name.firstName",
+                    "pointOfContact.name.lastName",
+                    "pointOfContact.emails.primaryEmail",
+                    "pointOfContact.jobTitle",
+                    "pointOfContact.companyId",
                     "ownerId",
                     "searchVector",
                     "amount.amountMicros",
@@ -826,8 +840,38 @@ pub async fn list_opportunities(
         .await
         .map_err(AppError::Internal)?;
     if let Some(filter) = &filter {
+        let companies: HashMap<Uuid, Company> = if filtering::references_prefix(filter, "company.")
+        {
+            let (companies, _) = state
+                .db
+                .list_companies(auth.workspace_id, 10_000, 0)
+                .await
+                .map_err(AppError::Internal)?;
+            companies
+                .into_iter()
+                .map(|company| (company.id, company))
+                .collect()
+        } else {
+            HashMap::new()
+        };
+        let people: HashMap<Uuid, squid_core::Person> =
+            if filtering::references_prefix(filter, "pointOfContact.") {
+                state
+                    .db
+                    .list_persons_page(auth.workspace_id, 10_000, 0, None, None, &[], None)
+                    .await
+                    .map_err(AppError::Internal)?
+                    .persons
+                    .into_iter()
+                    .map(|person| (person.id, person))
+                    .collect()
+            } else {
+                HashMap::new()
+            };
         opportunities.retain(|opportunity| {
-            filtering::matches(filter, &|field| opportunity_value(opportunity, field))
+            filtering::matches(filter, &|field| {
+                opportunity_relation_value(opportunity, field, &companies, &people)
+            })
         });
     }
     let total = opportunities.len() as i64;
@@ -1941,6 +1985,23 @@ fn parse_generic_order_by(raw: Option<&str>, allowed: &[&str]) -> AppResult<Vec<
 
 /// Parse the REST filter mini-language, e.g.
 /// `createdAt[gte]:"2024-01-01",name.firstName[startsWith]:A`.
+fn opportunity_relation_value(
+    opportunity: &Opportunity,
+    field: &str,
+    companies: &HashMap<Uuid, Company>,
+    people: &HashMap<Uuid, squid_core::Person>,
+) -> Option<SortValue> {
+    if let Some(rest) = field.strip_prefix("company.") {
+        let company = companies.get(&opportunity.company_id?)?;
+        return company_value(company, rest);
+    }
+    if let Some(rest) = field.strip_prefix("pointOfContact.") {
+        let person = people.get(&opportunity.point_of_contact_id?)?;
+        return person_value(person, rest);
+    }
+    opportunity_value(opportunity, field)
+}
+
 fn parse_filter(raw: &str) -> AppResult<FilterExpr> {
     let mut parser = FilterParser::new(raw);
     let expr = parser.parse_list(')')?;
@@ -2231,6 +2292,70 @@ fn build_filter_leaf(field: &str, operator: &str, values: &[String]) -> AppResul
         ))),
         ("companyId", "is") => Ok(FilterExpr::CompanyId(UuidOp::IsNull(
             is_null.expect("is operator"),
+        ))),
+        ("company.id", "eq") => Ok(FilterExpr::RelatedCompany(Box::new(FilterExpr::Id(
+            UuidOp::Eq(parse_uuid(&value)?),
+        )))),
+        ("company.id", "neq") => Ok(FilterExpr::RelatedCompany(Box::new(FilterExpr::Id(
+            UuidOp::Neq(parse_uuid(&value)?),
+        )))),
+        ("company.id", "in") => Ok(FilterExpr::RelatedCompany(Box::new(FilterExpr::Id(
+            UuidOp::In(
+                values
+                    .iter()
+                    .map(|value| parse_uuid(value))
+                    .collect::<AppResult<_>>()?,
+            ),
+        )))),
+        ("company.id", "is") => Ok(FilterExpr::RelatedCompany(Box::new(FilterExpr::Id(
+            UuidOp::IsNull(is_null.expect("is operator")),
+        )))),
+        ("company.createdAt", op) => Ok(FilterExpr::RelatedCompany(Box::new(
+            FilterExpr::CompanyCreatedAt(build_date_op(op, values, is_null)?),
+        ))),
+        ("company.updatedAt", op) => Ok(FilterExpr::RelatedCompany(Box::new(
+            FilterExpr::CompanyUpdatedAt(build_date_op(op, values, is_null)?),
+        ))),
+        ("company.name", "eq") => Ok(FilterExpr::RelatedCompany(Box::new(
+            FilterExpr::CompanyName(StringOp::Eq(value.clone())),
+        ))),
+        ("company.name", "neq") => Ok(FilterExpr::RelatedCompany(Box::new(
+            FilterExpr::CompanyName(StringOp::Neq(value.clone())),
+        ))),
+        ("company.name", "contains") => Ok(FilterExpr::RelatedCompany(Box::new(
+            FilterExpr::CompanyName(StringOp::Like(format!("%{value}%"))),
+        ))),
+        ("company.name", "startsWith") => Ok(FilterExpr::RelatedCompany(Box::new(
+            FilterExpr::CompanyName(StringOp::StartsWith(value.clone())),
+        ))),
+        ("company.name", "endsWith") => Ok(FilterExpr::RelatedCompany(Box::new(
+            FilterExpr::CompanyName(StringOp::EndsWith(value.clone())),
+        ))),
+        ("company.name", "like") => Ok(FilterExpr::RelatedCompany(Box::new(
+            FilterExpr::CompanyName(StringOp::Like(value.clone())),
+        ))),
+        ("company.name", "ilike") => Ok(FilterExpr::RelatedCompany(Box::new(
+            FilterExpr::CompanyName(StringOp::ILike(value.clone())),
+        ))),
+        ("company.name", "is") => Ok(FilterExpr::RelatedCompany(Box::new(
+            FilterExpr::CompanyName(StringOp::IsNull(is_null.expect("is operator"))),
+        ))),
+        ("company.accountOwnerId", "eq") => Ok(FilterExpr::RelatedCompany(Box::new(
+            FilterExpr::CompanyAccountOwnerId(UuidOp::Eq(parse_uuid(&value)?)),
+        ))),
+        ("company.accountOwnerId", "neq") => Ok(FilterExpr::RelatedCompany(Box::new(
+            FilterExpr::CompanyAccountOwnerId(UuidOp::Neq(parse_uuid(&value)?)),
+        ))),
+        ("company.accountOwnerId", "in") => Ok(FilterExpr::RelatedCompany(Box::new(
+            FilterExpr::CompanyAccountOwnerId(UuidOp::In(
+                values
+                    .iter()
+                    .map(|value| parse_uuid(value))
+                    .collect::<AppResult<_>>()?,
+            )),
+        ))),
+        ("company.accountOwnerId", "is") => Ok(FilterExpr::RelatedCompany(Box::new(
+            FilterExpr::CompanyAccountOwnerId(UuidOp::IsNull(is_null.expect("is operator"))),
         ))),
         _ => Err(AppError::BadRequest(format!(
             "Unsupported filter: {field}[{operator}]"

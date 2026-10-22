@@ -3,6 +3,7 @@
 //! `person` object, so the existing React client can authenticate and read
 //! people against the Rust backend.
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use async_graphql::ErrorExtensions;
@@ -422,6 +423,7 @@ pub struct PersonFilterInput {
     pub emails: Option<EmailsFilterInput>,
     pub job_title: Option<StringFilter>,
     pub company_id: Option<UuidFilter>,
+    pub company: Option<CompanyFilterInput>,
     pub and: Option<Vec<PersonFilterInput>>,
     pub or: Option<Vec<PersonFilterInput>>,
     pub not: Option<Box<PersonFilterInput>>,
@@ -563,6 +565,11 @@ impl PersonFilterInput {
         if let Some(company_id) = &self.company_id {
             items.extend(uuid_ops(company_id).into_iter().map(FilterExpr::CompanyId));
         }
+        if let Some(company) = &self.company {
+            if let Some(expr) = company.to_expr() {
+                items.push(FilterExpr::RelatedCompany(Box::new(expr)));
+            }
+        }
         if let Some(and) = &self.and {
             let exprs: Vec<FilterExpr> =
                 and.iter().filter_map(PersonFilterInput::to_expr).collect();
@@ -582,6 +589,63 @@ impl PersonFilterInput {
             }
         }
 
+        match items.len() {
+            0 => None,
+            1 => items.pop(),
+            _ => Some(FilterExpr::And(items)),
+        }
+    }
+}
+
+impl CompanyFilterInput {
+    fn to_expr(&self) -> Option<FilterExpr> {
+        let mut items = Vec::new();
+        if let Some(id) = &self.id {
+            items.extend(uuid_ops(id).into_iter().map(FilterExpr::Id));
+        }
+        if let Some(created_at) = &self.created_at {
+            items.extend(
+                date_ops(created_at)
+                    .into_iter()
+                    .map(FilterExpr::CompanyCreatedAt),
+            );
+        }
+        if let Some(updated_at) = &self.updated_at {
+            items.extend(
+                date_ops(updated_at)
+                    .into_iter()
+                    .map(FilterExpr::CompanyUpdatedAt),
+            );
+        }
+        if let Some(name) = &self.name {
+            items.extend(string_ops(name).into_iter().map(FilterExpr::CompanyName));
+        }
+        if let Some(account_owner_id) = &self.account_owner_id {
+            items.extend(
+                uuid_ops(account_owner_id)
+                    .into_iter()
+                    .map(FilterExpr::CompanyAccountOwnerId),
+            );
+        }
+        if let Some(and) = &self.and {
+            let exprs: Vec<FilterExpr> =
+                and.iter().filter_map(CompanyFilterInput::to_expr).collect();
+            if !exprs.is_empty() {
+                items.push(FilterExpr::And(exprs));
+            }
+        }
+        if let Some(or) = &self.or {
+            let exprs: Vec<FilterExpr> =
+                or.iter().filter_map(CompanyFilterInput::to_expr).collect();
+            if !exprs.is_empty() {
+                items.push(FilterExpr::Or(exprs));
+            }
+        }
+        if let Some(not) = &self.not {
+            if let Some(expr) = not.to_expr() {
+                items.push(FilterExpr::Not(Box::new(expr)));
+            }
+        }
         match items.len() {
             0 => None,
             1 => items.pop(),
@@ -822,7 +886,9 @@ pub struct OpportunityFilterInput {
     pub close_date: Option<DateTimeFilter>,
     pub stage: Option<OpportunityStageFilter>,
     pub company_id: Option<UuidFilter>,
+    pub company: Option<CompanyFilterInput>,
     pub point_of_contact_id: Option<UuidFilter>,
+    pub point_of_contact: Option<PersonFilterInput>,
     pub owner_id: Option<UuidFilter>,
     pub and: Option<Vec<OpportunityFilterInput>>,
     pub or: Option<Vec<OpportunityFilterInput>>,
@@ -845,7 +911,13 @@ pub struct OpportunityConnection {
 #[derive(Debug, Default, InputObject)]
 pub struct CompanyFilterInput {
     pub id: Option<UuidFilter>,
+    pub created_at: Option<DateTimeFilter>,
+    pub updated_at: Option<DateTimeFilter>,
     pub name: Option<StringFilter>,
+    pub account_owner_id: Option<UuidFilter>,
+    pub and: Option<Vec<CompanyFilterInput>>,
+    pub or: Option<Vec<CompanyFilterInput>>,
+    pub not: Option<Box<CompanyFilterInput>>,
 }
 
 #[derive(Debug, InputObject)]
@@ -1557,19 +1629,249 @@ fn require_auth<'a>(ctx: &'a Context<'_>) -> async_graphql::Result<&'a AuthConte
     })
 }
 
-fn opportunity_matches(opportunity: &Opportunity, filter: &OpportunityFilterInput) -> bool {
+fn string_op_matches(ops: &[StringOp], actual: Option<&str>) -> bool {
+    let actual = actual.unwrap_or_default();
+    ops.iter().all(|op| match op {
+        StringOp::Eq(expected) => actual == expected,
+        StringOp::Neq(expected) => actual != expected,
+        StringOp::Gt(expected) => actual > expected.as_str(),
+        StringOp::Gte(expected) => actual >= expected.as_str(),
+        StringOp::Lt(expected) => actual < expected.as_str(),
+        StringOp::Lte(expected) => actual <= expected.as_str(),
+        StringOp::In(values) => values.iter().any(|value| value == actual),
+        StringOp::StartsWith(value) => actual.starts_with(value),
+        StringOp::EndsWith(value) => actual.ends_with(value),
+        StringOp::Like(pattern) => pattern.trim_matches('%') == actual,
+        StringOp::ILike(pattern) => actual
+            .to_lowercase()
+            .contains(&pattern.trim_matches('%').to_lowercase()),
+        StringOp::Regex(_) | StringOp::IRegex(_) => true,
+        StringOp::IsNull(true) => false,
+        StringOp::IsNull(false) => true,
+    })
+}
+
+fn date_op_matches(ops: &[DateOp], actual: Option<chrono::DateTime<Utc>>) -> bool {
+    ops.iter().all(|op| match op {
+        DateOp::Eq(expected) => actual == Some(*expected),
+        DateOp::Neq(expected) => actual != Some(*expected),
+        DateOp::Gt(expected) => actual.is_some_and(|value| value > *expected),
+        DateOp::Gte(expected) => actual.is_some_and(|value| value >= *expected),
+        DateOp::Lt(expected) => actual.is_some_and(|value| value < *expected),
+        DateOp::Lte(expected) => actual.is_some_and(|value| value <= *expected),
+        DateOp::In(values) => actual.is_some_and(|value| values.contains(&value)),
+        DateOp::IsNull(true) => actual.is_none(),
+        DateOp::IsNull(false) => actual.is_some(),
+    })
+}
+
+fn uuid_op_matches(ops: &[UuidOp], actual: Option<Uuid>) -> bool {
+    ops.iter().all(|op| match op {
+        UuidOp::Eq(expected) => actual == Some(*expected),
+        UuidOp::Neq(expected) => actual != Some(*expected),
+        UuidOp::In(values) => actual.is_some_and(|value| values.contains(&value)),
+        UuidOp::IsNull(true) => actual.is_none(),
+        UuidOp::IsNull(false) => actual.is_some(),
+    })
+}
+
+fn company_filter_matches(company: &Company, filter: &CompanyFilterInput) -> bool {
     if let Some(and) = filter.and.as_ref() {
-        if !and.iter().all(|f| opportunity_matches(opportunity, f)) {
+        if !and
+            .iter()
+            .all(|filter| company_filter_matches(company, filter))
+        {
             return false;
         }
     }
     if let Some(or) = filter.or.as_ref() {
-        if !or.iter().any(|f| opportunity_matches(opportunity, f)) {
+        if !or
+            .iter()
+            .any(|filter| company_filter_matches(company, filter))
+        {
             return false;
         }
     }
     if let Some(not) = filter.not.as_ref() {
-        if opportunity_matches(opportunity, not) {
+        if company_filter_matches(company, not) {
+            return false;
+        }
+    }
+    if let Some(id) = &filter.id {
+        if !uuid_op_matches(&uuid_ops(id), Some(company.id)) {
+            return false;
+        }
+    }
+    if let Some(created_at) = &filter.created_at {
+        if !date_op_matches(&date_ops(created_at), Some(company.created_at)) {
+            return false;
+        }
+    }
+    if let Some(updated_at) = &filter.updated_at {
+        if !date_op_matches(&date_ops(updated_at), Some(company.updated_at)) {
+            return false;
+        }
+    }
+    if let Some(name) = &filter.name {
+        if !string_op_matches(&string_ops(name), company.name.as_deref()) {
+            return false;
+        }
+    }
+    if let Some(account_owner_id) = &filter.account_owner_id {
+        if !uuid_op_matches(&uuid_ops(account_owner_id), company.account_owner_id) {
+            return false;
+        }
+    }
+    true
+}
+
+fn person_filter_matches(
+    person: &Person,
+    filter: &PersonFilterInput,
+    companies: &HashMap<Uuid, Company>,
+) -> bool {
+    if let Some(and) = filter.and.as_ref() {
+        if !and
+            .iter()
+            .all(|filter| person_filter_matches(person, filter, companies))
+        {
+            return false;
+        }
+    }
+    if let Some(or) = filter.or.as_ref() {
+        if !or
+            .iter()
+            .any(|filter| person_filter_matches(person, filter, companies))
+        {
+            return false;
+        }
+    }
+    if let Some(not) = filter.not.as_ref() {
+        if person_filter_matches(person, not, companies) {
+            return false;
+        }
+    }
+    if let Some(id) = &filter.id {
+        if !uuid_op_matches(&uuid_ops(id), Some(person.id)) {
+            return false;
+        }
+    }
+    if let Some(created_at) = &filter.created_at {
+        if !date_op_matches(&date_ops(created_at), Some(person.created_at)) {
+            return false;
+        }
+    }
+    if let Some(updated_at) = &filter.updated_at {
+        if !date_op_matches(&date_ops(updated_at), Some(person.updated_at)) {
+            return false;
+        }
+    }
+    if let Some(name) = &filter.name {
+        if let Some(first_name) = &name.first_name {
+            if !string_op_matches(&string_ops(first_name), Some(&person.name.first_name)) {
+                return false;
+            }
+        }
+        if let Some(last_name) = &name.last_name {
+            if !string_op_matches(&string_ops(last_name), Some(&person.name.last_name)) {
+                return false;
+            }
+        }
+    }
+    if let Some(emails) = &filter.emails {
+        if let Some(primary_email) = &emails.primary_email {
+            if !string_op_matches(
+                &string_ops(primary_email),
+                Some(&person.emails.primary_email),
+            ) {
+                return false;
+            }
+        }
+    }
+    if let Some(job_title) = &filter.job_title {
+        if !string_op_matches(&string_ops(job_title), person.job_title.as_deref()) {
+            return false;
+        }
+    }
+    if let Some(company_id) = &filter.company_id {
+        if !uuid_op_matches(&uuid_ops(company_id), person.company_id) {
+            return false;
+        }
+    }
+    if let Some(company_filter) = &filter.company {
+        let Some(company_id) = person.company_id else {
+            return false;
+        };
+        let Some(company) = companies.get(&company_id) else {
+            return false;
+        };
+        if !company_filter_matches(company, company_filter) {
+            return false;
+        }
+    }
+    true
+}
+
+fn opportunity_needs_companies(filter: &OpportunityFilterInput) -> bool {
+    filter.company.is_some()
+        || filter
+            .point_of_contact
+            .as_ref()
+            .is_some_and(|person| person.company.is_some())
+        || filter
+            .and
+            .as_ref()
+            .is_some_and(|items| items.iter().any(opportunity_needs_companies))
+        || filter
+            .or
+            .as_ref()
+            .is_some_and(|items| items.iter().any(opportunity_needs_companies))
+        || filter
+            .not
+            .as_ref()
+            .is_some_and(|item| opportunity_needs_companies(item))
+}
+
+fn opportunity_needs_people(filter: &OpportunityFilterInput) -> bool {
+    filter.point_of_contact.is_some()
+        || filter
+            .and
+            .as_ref()
+            .is_some_and(|items| items.iter().any(opportunity_needs_people))
+        || filter
+            .or
+            .as_ref()
+            .is_some_and(|items| items.iter().any(opportunity_needs_people))
+        || filter
+            .not
+            .as_ref()
+            .is_some_and(|item| opportunity_needs_people(item))
+}
+
+fn opportunity_matches(
+    opportunity: &Opportunity,
+    filter: &OpportunityFilterInput,
+    companies: &HashMap<Uuid, Company>,
+    people: &HashMap<Uuid, Person>,
+) -> bool {
+    if let Some(and) = filter.and.as_ref() {
+        if !and
+            .iter()
+            .all(|f| opportunity_matches(opportunity, f, companies, people))
+        {
+            return false;
+        }
+    }
+    if let Some(or) = filter.or.as_ref() {
+        if !or
+            .iter()
+            .any(|f| opportunity_matches(opportunity, f, companies, people))
+        {
+            return false;
+        }
+    }
+    if let Some(not) = filter.not.as_ref() {
+        if opportunity_matches(opportunity, not, companies, people) {
             return false;
         }
     }
@@ -1663,11 +1965,33 @@ fn opportunity_matches(opportunity: &Opportunity, filter: &OpportunityFilterInpu
             }
         }
     }
+    if let Some(company_filter) = filter.company.as_ref() {
+        let Some(company_id) = opportunity.company_id else {
+            return false;
+        };
+        let Some(company) = companies.get(&company_id) else {
+            return false;
+        };
+        if !company_filter_matches(company, company_filter) {
+            return false;
+        }
+    }
     if let Some(contact) = filter.point_of_contact_id.as_ref() {
         if let Some(eq) = contact.eq {
             if opportunity.point_of_contact_id != Some(eq) {
                 return false;
             }
+        }
+    }
+    if let Some(person_filter) = filter.point_of_contact.as_ref() {
+        let Some(person_id) = opportunity.point_of_contact_id else {
+            return false;
+        };
+        let Some(person) = people.get(&person_id) else {
+            return false;
+        };
+        if !person_filter_matches(person, person_filter, companies) {
+            return false;
         }
     }
     if let Some(owner) = filter.owner_id.as_ref() {
@@ -3088,7 +3412,33 @@ impl QueryRoot {
             .await
             .map_err(|e| gql_err(AppError::Internal(e)))?;
         let filter = filter.unwrap_or_default();
-        all.retain(|opportunity| opportunity_matches(opportunity, &filter));
+        let companies = if opportunity_needs_companies(&filter) {
+            let (companies, _) = state(ctx)
+                .db
+                .list_companies(auth.workspace_id, 10_000, 0)
+                .await
+                .map_err(|e| gql_err(AppError::Internal(e)))?;
+            companies
+                .into_iter()
+                .map(|company| (company.id, company))
+                .collect()
+        } else {
+            HashMap::new()
+        };
+        let people = if opportunity_needs_people(&filter) {
+            state(ctx)
+                .db
+                .list_persons_page(auth.workspace_id, 10_000, 0, None, None, &[], None)
+                .await
+                .map_err(|e| gql_err(AppError::Internal(e)))?
+                .persons
+                .into_iter()
+                .map(|person| (person.id, person))
+                .collect()
+        } else {
+            HashMap::new()
+        };
+        all.retain(|opportunity| opportunity_matches(opportunity, &filter, &companies, &people));
         sort_opportunities(&mut all, &order);
 
         let total = all.len() as i64;
@@ -3160,9 +3510,35 @@ impl QueryRoot {
             .list_opportunities(auth.workspace_id, 10_000, 0)
             .await
             .map_err(|e| gql_err(AppError::Internal(e)))?;
+        let companies = if opportunity_needs_companies(&filter) {
+            let (companies, _) = state(ctx)
+                .db
+                .list_companies(auth.workspace_id, 10_000, 0)
+                .await
+                .map_err(|e| gql_err(AppError::Internal(e)))?;
+            companies
+                .into_iter()
+                .map(|company| (company.id, company))
+                .collect()
+        } else {
+            HashMap::new()
+        };
+        let people = if opportunity_needs_people(&filter) {
+            state(ctx)
+                .db
+                .list_persons_page(auth.workspace_id, 10_000, 0, None, None, &[], None)
+                .await
+                .map_err(|e| gql_err(AppError::Internal(e)))?
+                .persons
+                .into_iter()
+                .map(|person| (person.id, person))
+                .collect()
+        } else {
+            HashMap::new()
+        };
         Ok(opportunities
             .into_iter()
-            .find(|opportunity| opportunity_matches(opportunity, &filter)))
+            .find(|opportunity| opportunity_matches(opportunity, &filter, &companies, &people)))
     }
 
     #[allow(clippy::too_many_arguments)]
