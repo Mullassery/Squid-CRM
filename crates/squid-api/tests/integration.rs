@@ -1715,7 +1715,7 @@ async fn metadata_objects_match_frontend_fragment() {
         let objects = response.body["data"]["objects"]["edges"]
             .as_array()
             .unwrap();
-        assert_eq!(objects.len(), 7, "seed must be idempotent");
+        assert_eq!(objects.len(), 8, "seed must be idempotent");
         let object = objects
             .iter()
             .map(|edge| &edge["node"])
@@ -1810,12 +1810,19 @@ async fn metadata_objects_match_frontend_fragment() {
             .map(|edge| &edge["node"])
             .find(|node| node["nameSingular"] == "taskTarget")
             .expect("taskTarget object seeded");
-        let target_company = task_target["fieldsList"]
+        let target_company_id = task_target["fieldsList"]
             .as_array()
             .unwrap()
             .iter()
             .find(|field| field["name"] == "targetCompanyId")
             .expect("taskTarget.targetCompanyId");
+        assert_eq!(target_company_id["relation"], json!(null));
+        let target_company = task_target["fieldsList"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|field| field["name"] == "targetCompany")
+            .expect("taskTarget.targetCompany");
         assert_eq!(target_company["relation"]["type"], "MANY_TO_ONE");
         assert_eq!(
             target_company["relation"]["sourceObjectMetadata"]["nameSingular"],
@@ -1829,6 +1836,15 @@ async fn metadata_objects_match_frontend_fragment() {
             target_company["relation"]["targetFieldMetadata"]["name"],
             "taskTargets"
         );
+        assert_eq!(
+            target_company["morphId"],
+            task_target["fieldsList"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|field| field["name"] == "target")
+                .unwrap()["morphId"]
+        );
         let company_task_targets = company["fieldsList"]
             .as_array()
             .unwrap()
@@ -1840,6 +1856,100 @@ async fn metadata_objects_match_frontend_fragment() {
             company_task_targets["id"]
         );
         assert_eq!(company_task_targets["relation"]["type"], "ONE_TO_MANY");
+
+        let target = task_target["fieldsList"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|field| field["name"] == "target")
+            .expect("taskTarget.target morph head");
+        assert_eq!(target["relation"], json!(null));
+        let morph_relations = target["morphRelations"].as_array().unwrap();
+        assert_eq!(morph_relations.len(), 3);
+        let morph_targets: Vec<&str> = morph_relations
+            .iter()
+            .map(|relation| {
+                relation["targetObjectMetadata"]["nameSingular"]
+                    .as_str()
+                    .unwrap()
+            })
+            .collect();
+        assert_eq!(morph_targets, ["company", "opportunity", "person"]);
+        for relation in morph_relations {
+            assert_eq!(relation["type"], "MANY_TO_ONE");
+            assert_eq!(relation["targetFieldMetadata"]["name"], "taskTargets");
+        }
+
+        let task = objects
+            .iter()
+            .map(|edge| &edge["node"])
+            .find(|node| node["nameSingular"] == "task")
+            .expect("task object seeded");
+        let task_relation = task_target["fieldsList"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|field| field["name"] == "task")
+            .expect("taskTarget.task relation");
+        assert_eq!(
+            task_relation["relation"]["targetObjectMetadata"]["nameSingular"],
+            "task"
+        );
+        assert_eq!(
+            task_relation["relation"]["targetFieldMetadata"]["name"],
+            "taskTargets"
+        );
+        let task_targets = task["fieldsList"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|field| field["name"] == "taskTargets")
+            .expect("task.taskTargets reverse field");
+        assert_eq!(
+            task_relation["relation"]["targetFieldMetadata"]["id"],
+            task_targets["id"]
+        );
+
+        let workspace_member = objects
+            .iter()
+            .map(|edge| &edge["node"])
+            .find(|node| node["nameSingular"] == "workspaceMember")
+            .expect("workspaceMember object seeded");
+        assert_eq!(workspace_member["isUICreatable"], false);
+        let workspace_member_fields = workspace_member["fieldsList"].as_array().unwrap();
+        for (field_name, target_object) in [
+            ("assignedTasks", "task"),
+            ("accountOwnerForCompanies", "company"),
+        ] {
+            let field = workspace_member_fields
+                .iter()
+                .find(|field| field["name"] == field_name)
+                .unwrap_or_else(|| panic!("workspaceMember.{field_name}"));
+            assert_eq!(field["relation"]["type"], "ONE_TO_MANY");
+            assert_eq!(
+                field["relation"]["targetObjectMetadata"]["nameSingular"],
+                target_object
+            );
+        }
+        let assignee = task["fieldsList"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|field| field["name"] == "assigneeId")
+            .expect("task.assigneeId");
+        let assigned_tasks = workspace_member_fields
+            .iter()
+            .find(|field| field["name"] == "assignedTasks")
+            .unwrap();
+        assert_eq!(
+            assignee["relation"]["targetFieldMetadata"]["id"],
+            assigned_tasks["id"]
+        );
+        assert_eq!(
+            assignee["relation"]["targetFieldMetadata"]["name"],
+            "assignedTasks"
+        );
+
         assert!(
             objects
                 .iter()
@@ -3726,7 +3836,7 @@ async fn metadata_object_and_field_writes() {
             .as_array()
             .unwrap()
             .len(),
-        7,
+        8,
         "body: {}",
         objects.body
     );
@@ -4010,7 +4120,7 @@ async fn metadata_object_and_field_writes() {
             .as_array()
             .unwrap()
             .len(),
-        7,
+        8,
         "body: {}",
         after.body
     );

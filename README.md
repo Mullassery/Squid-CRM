@@ -5,10 +5,12 @@ PostgreSQL, GraphQL/OpenAPI) and the **existing React/TypeScript frontend**,
 derived from [Twenty](https://github.com/twentyhq/twenty) and preserving its API
 contract.
 
-> **Status: Phase 4 vertical slice complete.** Auth + workspace bootstrap +
-> Person (REST and GraphQL) are implemented and tested against real PostgreSQL.
-> Parity is partial — see `docs/api-compatibility.md` and
-> `docs/migration-matrix.md`.
+> **Status: Phase 4 complete.** Auth, workspace bootstrap, eight standard
+> seeded objects (person, company, opportunity, task, note, task/note targets,
+> workspaceMember metadata), metadata/view writes and contract-aligned REST +
+> GraphQL surfaces are implemented and tested against real PostgreSQL. Dynamic
+> schema generation and role enforcement remain Phase 5 work — see
+> `docs/api-compatibility.md` and `docs/migration-matrix.md`.
 
 ## Quick start
 

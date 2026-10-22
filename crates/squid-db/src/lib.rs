@@ -1719,6 +1719,7 @@ impl Db {
         self.ensure_note_metadata(workspace_id).await?;
         self.ensure_task_target_metadata(workspace_id).await?;
         self.ensure_note_target_metadata(workspace_id).await?;
+        self.ensure_workspace_member_metadata(workspace_id).await?;
         Ok(())
     }
 
@@ -2173,6 +2174,7 @@ impl Db {
             .execute(&self.pool)
             .await?;
 
+        let is_ui_creatable = definition.name_singular != "workspaceMember";
         let mut tx = self.pool.begin().await?;
         sqlx::query(
             "INSERT INTO core.object_metadata
@@ -2181,7 +2183,7 @@ impl Db {
                  is_ui_editable, is_ui_creatable, is_searchable, open_record_in,
                  readability, sharing_reach, writability, is_label_synced_with_name)
              VALUES ($1, $2, $3, $4, $5, NULL, $6, $7, $8, false, true, true, true,
-                     true, true, 'SIDE_PANEL', 'OPEN', 'ROLE_ACCESS', 'OPEN', false)
+                     $9, true, 'SIDE_PANEL', 'OPEN', 'ROLE_ACCESS', 'OPEN', false)
              ON CONFLICT (workspace_id, name_singular) DO NOTHING",
         )
         .bind(workspace_id)
@@ -2192,6 +2194,7 @@ impl Db {
         .bind(definition.icon)
         .bind(definition.color)
         .bind(definition.shortcut)
+        .bind(is_ui_creatable)
         .execute(&mut *tx)
         .await?;
 
@@ -2205,13 +2208,18 @@ impl Db {
         .await?
         .get("id");
 
+        let target_morph_id = Uuid::new_v5(&object_id, b"targetMorphId");
         for field in definition.fields {
+            let morph_id =
+                (field.field_type == FieldMetadataType::MorphRelation).then_some(target_morph_id);
             sqlx::query(
                 "INSERT INTO core.field_metadata
                     (workspace_id, object_metadata_id, type, name, label, is_system,
-                     is_ui_editable, is_nullable, is_unique, is_searchable, is_audit_logged)
-                 VALUES ($1, $2, $3, $4, $5, true, true, $6, $7, $8, true)
-                 ON CONFLICT (object_metadata_id, name) DO NOTHING",
+                     is_ui_editable, is_nullable, is_unique, is_searchable, is_audit_logged,
+                     morph_id)
+                 VALUES ($1, $2, $3, $4, $5, true, true, $6, $7, $8, true, $9)
+                 ON CONFLICT (object_metadata_id, name) DO UPDATE
+                 SET morph_id = COALESCE(core.field_metadata.morph_id, EXCLUDED.morph_id)",
             )
             .bind(workspace_id)
             .bind(object_id)
@@ -2221,6 +2229,7 @@ impl Db {
             .bind(field.nullable)
             .bind(field.unique)
             .bind(field.searchable)
+            .bind(morph_id)
             .execute(&mut *tx)
             .await?;
         }
@@ -2365,6 +2374,27 @@ impl Db {
                 create_view: false,
             },
             WORKSPACE_NOTE_TARGET_SQL,
+        )
+        .await
+    }
+
+    pub async fn ensure_workspace_member_metadata(&self, workspace_id: Uuid) -> anyhow::Result<()> {
+        self.seed_standard_object(
+            workspace_id,
+            StandardObjectSeed {
+                name_singular: "workspaceMember",
+                name_plural: "workspaceMembers",
+                label_singular: "Workspace Member",
+                label_plural: "Workspace Members",
+                icon: "IconUserCircle",
+                color: "blue",
+                shortcut: "",
+                fields: WORKSPACE_MEMBER_METADATA_FIELDS,
+                view_name: "",
+                view_fields: &[],
+                create_view: false,
+            },
+            "SELECT 1;",
         )
         .await
     }
@@ -3539,6 +3569,21 @@ impl Db {
             for field in object.fields.iter_mut() {
                 if let Some(relation) = reverse_relations.get(&(object.id, field.id)) {
                     field.relation = Some(relation.clone());
+                }
+            }
+        }
+
+        for object in objects.iter_mut() {
+            let mut by_morph: std::collections::HashMap<Uuid, Vec<RelationMetadata>> =
+                std::collections::HashMap::new();
+            for field in &object.fields {
+                if let (Some(morph_id), Some(relation)) = (field.morph_id, field.relation.clone()) {
+                    by_morph.entry(morph_id).or_default().push(relation);
+                }
+            }
+            for field in object.fields.iter_mut() {
+                if let Some(morph_id) = field.morph_id {
+                    field.morph_relations = by_morph.get(&morph_id).cloned().unwrap_or_default();
                 }
             }
         }
@@ -5225,6 +5270,46 @@ const TASK_TARGET_METADATA_FIELDS: &[PersonFieldSeed] = &[
         unique: false,
         searchable: false,
     },
+    PersonFieldSeed {
+        name: "task",
+        label: "Task",
+        field_type: FieldMetadataType::Relation,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "target",
+        label: "Related to",
+        field_type: FieldMetadataType::MorphRelation,
+        nullable: true,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "targetCompany",
+        label: "Company",
+        field_type: FieldMetadataType::MorphRelation,
+        nullable: true,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "targetOpportunity",
+        label: "Opportunity",
+        field_type: FieldMetadataType::MorphRelation,
+        nullable: true,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "targetPerson",
+        label: "Person",
+        field_type: FieldMetadataType::MorphRelation,
+        nullable: true,
+        unique: false,
+        searchable: false,
+    },
 ];
 
 const NOTE_TARGET_METADATA_FIELDS: &[PersonFieldSeed] = &[
@@ -5324,6 +5409,46 @@ const NOTE_TARGET_METADATA_FIELDS: &[PersonFieldSeed] = &[
         unique: false,
         searchable: false,
     },
+    PersonFieldSeed {
+        name: "note",
+        label: "Note",
+        field_type: FieldMetadataType::Relation,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "target",
+        label: "Related to",
+        field_type: FieldMetadataType::MorphRelation,
+        nullable: true,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "targetCompany",
+        label: "Company",
+        field_type: FieldMetadataType::MorphRelation,
+        nullable: true,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "targetOpportunity",
+        label: "Opportunity",
+        field_type: FieldMetadataType::MorphRelation,
+        nullable: true,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "targetPerson",
+        label: "Person",
+        field_type: FieldMetadataType::MorphRelation,
+        nullable: true,
+        unique: false,
+        searchable: false,
+    },
 ];
 
 const TASK_TARGET_SELECT: &str = "id, created_at, updated_at, deleted_at, position, \
@@ -5381,6 +5506,161 @@ struct StandardObjectSeed<'a> {
     view_fields: &'a [(&'a str, f64)],
     create_view: bool,
 }
+
+const WORKSPACE_MEMBER_METADATA_FIELDS: &[PersonFieldSeed] = &[
+    PersonFieldSeed {
+        name: "id",
+        label: "ID",
+        field_type: FieldMetadataType::Uuid,
+        nullable: false,
+        unique: true,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "createdAt",
+        label: "Creation date",
+        field_type: FieldMetadataType::DateTime,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "updatedAt",
+        label: "Last update",
+        field_type: FieldMetadataType::DateTime,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "deletedAt",
+        label: "Deleted at",
+        field_type: FieldMetadataType::DateTime,
+        nullable: true,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "position",
+        label: "Position",
+        field_type: FieldMetadataType::Position,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "name",
+        label: "Name",
+        field_type: FieldMetadataType::FullName,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "colorScheme",
+        label: "Color Scheme",
+        field_type: FieldMetadataType::Text,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "uiScale",
+        label: "Interface Scale",
+        field_type: FieldMetadataType::Text,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "locale",
+        label: "Locale",
+        field_type: FieldMetadataType::Text,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "avatarUrl",
+        label: "Avatar",
+        field_type: FieldMetadataType::Text,
+        nullable: true,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "userEmail",
+        label: "User Email",
+        field_type: FieldMetadataType::Emails,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "jobTitle",
+        label: "Job Title",
+        field_type: FieldMetadataType::Text,
+        nullable: true,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "timeZone",
+        label: "Time Zone",
+        field_type: FieldMetadataType::Text,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "dateFormat",
+        label: "Date Format",
+        field_type: FieldMetadataType::Text,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "timeFormat",
+        label: "Time Format",
+        field_type: FieldMetadataType::Text,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "numberFormat",
+        label: "Number Format",
+        field_type: FieldMetadataType::Text,
+        nullable: false,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "searchVector",
+        label: "Search vector",
+        field_type: FieldMetadataType::TsVector,
+        nullable: true,
+        unique: false,
+        searchable: true,
+    },
+    PersonFieldSeed {
+        name: "assignedTasks",
+        label: "Assigned tasks",
+        field_type: FieldMetadataType::Relation,
+        nullable: true,
+        unique: false,
+        searchable: false,
+    },
+    PersonFieldSeed {
+        name: "accountOwnerForCompanies",
+        label: "Account owner for companies",
+        field_type: FieldMetadataType::Relation,
+        nullable: true,
+        unique: false,
+        searchable: false,
+    },
+];
 
 const TASK_METADATA_FIELDS: &[PersonFieldSeed] = &[
     PersonFieldSeed {
@@ -6254,24 +6534,24 @@ const METADATA_RELATIONS: &[(&str, &str, &str, &str)] = &[
         "workspaceMember",
         "accountOwnerForCompanies",
     ),
-    ("taskTarget", "taskId", "task", "taskTargets"),
-    ("noteTarget", "noteId", "note", "noteTargets"),
-    ("taskTarget", "targetCompanyId", "company", "taskTargets"),
+    ("taskTarget", "task", "task", "taskTargets"),
+    ("noteTarget", "note", "note", "noteTargets"),
+    ("taskTarget", "targetCompany", "company", "taskTargets"),
     (
         "taskTarget",
-        "targetOpportunityId",
+        "targetOpportunity",
         "opportunity",
         "taskTargets",
     ),
-    ("taskTarget", "targetPersonId", "person", "taskTargets"),
-    ("noteTarget", "targetCompanyId", "company", "noteTargets"),
+    ("taskTarget", "targetPerson", "person", "taskTargets"),
+    ("noteTarget", "targetCompany", "company", "noteTargets"),
     (
         "noteTarget",
-        "targetOpportunityId",
+        "targetOpportunity",
         "opportunity",
         "noteTargets",
     ),
-    ("noteTarget", "targetPersonId", "person", "noteTargets"),
+    ("noteTarget", "targetPerson", "person", "noteTargets"),
 ];
 
 fn build_search_field_metadata(object: &ObjectMetadata) -> Vec<SearchFieldMetadata> {
