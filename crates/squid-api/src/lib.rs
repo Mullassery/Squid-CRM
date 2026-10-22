@@ -354,7 +354,7 @@ pub fn app(state: AppState) -> Router {
 
 /// Propagate a caller-supplied request/correlation id, or generate one. The
 /// id is returned on every response so logs and downstream calls can be joined.
-async fn correlation_id(mut request: Request, next: Next) -> Response {
+async fn correlation_id(request: Request, next: Next) -> Response {
     let incoming = request
         .headers()
         .get("x-correlation-id")

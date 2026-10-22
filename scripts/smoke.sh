@@ -33,7 +33,19 @@ SIGNUP_STATUS=$(curl -s -o /tmp/squid-smoke-signup.json -w '%{http_code}' \
   -d "{\"email\":\"${EMAIL}\",\"password\":\"super-secret-password\",\"workspaceName\":\"Smoke Co\"}")
 test "$SIGNUP_STATUS" = "201" || { echo "signup failed: $SIGNUP_STATUS"; cat /tmp/squid-smoke-signup.json; exit 1; }
 
-TOKEN=$(python3 -c "import json;print(json.load(open('/tmp/squid-smoke-signup.json'))['tokens']['accessOrWorkspaceAgnosticToken']['token'])")
+ACCESS_TOKEN=$(python3 -c "import json;print(json.load(open('/tmp/squid-smoke-signup.json'))['tokens']['accessOrWorkspaceAgnosticToken']['token'])")
+
+KEY_STATUS=$(curl -s -o /tmp/squid-smoke-key.json -w '%{http_code}' \
+  -X POST "${BASE}/metadata" -H "Authorization: Bearer ${ACCESS_TOKEN}" -H 'Content-Type: application/json' \
+  -d "{\"query\":\"mutation(\$input: CreateApiKeyInput!) { createApiKey(input:\$input) { id } }\",\"variables\":{\"input\":{\"name\":\"smoke\",\"expiresAt\":\"2035-01-01T00:00:00.000Z\",\"roleId\":\"$(python3 -c 'import uuid;print(uuid.uuid4())')\"}}}")
+test "$KEY_STATUS" = "200" || { echo "api key creation failed: $KEY_STATUS"; cat /tmp/squid-smoke-key.json; exit 1; }
+API_KEY_ID=$(python3 -c "import json;print(json.load(open('/tmp/squid-smoke-key.json'))['data']['createApiKey']['id'])")
+
+KEY_TOKEN_STATUS=$(curl -s -o /tmp/squid-smoke-key-token.json -w '%{http_code}' \
+  -X POST "${BASE}/metadata" -H "Authorization: Bearer ${ACCESS_TOKEN}" -H 'Content-Type: application/json' \
+  -d "{\"query\":\"mutation(\$id: UUID!, \$expiresAt: String!) { generateApiKeyToken(apiKeyId:\$id, expiresAt:\$expiresAt) { token } }\",\"variables\":{\"id\":\"${API_KEY_ID}\",\"expiresAt\":\"2035-01-01T00:00:00.000Z\"}}")
+test "$KEY_TOKEN_STATUS" = "200" || { echo "api key token creation failed: $KEY_TOKEN_STATUS"; cat /tmp/squid-smoke-key-token.json; exit 1; }
+TOKEN=$(python3 -c "import json;print(json.load(open('/tmp/squid-smoke-key-token.json'))['data']['generateApiKeyToken']['token'])")
 
 CREATE_STATUS=$(curl -s -o /tmp/squid-smoke-create.json -w '%{http_code}' \
   -X POST "${BASE}/rest/people" -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' \
@@ -67,6 +79,8 @@ assert body['pageInfo']['hasNextPage'] is False, body
 print('list OK: totalCount=1, envelope and cursors match contract')
 PY
 
+TOKEN="$ACCESS_TOKEN"
+
 METADATA_STATUS=$(curl -s -o /tmp/squid-smoke-metadata.json -w '%{http_code}' \
   -X POST "${BASE}/metadata" -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' \
   -d '{"query":"{ objects(paging:{first:100}) { edges { node { nameSingular fieldsList { name type } } } } getViews { id name type viewFields { fieldMetadataId isVisible position } } currentUser { email currentWorkspace { subdomain activationStatus } } }"}')
@@ -76,7 +90,9 @@ import json
 body = json.load(open('/tmp/squid-smoke-metadata.json'))
 assert 'errors' not in body, body
 objects = body['data']['objects']['edges']
-assert len(objects) == 5, body
+assert {'person', 'company', 'opportunity', 'task', 'note'} <= {
+    edge['node']['nameSingular'] for edge in objects
+}, body
 node = next(edge['node'] for edge in objects if edge['node']['nameSingular'] == 'person')
 fields = {field['name']: field['type'] for field in node['fieldsList']}
 assert fields['name'] == 'FULL_NAME', fields

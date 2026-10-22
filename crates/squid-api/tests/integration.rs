@@ -6870,6 +6870,10 @@ async fn webhook_delivery_posts_record_events() {
         "webhook errors: {}",
         webhook.body
     );
+    let webhook_id = webhook.body["data"]["createWebhook"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     let person = send(
         &app,
@@ -6897,6 +6901,61 @@ async fn webhook_delivery_posts_record_events() {
         received["data"]["name"]["firstName"], "Web",
         "payload: {received}"
     );
+
+    let mut first_delivery = json!(null);
+    for _ in 0..50 {
+        let deliveries = send(
+            &app,
+            authorized(
+                "POST",
+                "/graphql",
+                &token,
+                Some(json!({
+                    "query": "query($id: UUID!) { webhookDeliveries(webhookId: $id) { id state attempts eventId } }",
+                    "variables": { "id": webhook_id }
+                })),
+            ),
+        )
+        .await;
+        assert!(
+            deliveries.body["errors"].is_null(),
+            "errors: {}",
+            deliveries.body
+        );
+        first_delivery = deliveries.body["data"]["webhookDeliveries"][0].clone();
+        if first_delivery["state"] == "succeeded" {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(first_delivery["state"], "succeeded", "{first_delivery}");
+    assert!(first_delivery["attempts"].as_i64().unwrap() >= 1);
+    let delivery_id = first_delivery["id"].as_str().unwrap().to_string();
+
+    let replayed = send(
+        &app,
+        authorized(
+            "POST",
+            "/graphql",
+            &token,
+            Some(json!({
+                "query": "mutation($id: UUID!) { replayWebhookDelivery(id: $id) }",
+                "variables": { "id": delivery_id }
+            })),
+        ),
+    )
+    .await;
+    assert!(
+        replayed.body["errors"].is_null(),
+        "errors: {}",
+        replayed.body
+    );
+    assert_eq!(replayed.body["data"]["replayWebhookDelivery"], true);
+    let replayed_payload = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+        .await
+        .expect("replay delivery timed out")
+        .expect("replay payload");
+    assert_eq!(replayed_payload["event"], "person.created");
 }
 
 #[tokio::test]

@@ -29,11 +29,11 @@ Statuses: **VERIFIED** (executable evidence in this repository), **PARTIAL**
 
 | Counterpart | Direction | Interface used here | Status | Evidence / gap |
 | --- | --- | --- | --- | --- |
-| PyReverseETL | inbound activation writes | REST `/rest/...`, GraphQL, custom-object REST | PARTIAL | REST/GraphQL CRUD and API keys are tested (`crates/squid-api/tests/integration.rs`). No `Idempotency-Key`, bulk upsert or durable outbox; exact PyReverseETL payload contract is not available locally. |
+| PyReverseETL | inbound activation writes | REST `/rest/...`, GraphQL, custom-object REST | PARTIAL | REST/GraphQL CRUD, API keys and `Idempotency-Key` replay are tested (`crates/squid-api/tests/integration.rs`). No bulk upsert or durable outbox; PyReverseETL cannot currently send the header and its exact payload contract is not available locally. |
 | ClusterAudienceKit | inbound audience/custom-object sync | Custom-object REST `/rest/{object}` | PARTIAL | Custom-object tables, relation fields and generic CRUD are tested in `metadata_object_and_field_writes`. No batch/upsert endpoint or audience-specific schema contract. |
 | PyTagShield | inbound validated events/records | REST/GraphQL, custom objects | PARTIAL | Record APIs and relation fields exist. Consent enforcement belongs to PyTagShield; Squid does not independently prove consent and must not be treated as a consent authority. |
 | PyTagManager | inbound findings storage | Custom-object REST | PARTIAL | Generic custom objects can store findings, but no agreed findings schema/version is available in this repository. |
-| MessageBirds | outbound record events | Webhooks | PARTIAL | Envelope v1 and HMAC signatures are implemented and tested. No shared event-schema registry, retry queue, dead-letter queue or ordering guarantee. |
+| MessageBirds | outbound record events | Webhooks | PARTIAL | Envelope v1, HMAC signatures, bounded retries, durable delivery log and manual replay are implemented and tested. No shared event-schema registry or ordering guarantee. |
 | ScrapeOwl | none | none | NOT APPLICABLE | No direct data contract; scraping output would arrive through another ecosystem service. |
 | MudFish | none | none | NOT APPLICABLE | No direct data contract; crawling output would arrive through another ecosystem service. |
 | Any counterpart | Python integration | `python/` `squid_crm` client | VERIFIED (client import) | Import/version checked locally. REST/GraphQL contract tests live in the Rust suite. |
@@ -48,6 +48,11 @@ Statuses: **VERIFIED** (executable evidence in this repository), **PARTIAL**
   user agent.
 - Removed the plaintext `x-webhook-secret` header to avoid leaking stored
   secrets over the wire. Consumers must verify the HMAC signature.
+- Added workspace-scoped `Idempotency-Key` replay with body-hash conflict
+  detection, response replay headers and retry-after-failure semantics.
+- Added `x-correlation-id` propagation/echo, bounded webhook retries with
+  backoff and `Retry-After`, a durable `core.webhook_deliveries` log, admin
+  delivery listing and manual replay.
 - Added `examples/webhook_receiver.py` as a runnable HMAC-verifying receiver.
 - Added the Python client package under `python/` and published `squid-crm`
   0.1.0 to PyPI.
@@ -66,8 +71,11 @@ Statuses: **VERIFIED** (executable evidence in this repository), **PARTIAL**
   configured webhook secret.
 - File URLs: HMAC-signed, expiring, with `UPLOAD_FILE`/`DOWNLOAD_FILE` checks at
   issuance.
-- No input idempotency contract exists yet. Callers retrying writes can create
-  duplicates.
+- Mutating requests may send `Idempotency-Key` (1-255 printable ASCII bytes).
+  Keys are scoped to a workspace, the request body is hashed, a completed
+  response is replayed with `Idempotency-Replayed: true`, and a reused key with
+  a different body returns `409 Conflict`. Keys expire; there is no
+  cross-workspace sharing.
 
 ## E. Test commands and actual results
 
@@ -75,16 +83,22 @@ Statuses: **VERIFIED** (executable evidence in this repository), **PARTIAL**
 cargo fmt --all -- --check
 CARGO_INCREMENTAL=0 cargo clippy --workspace --all-targets -- -D warnings
 TEST_DATABASE_URL=postgres://$USER@127.0.0.1:5432/squid_test \
-  CARGO_INCREMENTAL=0 cargo test
+  CARGO_INCREMENTAL=0 cargo test --workspace
+TEST_DATABASE_URL=postgres://$USER@127.0.0.1:5432/squid_test \
+  ./scripts/smoke.sh
 ```
 
-Last verified result:
+Last verified result (2026-10-22):
 
 - `cargo fmt --check`: passed.
 - clippy with `-D warnings`: passed.
-- tests: **63 passing** (13 API unit, 43 integration, 5 auth, 2 DB).
+- tests: **69 passing** (13 API unit, 49 integration, 5 auth, 2 DB).
+- `scripts/smoke.sh`: passed signup, API-key auth, REST create/update/list,
+  metadata/frontend contract, unauthenticated 403 and API-key revocation.
 - Webhook envelope/signature behavior is covered by
   `webhook_delivery_posts_record_events` with a live local HTTP receiver.
+- Idempotent replay, conflict, tenant scoping and failed-request retry are
+  covered by integration tests.
 - Python package import check: `squid_crm.__version__ == "0.1.0"`.
 
 Runnable webhook example:
@@ -117,10 +131,13 @@ SQUID_WEBHOOK_SECRET='the-webhook-secret' \
 - **No counterpart contracts verified live.** Sibling repositories and their
   OpenAPI/GraphQL schemas are not present in this workspace. Adapters must not
   be invented from README claims.
-- **Idempotency**: no `Idempotency-Key` support or deduplication store for
-  inbound writes. This is the largest reverse-ETL/audience risk.
-- **Webhook delivery durability**: fire-and-forget HTTP with a 5s timeout; no
-  retry/backoff, dead-letter queue, ordering or delivery log.
+- **Idempotency**: header-bearing mutating requests are replay-safe, but
+  counterparts must still be taught to send stable keys, and expired-key
+  cleanup/retention is not automated.
+- **Webhook delivery durability**: bounded in-process retries, a durable
+  `core.webhook_deliveries` log, admin delivery listing and manual replay
+  exist; there is no automatic background replay/worker, ordering guarantee or
+  long-term retention policy.
 - **Event schema governance**: envelope v1 exists, but no shared schema registry
   or compatibility tests with MessageBirds.
 - **Consent/PII**: Squid does not emit consent decisions or field-level
@@ -141,9 +158,10 @@ Required counterpart decisions:
 
 ## H. Compatibility and next steps
 
-1. Add idempotency-key storage and replay-safe write semantics to REST/GraphQL.
-2. Move webhook delivery into a durable job queue with retries and a delivery
-   log; keep envelope v1 stable.
+1. Agree idempotency-key generation and retry semantics with reverse-ETL and
+   audience consumers; add scheduled expiry cleanup.
+2. Add an automatic background replay worker for failed webhook deliveries;
+   keep envelope v1 and the existing manual replay stable.
 3. Publish a JSON Schema for webhook envelope v1 and contract-test it against
    MessageBirds when its schema is available.
 4. Add batch/upsert endpoints for reverse-ETL and audience sync.

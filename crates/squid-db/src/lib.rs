@@ -93,6 +93,28 @@ const CORE_ROLE_PERMISSION_FLAGS_SQL: &str =
     include_str!("../migrations/core/0010_role_permission_flags.sql");
 const CORE_IDEMPOTENCY_KEYS_SQL: &str =
     include_str!("../migrations/core/0011_idempotency_keys.sql");
+const CORE_WEBHOOK_DELIVERIES_SQL: &str =
+    include_str!("../migrations/core/0012_webhook_deliveries.sql");
+const CORE_WEBHOOK_DELIVERY_REPLAY_SQL: &str =
+    include_str!("../migrations/core/0013_webhook_delivery_replay.sql");
+
+#[derive(Debug, Clone)]
+pub struct WebhookDeliveryRecord {
+    pub id: Uuid,
+    pub webhook_id: Uuid,
+    pub event: String,
+    pub event_id: Uuid,
+    pub state: String,
+    pub attempts: i32,
+    pub last_status_code: Option<i32>,
+    pub last_error: Option<String>,
+    pub target_url: Option<String>,
+    pub request_body: Option<Vec<u8>>,
+    pub signature: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub completed_at: Option<DateTime<Utc>>,
+}
 
 #[derive(Clone)]
 pub struct Db {
@@ -462,6 +484,8 @@ impl Db {
             CORE_WEBHOOKS_SQL,
             CORE_ROLE_PERMISSION_FLAGS_SQL,
             CORE_IDEMPOTENCY_KEYS_SQL,
+            CORE_WEBHOOK_DELIVERIES_SQL,
+            CORE_WEBHOOK_DELIVERY_REPLAY_SQL,
         ] {
             result = sqlx::raw_sql(ddl).execute(&mut *conn).await.map(|_| ());
             if result.is_err() {
@@ -2161,6 +2185,105 @@ impl Db {
         .fetch_optional(&self.pool)
         .await?;
         Ok(row.as_ref().map(row_to_webhook))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_webhook_delivery(
+        &self,
+        workspace_id: Uuid,
+        webhook_id: Uuid,
+        event: &str,
+        event_id: Uuid,
+        target_url: &str,
+        request_body: &[u8],
+        signature: &str,
+    ) -> anyhow::Result<Uuid> {
+        Ok(sqlx::query_scalar(
+            "INSERT INTO core.webhook_deliveries
+                (workspace_id, webhook_id, event, event_id, target_url, request_body, signature)
+             VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
+        )
+        .bind(workspace_id)
+        .bind(webhook_id)
+        .bind(event)
+        .bind(event_id)
+        .bind(target_url)
+        .bind(request_body)
+        .bind(signature)
+        .fetch_one(&self.pool)
+        .await?)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn record_webhook_delivery(
+        &self,
+        workspace_id: Uuid,
+        delivery_id: Uuid,
+        attempts: i32,
+        last_status_code: Option<i32>,
+        last_error: Option<&str>,
+        state: &str,
+    ) -> anyhow::Result<()> {
+        sqlx::query(
+            "UPDATE core.webhook_deliveries SET
+                attempts = $3, last_status_code = $4, last_error = $5, state = $6,
+                updated_at = now(), completed_at = CASE WHEN $6 = 'pending' THEN NULL ELSE now() END
+             WHERE workspace_id = $1 AND id = $2",
+        )
+        .bind(workspace_id)
+        .bind(delivery_id)
+        .bind(attempts)
+        .bind(last_status_code)
+        .bind(last_error)
+        .bind(state)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn list_webhook_deliveries(
+        &self,
+        workspace_id: Uuid,
+        webhook_id: Option<Uuid>,
+        state: Option<&str>,
+        limit: i64,
+    ) -> anyhow::Result<Vec<WebhookDeliveryRecord>> {
+        let rows = sqlx::query(
+            "SELECT id, webhook_id, event, event_id, state, attempts, last_status_code,
+                    last_error, target_url, request_body, signature, created_at,
+                    updated_at, completed_at
+             FROM core.webhook_deliveries
+             WHERE workspace_id = $1
+               AND ($2::uuid IS NULL OR webhook_id = $2)
+               AND ($3::text IS NULL OR state = $3)
+             ORDER BY created_at DESC LIMIT $4",
+        )
+        .bind(workspace_id)
+        .bind(webhook_id)
+        .bind(state)
+        .bind(limit.clamp(1, 500))
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.iter().map(row_to_webhook_delivery).collect())
+    }
+
+    pub async fn get_webhook_delivery(
+        &self,
+        workspace_id: Uuid,
+        delivery_id: Uuid,
+    ) -> anyhow::Result<Option<WebhookDeliveryRecord>> {
+        let row = sqlx::query(
+            "SELECT id, webhook_id, event, event_id, state, attempts, last_status_code,
+                    last_error, target_url, request_body, signature, created_at,
+                    updated_at, completed_at
+             FROM core.webhook_deliveries
+             WHERE workspace_id = $1 AND id = $2",
+        )
+        .bind(workspace_id)
+        .bind(delivery_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.as_ref().map(row_to_webhook_delivery))
     }
 
     pub async fn ensure_roles(&self, workspace_id: Uuid) -> anyhow::Result<()> {
@@ -7656,6 +7779,25 @@ fn row_to_object(row: &sqlx::postgres::PgRow) -> anyhow::Result<ObjectMetadata> 
         index_metadata: Vec::new(),
         search_field_metadata: Vec::new(),
     })
+}
+
+fn row_to_webhook_delivery(row: &sqlx::postgres::PgRow) -> WebhookDeliveryRecord {
+    WebhookDeliveryRecord {
+        id: row.get("id"),
+        webhook_id: row.get("webhook_id"),
+        event: row.get("event"),
+        event_id: row.get("event_id"),
+        state: row.get("state"),
+        attempts: row.get("attempts"),
+        last_status_code: row.get("last_status_code"),
+        last_error: row.get("last_error"),
+        target_url: row.get("target_url"),
+        request_body: row.get("request_body"),
+        signature: row.get("signature"),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+        completed_at: row.get("completed_at"),
+    }
 }
 
 fn row_to_webhook(row: &sqlx::postgres::PgRow) -> WebhookRecord {

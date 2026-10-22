@@ -200,6 +200,42 @@ fn search_filter_matches(
     true
 }
 
+#[derive(Debug, Clone, SimpleObject)]
+#[graphql(name = "WebhookDelivery")]
+pub struct WebhookDeliveryGql {
+    pub id: Uuid,
+    pub webhook_id: Uuid,
+    pub event: String,
+    pub event_id: Uuid,
+    pub state: String,
+    pub attempts: i32,
+    pub last_status_code: Option<i32>,
+    pub last_error: Option<String>,
+    pub target_url: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub completed_at: Option<DateTime<Utc>>,
+}
+
+impl From<squid_db::WebhookDeliveryRecord> for WebhookDeliveryGql {
+    fn from(record: squid_db::WebhookDeliveryRecord) -> Self {
+        Self {
+            id: record.id,
+            webhook_id: record.webhook_id,
+            event: record.event,
+            event_id: record.event_id,
+            state: record.state,
+            attempts: record.attempts,
+            last_status_code: record.last_status_code,
+            last_error: record.last_error,
+            target_url: record.target_url,
+            created_at: record.created_at,
+            updated_at: record.updated_at,
+            completed_at: record.completed_at,
+        }
+    }
+}
+
 #[derive(Debug, SimpleObject)]
 #[graphql(name = "SearchRecord")]
 pub struct SearchRecord {
@@ -3505,6 +3541,28 @@ impl QueryRoot {
             .map_err(|e| gql_err(AppError::Internal(e)))
     }
 
+    async fn webhook_deliveries(
+        &self,
+        ctx: &Context<'_>,
+        webhook_id: Option<Uuid>,
+        delivery_state: Option<String>,
+        limit: Option<i32>,
+    ) -> async_graphql::Result<Vec<WebhookDeliveryGql>> {
+        let auth = require_admin(ctx)?;
+        Ok(state(ctx)
+            .db
+            .list_webhook_deliveries(
+                auth.workspace_id,
+                webhook_id,
+                delivery_state.as_deref(),
+                i64::from(limit.unwrap_or(100)),
+            )
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .into_iter()
+            .map(WebhookDeliveryGql::from)
+            .collect())
+    }
     async fn get_roles(
         &self,
         ctx: &Context<'_>,
@@ -5871,6 +5929,17 @@ impl MutationRoot {
             .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))?;
 
         Ok(ApiKeyToken { token })
+    }
+
+    async fn replay_webhook_delivery(
+        &self,
+        ctx: &Context<'_>,
+        id: Uuid,
+    ) -> async_graphql::Result<bool> {
+        let auth = require_admin(ctx)?;
+        crate::rest::replay_webhook_delivery(state(ctx), auth.workspace_id, id)
+            .await
+            .map_err(gql_err)
     }
 
     async fn create_webhook(

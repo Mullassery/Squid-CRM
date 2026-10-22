@@ -2940,9 +2940,31 @@ pub(crate) async fn emit_webhooks(
         let hook_id = hook.id;
         let target_url = hook.target_url.clone();
         let client = client.clone();
+        let delivery_id = match state
+            .db
+            .create_webhook_delivery(
+                workspace_id,
+                hook_id,
+                &event,
+                event_id,
+                &hook.target_url,
+                &body_bytes,
+                &signature,
+            )
+            .await
+        {
+            Ok(id) => id,
+            Err(error) => {
+                tracing::error!(%error, webhook_id = %hook_id, "failed to record webhook delivery");
+                continue;
+            }
+        };
+        let state = state.clone();
         tokio::spawn(async move {
             deliver_webhook(
+                &state,
                 &client,
+                delivery_id,
                 hook_id,
                 workspace_id,
                 &target_url,
@@ -2958,7 +2980,9 @@ pub(crate) async fn emit_webhooks(
 
 #[allow(clippy::too_many_arguments)]
 async fn deliver_webhook(
+    state: &AppState,
     client: &reqwest::Client,
+    delivery_id: Uuid,
     hook_id: Uuid,
     workspace_id: Uuid,
     target_url: &str,
@@ -2987,6 +3011,17 @@ async fn deliver_webhook(
             Ok(response) => {
                 let status = response.status();
                 if status.is_success() {
+                    let _ = state
+                        .db
+                        .record_webhook_delivery(
+                            workspace_id,
+                            delivery_id,
+                            attempt as i32,
+                            Some(i32::from(status.as_u16())),
+                            None,
+                            "succeeded",
+                        )
+                        .await;
                     tracing::debug!(
                         webhook_id = %hook_id,
                         event_id = %event_id,
@@ -3002,6 +3037,17 @@ async fn deliver_webhook(
                     .and_then(|value| value.to_str().ok())
                     .and_then(parse_retry_after);
                 if is_retryable_status(status) && attempt < WEBHOOK_MAX_ATTEMPTS {
+                    let _ = state
+                        .db
+                        .record_webhook_delivery(
+                            workspace_id,
+                            delivery_id,
+                            attempt as i32,
+                            Some(i32::from(status.as_u16())),
+                            None,
+                            "pending",
+                        )
+                        .await;
                     let delay = webhook_backoff(attempt, retry_after);
                     tracing::warn!(
                         webhook_id = %hook_id,
@@ -3015,6 +3061,17 @@ async fn deliver_webhook(
                     continue;
                 }
 
+                let _ = state
+                    .db
+                    .record_webhook_delivery(
+                        workspace_id,
+                        delivery_id,
+                        attempt as i32,
+                        Some(i32::from(status.as_u16())),
+                        Some("non-success HTTP status"),
+                        "failed",
+                    )
+                    .await;
                 tracing::warn!(
                     webhook_id = %hook_id,
                     event_id = %event_id,
@@ -3026,6 +3083,17 @@ async fn deliver_webhook(
             }
             Err(error) => {
                 if attempt < WEBHOOK_MAX_ATTEMPTS {
+                    let _ = state
+                        .db
+                        .record_webhook_delivery(
+                            workspace_id,
+                            delivery_id,
+                            attempt as i32,
+                            None,
+                            Some(&error.to_string()),
+                            "pending",
+                        )
+                        .await;
                     let delay = webhook_backoff(attempt, None);
                     tracing::warn!(
                         webhook_id = %hook_id,
@@ -3069,6 +3137,74 @@ fn webhook_backoff(attempt: u32, retry_after: Option<std::time::Duration>) -> st
     }
     let millis = 250_u64.saturating_mul(1_u64 << (attempt.saturating_sub(1).min(4)));
     std::time::Duration::from_millis(millis.min(5_000))
+}
+
+pub(crate) async fn replay_webhook_delivery(
+    state: &AppState,
+    workspace_id: Uuid,
+    delivery_id: Uuid,
+) -> AppResult<bool> {
+    let delivery = state
+        .db
+        .get_webhook_delivery(workspace_id, delivery_id)
+        .await
+        .map_err(AppError::Internal)?
+        .ok_or_else(|| AppError::NotFound("Webhook delivery not found".to_string()))?;
+    let hook = state
+        .db
+        .get_webhook(workspace_id, delivery.webhook_id)
+        .await
+        .map_err(AppError::Internal)?
+        .ok_or_else(|| AppError::NotFound("Webhook not found".to_string()))?;
+    let target_url = delivery
+        .target_url
+        .clone()
+        .unwrap_or_else(|| hook.target_url.clone());
+    let body = delivery
+        .request_body
+        .clone()
+        .ok_or_else(|| AppError::BadRequest("Delivery has no stored body".to_string()))?;
+    let mut mac = Hmac::<Sha256>::new_from_slice(hook.secret.as_bytes())
+        .expect("HMAC accepts any key length");
+    mac.update(&body);
+    let signature = format!("sha256={}", hex::encode(mac.finalize().into_bytes()));
+    let new_delivery = state
+        .db
+        .create_webhook_delivery(
+            workspace_id,
+            hook.id,
+            &delivery.event,
+            delivery.event_id,
+            &target_url,
+            &body,
+            &signature,
+        )
+        .await
+        .map_err(AppError::Internal)?;
+    let client = reqwest::Client::builder()
+        .timeout(WEBHOOK_TIMEOUT)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|error| AppError::Internal(anyhow::anyhow!(error)))?;
+    let state = state.clone();
+    let event = delivery.event.clone();
+    let event_id = delivery.event_id;
+    tokio::spawn(async move {
+        deliver_webhook(
+            &state,
+            &client,
+            new_delivery,
+            hook.id,
+            workspace_id,
+            &target_url,
+            &event,
+            event_id,
+            &body,
+            &signature,
+        )
+        .await;
+    });
+    Ok(true)
 }
 
 async fn require_capability(
