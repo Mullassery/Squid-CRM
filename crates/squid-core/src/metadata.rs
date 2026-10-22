@@ -739,3 +739,35 @@ pub struct RoleRecord {
     pub application_id: Uuid,
     pub universal_identifier: Option<String>,
 }
+
+#[derive(Debug, Clone)]
+pub struct RoleWrite {
+    pub label: String,
+    pub description: Option<String>,
+    pub icon: Option<String>,
+    pub can_update_all_settings: bool,
+    pub can_access_all_tools: bool,
+    pub can_read_all_object_records: bool,
+    pub can_update_all_object_records: bool,
+    pub can_soft_delete_all_object_records: bool,
+    pub can_destroy_all_object_records: bool,
+    pub can_be_assigned_to_users: bool,
+    pub can_be_assigned_to_agents: bool,
+    pub can_be_assigned_to_api_keys: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct RolePatch {
+    pub label: Option<String>,
+    pub description: Option<String>,
+    pub icon: Option<String>,
+    pub can_update_all_settings: Option<bool>,
+    pub can_access_all_tools: Option<bool>,
+    pub can_read_all_object_records: Option<bool>,
+    pub can_update_all_object_records: Option<bool>,
+    pub can_soft_delete_all_object_records: Option<bool>,
+    pub can_destroy_all_object_records: Option<bool>,
+    pub can_be_assigned_to_users: Option<bool>,
+    pub can_be_assigned_to_agents: Option<bool>,
+    pub can_be_assigned_to_api_keys: Option<bool>,
+}

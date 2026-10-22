@@ -10,7 +10,6 @@ use regex::Regex;
 use serde::de::DeserializeOwned;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Postgres, QueryBuilder, Row};
-use squid_core::RoleRecord;
 use squid_core::{
     Actor, AggregateOperations, ApiKey, Company, CreateCompanyInput, CreateFieldMetadataInput,
     CreateIndexInput, CreateNoteInput, CreateNoteTargetInput, CreateObjectMetadataInput,
@@ -30,6 +29,7 @@ use squid_core::{
     ViewFilter, ViewFilterGroup, ViewFilterGroupLogicalOperator, ViewFilterOperand, ViewGroup,
     ViewKey, ViewOpenRecordIn, ViewSort, ViewSortDirection, ViewType, ViewVisibility, Workspace,
 };
+use squid_core::{RolePatch, RoleRecord, RoleWrite};
 use uuid::Uuid;
 
 const CORE_SCHEMA_SQL: &str = include_str!("../migrations/core/0001_core.sql");
@@ -653,7 +653,7 @@ impl Db {
         user_id: Uuid,
     ) -> sqlx::Result<Option<squid_core::WorkspaceMember>> {
         let row = sqlx::query(
-            "SELECT id, workspace_id, user_id, role, created_at
+            "SELECT id, workspace_id, user_id, role, role_id, created_at
              FROM core.workspace_members
              WHERE workspace_id = $1 AND user_id = $2",
         )
@@ -668,6 +668,7 @@ impl Db {
                 workspace_id: row.get("workspace_id"),
                 user_id: row.get("user_id"),
                 role,
+                role_id: row.get("role_id"),
                 created_at: row.get("created_at"),
             })
         }))
@@ -678,7 +679,7 @@ impl Db {
         workspace_id: Uuid,
     ) -> sqlx::Result<Vec<(squid_core::WorkspaceMember, squid_core::User)>> {
         let rows = sqlx::query(
-            "SELECT m.id, m.workspace_id, m.user_id, m.role, m.created_at,
+            "SELECT m.id, m.workspace_id, m.user_id, m.role, m.role_id, m.created_at,
                     u.email AS user_email, u.created_at AS user_created_at
              FROM core.workspace_members m
              JOIN core.users u ON u.id = m.user_id
@@ -700,6 +701,7 @@ impl Db {
                     workspace_id: row.get("workspace_id"),
                     user_id: row.get("user_id"),
                     role,
+                    role_id: row.get("role_id"),
                     created_at: row.get("created_at"),
                 },
                 squid_core::User {
@@ -1944,6 +1946,116 @@ impl Db {
         .fetch_optional(&self.pool)
         .await?;
         Ok(row.as_ref().map(row_to_role))
+    }
+
+    pub async fn create_role(
+        &self,
+        workspace_id: Uuid,
+        id: Option<Uuid>,
+        input: &RoleWrite,
+    ) -> anyhow::Result<RoleRecord> {
+        self.ensure_roles(workspace_id).await?;
+        let id = id.unwrap_or_else(Uuid::new_v4);
+        let row = sqlx::query(
+            "INSERT INTO core.roles
+                (id, workspace_id, label, description, icon, is_editable,
+                 can_update_all_settings, can_access_all_tools,
+                 can_read_all_object_records, can_update_all_object_records,
+                 can_soft_delete_all_object_records, can_destroy_all_object_records,
+                 can_be_assigned_to_users, can_be_assigned_to_agents,
+                 can_be_assigned_to_api_keys, application_id, universal_identifier)
+             VALUES ($1, $2, $3, $4, $5, true, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+                     $15, $16)
+             RETURNING id, label, description, icon, is_editable, can_update_all_settings,
+                       can_access_all_tools, can_read_all_object_records,
+                       can_update_all_object_records, can_soft_delete_all_object_records,
+                       can_destroy_all_object_records, can_be_assigned_to_users,
+                       can_be_assigned_to_agents, can_be_assigned_to_api_keys,
+                       application_id, universal_identifier",
+        )
+        .bind(id)
+        .bind(workspace_id)
+        .bind(&input.label)
+        .bind(&input.description)
+        .bind(&input.icon)
+        .bind(input.can_update_all_settings)
+        .bind(input.can_access_all_tools)
+        .bind(input.can_read_all_object_records)
+        .bind(input.can_update_all_object_records)
+        .bind(input.can_soft_delete_all_object_records)
+        .bind(input.can_destroy_all_object_records)
+        .bind(input.can_be_assigned_to_users)
+        .bind(input.can_be_assigned_to_agents)
+        .bind(input.can_be_assigned_to_api_keys)
+        .bind(Uuid::nil())
+        .bind(id.to_string())
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row_to_role(&row))
+    }
+
+    pub async fn update_role(
+        &self,
+        workspace_id: Uuid,
+        id: Uuid,
+        patch: &RolePatch,
+    ) -> anyhow::Result<Option<RoleRecord>> {
+        self.ensure_roles(workspace_id).await?;
+        let row = sqlx::query(
+            "UPDATE core.roles SET
+                label = COALESCE($3, label),
+                description = COALESCE($4, description),
+                icon = COALESCE($5, icon),
+                can_update_all_settings = COALESCE($6, can_update_all_settings),
+                can_access_all_tools = COALESCE($7, can_access_all_tools),
+                can_read_all_object_records = COALESCE($8, can_read_all_object_records),
+                can_update_all_object_records = COALESCE($9, can_update_all_object_records),
+                can_soft_delete_all_object_records =
+                    COALESCE($10, can_soft_delete_all_object_records),
+                can_destroy_all_object_records =
+                    COALESCE($11, can_destroy_all_object_records),
+                can_be_assigned_to_users = COALESCE($12, can_be_assigned_to_users),
+                can_be_assigned_to_agents = COALESCE($13, can_be_assigned_to_agents),
+                can_be_assigned_to_api_keys = COALESCE($14, can_be_assigned_to_api_keys),
+                updated_at = now()
+             WHERE workspace_id = $1 AND id = $2 AND is_editable = true
+             RETURNING id, label, description, icon, is_editable, can_update_all_settings,
+                       can_access_all_tools, can_read_all_object_records,
+                       can_update_all_object_records, can_soft_delete_all_object_records,
+                       can_destroy_all_object_records, can_be_assigned_to_users,
+                       can_be_assigned_to_agents, can_be_assigned_to_api_keys,
+                       application_id, universal_identifier",
+        )
+        .bind(workspace_id)
+        .bind(id)
+        .bind(&patch.label)
+        .bind(&patch.description)
+        .bind(&patch.icon)
+        .bind(patch.can_update_all_settings)
+        .bind(patch.can_access_all_tools)
+        .bind(patch.can_read_all_object_records)
+        .bind(patch.can_update_all_object_records)
+        .bind(patch.can_soft_delete_all_object_records)
+        .bind(patch.can_destroy_all_object_records)
+        .bind(patch.can_be_assigned_to_users)
+        .bind(patch.can_be_assigned_to_agents)
+        .bind(patch.can_be_assigned_to_api_keys)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.as_ref().map(row_to_role))
+    }
+
+    pub async fn delete_role(&self, workspace_id: Uuid, id: Uuid) -> anyhow::Result<bool> {
+        self.ensure_roles(workspace_id).await?;
+        let result = sqlx::query(
+            "DELETE FROM core.roles
+             WHERE workspace_id = $1 AND id = $2 AND is_editable = true",
+        )
+        .bind(workspace_id)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
     }
 
     pub async fn update_workspace_member_role(

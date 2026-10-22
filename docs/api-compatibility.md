@@ -159,9 +159,10 @@ id/object/active/system filters. Object and field metadata writes are implemente
 Metadata indexes are persisted and exposed through `createOneIndex`,
 `deleteOneIndex` and `Object.indexMetadataList`; roles are stored in
 `core.roles` and exposed through `getRoles`/`getRole`/`getApiKeyRoles` with
-built-in role seeding and member/API-key assignment. `getPermissionFlags` and
-`mostlyEmptyFieldMetadataIds` exist; custom-role CRUD and permission-flag
-enforcement are absent. Custom objects do **not** yet generate
+built-in role seeding, member/API-key assignment and custom-role CRUD.
+`getPermissionFlags` and `mostlyEmptyFieldMetadataIds` exist; permission-flag
+assignment/enforcement is absent, and custom roles authorize as the legacy
+`MEMBER` enum. Custom objects do **not** yet generate
 physical workspace tables or dynamic GraphQL/REST schemas; relation field
 creation remains unimplemented, and index metadata does not create physical
 PostgreSQL indexes.

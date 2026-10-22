@@ -26,12 +26,13 @@ use squid_core::{
     CursorPagingInput, DateOp, DeleteOneIndexInput, FieldConnection, FieldFilterInput,
     FieldMetadata, FileFolder, FileItemInput, FilterExpr, GqlJson, Links, MaybeUndefined, Note,
     NoteTarget, ObjectConnection, ObjectEdge, ObjectFilterInput, ObjectMetadata, Opportunity,
-    OpportunityStage, PageInfo, Person, RichText, Role, StringOp, Task, TaskStatus, TaskTarget,
-    UpdateCompanyInput, UpdateFieldMetadataInput, UpdateNoteInput, UpdateObjectMetadataInput,
-    UpdateOpportunityInput, UpdatePersonInput, UpdateTaskInput, UpdateViewFieldGroupInput,
-    UpdateViewFieldInput, UpdateViewFilterGroupInput, UpdateViewFilterInput, UpdateViewGroupInput,
-    UpdateViewInput, UpdateViewSortInput, User as CoreUser, UuidOp, View, ViewField,
-    ViewFieldGroup, ViewFilter, ViewFilterGroup, ViewGroup, ViewSort, ViewType,
+    OpportunityStage, PageInfo, Person, RichText, Role, RolePatch, RoleWrite, StringOp, Task,
+    TaskStatus, TaskTarget, UpdateCompanyInput, UpdateFieldMetadataInput, UpdateNoteInput,
+    UpdateObjectMetadataInput, UpdateOpportunityInput, UpdatePersonInput, UpdateTaskInput,
+    UpdateViewFieldGroupInput, UpdateViewFieldInput, UpdateViewFilterGroupInput,
+    UpdateViewFilterInput, UpdateViewGroupInput, UpdateViewInput, UpdateViewSortInput,
+    User as CoreUser, UuidOp, View, ViewField, ViewFieldGroup, ViewFilter, ViewFilterGroup,
+    ViewGroup, ViewSort, ViewType,
 };
 use squid_db::{OrderTerm, PersonColumn};
 use uuid::Uuid;
@@ -168,6 +169,48 @@ pub struct CreateApiKeyInput {
     pub expires_at: String,
     pub revoked_at: Option<String>,
     pub role_id: uuid::Uuid,
+}
+
+#[derive(Debug, InputObject)]
+#[graphql(name = "CreateRoleInput")]
+pub struct CreateRoleInputGql {
+    pub id: Option<String>,
+    pub label: String,
+    pub description: Option<String>,
+    pub icon: Option<String>,
+    pub can_update_all_settings: Option<bool>,
+    pub can_access_all_tools: Option<bool>,
+    pub can_read_all_object_records: Option<bool>,
+    pub can_update_all_object_records: Option<bool>,
+    pub can_soft_delete_all_object_records: Option<bool>,
+    pub can_destroy_all_object_records: Option<bool>,
+    pub can_be_assigned_to_users: Option<bool>,
+    pub can_be_assigned_to_agents: Option<bool>,
+    pub can_be_assigned_to_api_keys: Option<bool>,
+}
+
+#[derive(Debug, InputObject)]
+#[graphql(name = "UpdateRoleInput")]
+pub struct UpdateRoleInputGql {
+    pub update: UpdateRolePayloadGql,
+    pub id: Uuid,
+}
+
+#[derive(Debug, InputObject)]
+#[graphql(name = "UpdateRolePayload")]
+pub struct UpdateRolePayloadGql {
+    pub label: Option<String>,
+    pub description: Option<String>,
+    pub icon: Option<String>,
+    pub can_update_all_settings: Option<bool>,
+    pub can_access_all_tools: Option<bool>,
+    pub can_read_all_object_records: Option<bool>,
+    pub can_update_all_object_records: Option<bool>,
+    pub can_soft_delete_all_object_records: Option<bool>,
+    pub can_destroy_all_object_records: Option<bool>,
+    pub can_be_assigned_to_users: Option<bool>,
+    pub can_be_assigned_to_agents: Option<bool>,
+    pub can_be_assigned_to_api_keys: Option<bool>,
 }
 
 #[derive(Debug, InputObject)]
@@ -1886,6 +1929,30 @@ fn person_filter_matches(
     true
 }
 
+async fn role_map(
+    state: &AppState,
+    workspace_id: Uuid,
+) -> async_graphql::Result<HashMap<Uuid, current_user::RoleGql>> {
+    Ok(state
+        .db
+        .list_roles(workspace_id)
+        .await
+        .map_err(|e| gql_err(AppError::Internal(e)))?
+        .into_iter()
+        .map(|role| (role.id, current_user::RoleGql::from(role)))
+        .collect())
+}
+
+fn apply_member_role(
+    member: &mut current_user::WorkspaceMemberGql,
+    role_id: Option<Uuid>,
+    roles: &HashMap<Uuid, current_user::RoleGql>,
+) {
+    if let Some(role) = role_id.and_then(|id| roles.get(&id)) {
+        member.roles = Some(vec![role.clone()]);
+    }
+}
+
 fn opportunity_needs_companies(filter: &OpportunityFilterInput) -> bool {
     filter.company.is_some()
         || filter
@@ -3348,6 +3415,7 @@ impl QueryRoot {
         let auth = require_auth(ctx)?;
         let state = state(ctx);
         let filter = filter.unwrap_or_default();
+        let roles = role_map(state, auth.workspace_id).await?;
         let mut all = state
             .db
             .list_workspace_members_with_users(auth.workspace_id)
@@ -3356,7 +3424,9 @@ impl QueryRoot {
             .into_iter()
             .map(|(membership, user)| {
                 let role = membership.role;
-                current_user::workspace_member(&membership, &user, role)
+                let mut member = current_user::workspace_member(&membership, &user, role);
+                apply_member_role(&mut member, membership.role_id, &roles);
+                member
             })
             .filter(|member| workspace_member_matches(member, &filter))
             .collect::<Vec<_>>();
@@ -3424,6 +3494,7 @@ impl QueryRoot {
         filter: WorkspaceMemberFilterInput,
     ) -> async_graphql::Result<Option<WorkspaceMemberGql>> {
         let auth = require_auth(ctx)?;
+        let roles = role_map(state(ctx), auth.workspace_id).await?;
         Ok(state(ctx)
             .db
             .list_workspace_members_with_users(auth.workspace_id)
@@ -3432,7 +3503,8 @@ impl QueryRoot {
             .into_iter()
             .find_map(|(membership, user)| {
                 let role = membership.role;
-                let member = current_user::workspace_member(&membership, &user, role);
+                let mut member = current_user::workspace_member(&membership, &user, role);
+                apply_member_role(&mut member, membership.role_id, &roles);
                 workspace_member_matches(&member, &filter).then_some(member)
             }))
     }
@@ -5112,6 +5184,103 @@ impl MutationRoot {
         Ok(ApiKeyToken { token })
     }
 
+    async fn create_one_role(
+        &self,
+        ctx: &Context<'_>,
+        #[graphql(name = "createRoleInput")] input: CreateRoleInputGql,
+    ) -> async_graphql::Result<current_user::RoleGql> {
+        let auth = require_auth(ctx)?;
+        if !auth.role.can_administer() {
+            return Err(gql_err(AppError::Forbidden(
+                "Insufficient permissions".to_string(),
+            )));
+        }
+        let id = input
+            .id
+            .as_deref()
+            .map(Uuid::parse_str)
+            .transpose()
+            .map_err(|_| gql_err(AppError::BadRequest("Invalid role id".to_string())))?;
+        let write = RoleWrite {
+            label: input.label,
+            description: input.description,
+            icon: input.icon,
+            can_update_all_settings: input.can_update_all_settings.unwrap_or(false),
+            can_access_all_tools: input.can_access_all_tools.unwrap_or(true),
+            can_read_all_object_records: input.can_read_all_object_records.unwrap_or(true),
+            can_update_all_object_records: input.can_update_all_object_records.unwrap_or(true),
+            can_soft_delete_all_object_records: input
+                .can_soft_delete_all_object_records
+                .unwrap_or(true),
+            can_destroy_all_object_records: input.can_destroy_all_object_records.unwrap_or(false),
+            can_be_assigned_to_users: input.can_be_assigned_to_users.unwrap_or(true),
+            can_be_assigned_to_agents: input.can_be_assigned_to_agents.unwrap_or(false),
+            can_be_assigned_to_api_keys: input.can_be_assigned_to_api_keys.unwrap_or(true),
+        };
+        state(ctx)
+            .db
+            .create_role(auth.workspace_id, id, &write)
+            .await
+            .map(current_user::RoleGql::from)
+            .map_err(|e| gql_err(AppError::Internal(e)))
+    }
+
+    async fn update_one_role(
+        &self,
+        ctx: &Context<'_>,
+        #[graphql(name = "updateRoleInput")] input: UpdateRoleInputGql,
+    ) -> async_graphql::Result<current_user::RoleGql> {
+        let auth = require_auth(ctx)?;
+        if !auth.role.can_administer() {
+            return Err(gql_err(AppError::Forbidden(
+                "Insufficient permissions".to_string(),
+            )));
+        }
+        let patch = RolePatch {
+            label: input.update.label,
+            description: input.update.description,
+            icon: input.update.icon,
+            can_update_all_settings: input.update.can_update_all_settings,
+            can_access_all_tools: input.update.can_access_all_tools,
+            can_read_all_object_records: input.update.can_read_all_object_records,
+            can_update_all_object_records: input.update.can_update_all_object_records,
+            can_soft_delete_all_object_records: input.update.can_soft_delete_all_object_records,
+            can_destroy_all_object_records: input.update.can_destroy_all_object_records,
+            can_be_assigned_to_users: input.update.can_be_assigned_to_users,
+            can_be_assigned_to_agents: input.update.can_be_assigned_to_agents,
+            can_be_assigned_to_api_keys: input.update.can_be_assigned_to_api_keys,
+        };
+        state(ctx)
+            .db
+            .update_role(auth.workspace_id, input.id, &patch)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .map(current_user::RoleGql::from)
+            .ok_or_else(|| gql_err(AppError::NotFound("Role not found".to_string())))
+    }
+
+    async fn delete_one_role(
+        &self,
+        ctx: &Context<'_>,
+        role_id: Uuid,
+    ) -> async_graphql::Result<String> {
+        let auth = require_auth(ctx)?;
+        if !auth.role.can_administer() {
+            return Err(gql_err(AppError::Forbidden(
+                "Insufficient permissions".to_string(),
+            )));
+        }
+        let deleted = state(ctx)
+            .db
+            .delete_role(auth.workspace_id, role_id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        if !deleted {
+            return Err(gql_err(AppError::NotFound("Role not found".to_string())));
+        }
+        Ok(role_id.to_string())
+    }
+
     async fn update_workspace_member_role(
         &self,
         ctx: &Context<'_>,
@@ -5134,6 +5303,12 @@ impl MutationRoot {
                 "Workspace member or role not found".to_string(),
             )));
         }
+        let role_record = state(ctx)
+            .db
+            .get_role(auth.workspace_id, role_id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Role not found".to_string())))?;
         let members = state(ctx)
             .db
             .list_workspace_members_with_users(auth.workspace_id)
@@ -5142,7 +5317,11 @@ impl MutationRoot {
         members
             .into_iter()
             .find(|(member, _)| member.id == workspace_member_id)
-            .map(|(member, user)| current_user::workspace_member(&member, &user, member.role))
+            .map(|(member, user)| {
+                let mut gql = current_user::workspace_member(&member, &user, member.role);
+                gql.roles = Some(vec![current_user::RoleGql::from(role_record.clone())]);
+                gql
+            })
             .ok_or_else(|| gql_err(AppError::NotFound("Workspace member not found".to_string())))
     }
 
@@ -6414,6 +6593,7 @@ async fn build_current_user(
     let workspace =
         current_user::workspace(&workspace, role, &state.config.frontend_url, member_count);
     let member = current_user::workspace_member(&member, user, role);
+    let roles = role_map(state, workspace_id).await?;
     let all_members = state
         .db
         .list_workspace_members_with_users(workspace_id)
@@ -6422,7 +6602,9 @@ async fn build_current_user(
         .into_iter()
         .map(|(membership, member_user)| {
             let member_role = membership.role;
-            current_user::workspace_member(&membership, &member_user, member_role)
+            let mut gql = current_user::workspace_member(&membership, &member_user, member_role);
+            apply_member_role(&mut gql, membership.role_id, &roles);
+            gql
         })
         .collect::<Vec<_>>();
     let user_workspace = current_user::UserWorkspace {

@@ -6225,6 +6225,63 @@ async fn role_assignment_uses_metadata_roles() {
     assert!(role.body["errors"].is_null(), "errors: {}", role.body);
     assert_eq!(role.body["data"]["getRole"]["label"], "Admin");
     assert_eq!(role.body["data"]["getRole"]["canUpdateAllSettings"], true);
+
+    let custom = send(
+        &app,
+        json_request(
+            "POST",
+            "/metadata",
+            json!({
+                "query": "mutation($input: CreateRoleInput!) { createOneRole(createRoleInput: $input) { id label isEditable } }",
+                "variables": { "input": { "label": "Support", "canBeAssignedToApiKeys": true } }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(custom.status, StatusCode::OK, "body: {}", custom.body);
+    assert!(custom.body["errors"].is_null(), "errors: {}", custom.body);
+    assert_eq!(custom.body["data"]["createOneRole"]["label"], "Support");
+    assert_eq!(custom.body["data"]["createOneRole"]["isEditable"], true);
+    let custom_role_id = custom.body["data"]["createOneRole"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let renamed = send(
+        &app,
+        json_request(
+            "POST",
+            "/metadata",
+            json!({
+                "query": "mutation($input: UpdateRoleInput!) { updateOneRole(updateRoleInput: $input) { id label } }",
+                "variables": { "input": { "id": custom_role_id, "update": { "label": "Support Plus" } } }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert!(renamed.body["errors"].is_null(), "errors: {}", renamed.body);
+    assert_eq!(
+        renamed.body["data"]["updateOneRole"]["label"],
+        "Support Plus"
+    );
+
+    let deleted = send(
+        &app,
+        json_request(
+            "POST",
+            "/metadata",
+            json!({
+                "query": "mutation($id: UUID!) { deleteOneRole(roleId: $id) }",
+                "variables": { "id": custom_role_id }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert!(deleted.body["errors"].is_null(), "errors: {}", deleted.body);
+    assert_eq!(deleted.body["data"]["deleteOneRole"], custom_role_id);
 }
 
 #[tokio::test]

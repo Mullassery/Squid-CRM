@@ -91,6 +91,7 @@ pub struct WorkspaceMember {
     pub workspace_id: Uuid,
     pub user_id: Uuid,
     pub role: Role,
+    pub role_id: Option<Uuid>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 

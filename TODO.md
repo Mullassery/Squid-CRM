@@ -108,8 +108,10 @@
       view filter group CRUD and `getViewFieldGroups`/`getViewFilterGroups`.
 - [x] Built-in role metadata (`core.roles`) and role assignment:
       `updateWorkspaceMemberRole`, `assignRoleToApiKey`, `getApiKeyRoles`.
-- [ ] Custom role CRUD, permission-flag assignment/enforcement and
-      metadata-driven dynamic schema generation.
+- [x] Custom role CRUD (`createOneRole`/`updateOneRole`/`deleteOneRole`) with
+      immutable built-in roles.
+- [ ] Permission-flag assignment/enforcement and metadata-driven dynamic schema
+      generation.
 - [ ] Custom-object physical tables and dynamic GraphQL/REST schema/relation
       field creation (metadata writes currently persist metadata only).
 - [x] `currentUser`/`currentWorkspace` full frontend boot fragment (ADR 0005;
