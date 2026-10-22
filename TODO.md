@@ -118,9 +118,12 @@
       enterprise surfaces are explicit empty/static defaults).
 - [x] `workspaceMembers`/`workspaceMember` GraphQL queries with filters,
       ordering and pageInfo; boot `workspaceMembers` now lists every member.
-- [ ] Role/permission enforcement, billing/SSO data, feature flags, and
-      `ApiKey.role` as the upstream `Role` object (built-in role queries and
-      assignment exist; `ApiKey.role` remains the legacy enum).
+- [x] Admin guard on object/field metadata writes and role/webhook settings
+      mutations (non-admin callers receive `FORBIDDEN`).
+- [ ] Permission-flag enforcement across views/files/data operations,
+      billing/SSO data, feature flags, and `ApiKey.role` as the upstream `Role`
+      object (built-in role queries and assignment exist; `ApiKey.role` remains
+      the legacy enum).
 - [x] REST target routes, target updates/batches, and nested target record resolution (`TaskTarget.targetCompany` etc.).
 - [x] Scalar ordering parity (`orderBy` + REST `order_by`) for company,
       opportunity, task, note and task/note targets; relation ordering pending.
@@ -139,7 +142,10 @@
 - [ ] Search filter input (`ObjectRecordFilterInput`) semantics, export/import;
       local file upload exists for attachments/avatars but no object-storage
       backend.
-- [ ] Jobs/cron, webhooks, workflows, integrations.
+- [x] Webhook settings CRUD (`webhooks`/`webhook`,
+      `createWebhook`/`updateWebhook`/`deleteWebhook`); delivery workers are not
+      implemented.
+- [ ] Jobs/cron, webhook delivery, workflows, integrations.
 
 ## Phase 6-8
 - [ ] Threat model (`docs/threat-model.md`).

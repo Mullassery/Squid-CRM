@@ -29,7 +29,7 @@ use squid_core::{
     ViewFilter, ViewFilterGroup, ViewFilterGroupLogicalOperator, ViewFilterOperand, ViewGroup,
     ViewKey, ViewOpenRecordIn, ViewSort, ViewSortDirection, ViewType, ViewVisibility, Workspace,
 };
-use squid_core::{RolePatch, RoleRecord, RoleWrite};
+use squid_core::{RolePatch, RoleRecord, RoleWrite, WebhookRecord};
 use uuid::Uuid;
 
 const CORE_SCHEMA_SQL: &str = include_str!("../migrations/core/0001_core.sql");
@@ -52,6 +52,7 @@ const CORE_REFRESH_TOKENS_SQL: &str = include_str!("../migrations/core/0005_refr
 const CORE_FILES_SQL: &str = include_str!("../migrations/core/0006_files.sql");
 const CORE_INDEXES_SQL: &str = include_str!("../migrations/core/0007_indexes.sql");
 const CORE_ROLES_SQL: &str = include_str!("../migrations/core/0008_roles.sql");
+const CORE_WEBHOOKS_SQL: &str = include_str!("../migrations/core/0009_webhooks.sql");
 
 #[derive(Clone)]
 pub struct Db {
@@ -397,6 +398,7 @@ impl Db {
             CORE_FILES_SQL,
             CORE_INDEXES_SQL,
             CORE_ROLES_SQL,
+            CORE_WEBHOOKS_SQL,
         ] {
             result = sqlx::raw_sql(ddl).execute(&mut *conn).await.map(|_| ());
             if result.is_err() {
@@ -1843,6 +1845,118 @@ impl Db {
 
         tx.commit().await?;
         Ok(())
+    }
+
+    pub async fn list_webhooks(&self, workspace_id: Uuid) -> anyhow::Result<Vec<WebhookRecord>> {
+        let rows = sqlx::query(
+            "SELECT id, target_url, operations, description, secret, application_id,
+                    created_at, updated_at, deleted_at
+             FROM core.webhooks
+             WHERE workspace_id = $1 AND deleted_at IS NULL
+             ORDER BY created_at ASC, id ASC",
+        )
+        .bind(workspace_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.iter().map(row_to_webhook).collect())
+    }
+
+    pub async fn get_webhook(
+        &self,
+        workspace_id: Uuid,
+        id: Uuid,
+    ) -> anyhow::Result<Option<WebhookRecord>> {
+        let row = sqlx::query(
+            "SELECT id, target_url, operations, description, secret, application_id,
+                    created_at, updated_at, deleted_at
+             FROM core.webhooks
+             WHERE workspace_id = $1 AND id = $2 AND deleted_at IS NULL",
+        )
+        .bind(workspace_id)
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.as_ref().map(row_to_webhook))
+    }
+
+    pub async fn create_webhook(
+        &self,
+        workspace_id: Uuid,
+        id: Option<Uuid>,
+        target_url: &str,
+        operations: &[String],
+        description: Option<&str>,
+        secret: Option<&str>,
+    ) -> anyhow::Result<WebhookRecord> {
+        let secret = secret
+            .map(ToString::to_string)
+            .unwrap_or_else(|| Uuid::new_v4().simple().to_string());
+        let row = sqlx::query(
+            "INSERT INTO core.webhooks
+                (id, workspace_id, target_url, operations, description, secret, application_id)
+             VALUES (COALESCE($1, gen_random_uuid()), $2, $3, $4, $5, $6, $7)
+             RETURNING id, target_url, operations, description, secret, application_id,
+                       created_at, updated_at, deleted_at",
+        )
+        .bind(id)
+        .bind(workspace_id)
+        .bind(target_url)
+        .bind(operations)
+        .bind(description)
+        .bind(secret)
+        .bind(Uuid::nil())
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row_to_webhook(&row))
+    }
+
+    pub async fn update_webhook(
+        &self,
+        workspace_id: Uuid,
+        id: Uuid,
+        target_url: Option<&str>,
+        operations: Option<&[String]>,
+        description: Option<&str>,
+        secret: Option<&str>,
+    ) -> anyhow::Result<Option<WebhookRecord>> {
+        let row = sqlx::query(
+            "UPDATE core.webhooks SET
+                target_url = COALESCE($3, target_url),
+                operations = COALESCE($4, operations),
+                description = COALESCE($5, description),
+                secret = COALESCE($6, secret),
+                updated_at = now()
+             WHERE workspace_id = $1 AND id = $2 AND deleted_at IS NULL
+             RETURNING id, target_url, operations, description, secret, application_id,
+                       created_at, updated_at, deleted_at",
+        )
+        .bind(workspace_id)
+        .bind(id)
+        .bind(target_url)
+        .bind(operations)
+        .bind(description)
+        .bind(secret)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.as_ref().map(row_to_webhook))
+    }
+
+    pub async fn delete_webhook(
+        &self,
+        workspace_id: Uuid,
+        id: Uuid,
+    ) -> anyhow::Result<Option<WebhookRecord>> {
+        let row = sqlx::query(
+            "UPDATE core.webhooks SET deleted_at = now(), updated_at = now()
+             WHERE workspace_id = $1 AND id = $2 AND deleted_at IS NULL
+             RETURNING id, target_url, operations, description, secret, application_id,
+                       created_at, updated_at, deleted_at",
+        )
+        .bind(workspace_id)
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.as_ref().map(row_to_webhook))
     }
 
     pub async fn ensure_roles(&self, workspace_id: Uuid) -> anyhow::Result<()> {
@@ -6899,6 +7013,20 @@ fn row_to_object(row: &sqlx::postgres::PgRow) -> anyhow::Result<ObjectMetadata> 
         index_metadata: Vec::new(),
         search_field_metadata: Vec::new(),
     })
+}
+
+fn row_to_webhook(row: &sqlx::postgres::PgRow) -> WebhookRecord {
+    WebhookRecord {
+        id: row.get("id"),
+        target_url: row.get("target_url"),
+        operations: row.get("operations"),
+        description: row.get("description"),
+        secret: row.get("secret"),
+        application_id: row.get("application_id"),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+        deleted_at: row.get("deleted_at"),
+    }
 }
 
 fn row_to_role(row: &sqlx::postgres::PgRow) -> RoleRecord {

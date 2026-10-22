@@ -16,7 +16,7 @@ Operation coverage: `docs/frontend-operation-map.md`, `docs/rest-route-map.md`.
 | Auth: SAML/OIDC/SSO | `sso`, `auth/strategies/saml*`, `oidc*` | — | excluded (licence) | n/a | `@license Enterprise` |
 | User | `core-modules/user` | `squid-db`/`squid-api` | partial | boot integration test | email/password user only |
 | Workspace & members | `core-modules/workspace`, `workspace-invitation`, `workspace-member` | `squid-db`/`squid-api` | partial | tenant isolation, `workspace_members_query_and_boot_list` | bootstrap, members query, activation simplified; invitations pending |
-| Roles & permissions (RBAC) | `metadata-modules/role*`, object/field permissions | `squid-auth`/`squid-db` | partial | role assignment integration test | built-in roles metadata-backed with member/API-key assignment; custom roles, object/field/row permissions pending |
+| Roles & permissions (RBAC) | `metadata-modules/role*`, object/field permissions | `squid-auth`/`squid-db` | partial | role CRUD/assignment tests, forbidden metadata-write test | built-in/custom roles with member/API-key assignment; permission flags, object/field/row permissions pending |
 | Row-level permission predicates | `metadata-modules/row-level-permission-predicate*` | — | not-started | | |
 | Object metadata (custom objects) | `metadata-modules/object-metadata` | `squid-db`/`squid-api` | partial | metadata integration tests | read/write rows; no physical tables or dynamic schema |
 | Field metadata (custom fields) | `metadata-modules/field-metadata` | `squid-db`/`squid-api` | partial | metadata integration tests | read/write rows; relation fields rejected |
@@ -38,7 +38,7 @@ Operation coverage: `docs/frontend-operation-map.md`, `docs/rest-route-map.md`.
 | Email (Gmail/Graph/IMAP/SMTP) | `core-modules/email`, `messaging` | — | not-started | | |
 | Calendar | `core-modules/calendar`, `src/modules/calendar` | — | not-started | | |
 | Connected accounts | `metadata-modules/connected-account`, `connection-provider` | — | not-started | | |
-| Webhooks | `metadata-modules/webhook`, `workspace-event-emitter` | — | not-started | | metadata REST route missing |
+| Webhooks | `metadata-modules/webhook`, `workspace-event-emitter` | `squid-db`/`squid-api` | partial | webhook CRUD integration test | metadata CRUD implemented; delivery/event emission and REST route pending |
 | Background jobs / cron | `src/queue-worker`, `core-modules/message-queue`, `cron` | — | not-started | | Redis/BullMQ parity |
 | Workflows | `metadata-modules/workflow*`, `src/modules/workflow` | — | not-started | 36 static data documents MISSING | large area |
 | Logic functions | `core-modules/logic-function` | — | not-started | | |

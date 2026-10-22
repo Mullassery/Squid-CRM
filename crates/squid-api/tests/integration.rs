@@ -6135,6 +6135,130 @@ async fn object_updates_clear_nullable_fields() {
 }
 
 #[tokio::test]
+async fn webhook_crud_matches_metadata_contract() {
+    let app = test_app().await;
+    let email = unique_email("webhooks");
+    let (token, _workspace) = signup_with_access(&app, &email).await;
+
+    let created = send(
+        &app,
+        json_request(
+            "POST",
+            "/metadata",
+            json!({
+                "query": "mutation($input: CreateWebhookInput!) { createWebhook(input: $input) { id targetUrl operations description secret applicationId createdAt } }",
+                "variables": {
+                    "input": {
+                        "targetUrl": "https://example.com/hook",
+                        "operations": ["person.created", "company.updated"],
+                        "description": "Test hook"
+                    }
+                }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(created.status, StatusCode::OK, "body: {}", created.body);
+    assert!(created.body["errors"].is_null(), "errors: {}", created.body);
+    let webhook = &created.body["data"]["createWebhook"];
+    let webhook_id = webhook["id"].as_str().unwrap().to_string();
+    assert_eq!(webhook["targetUrl"], "https://example.com/hook");
+    assert_eq!(webhook["operations"][0], "person.created");
+    assert_eq!(webhook["description"], "Test hook");
+    assert!(webhook["secret"].as_str().unwrap().len() >= 16);
+
+    let listed = send(
+        &app,
+        json_request(
+            "POST",
+            "/metadata",
+            json!({ "query": "{ webhooks { id targetUrl operations } }" }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert!(listed.body["errors"].is_null(), "errors: {}", listed.body);
+    assert_eq!(listed.body["data"]["webhooks"].as_array().unwrap().len(), 1);
+
+    let fetched = send(
+        &app,
+        json_request(
+            "POST",
+            "/metadata",
+            json!({
+                "query": "query($id: UUID!) { webhook(id: $id) { id targetUrl } }",
+                "variables": { "id": webhook_id }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert!(fetched.body["errors"].is_null(), "errors: {}", fetched.body);
+    assert_eq!(fetched.body["data"]["webhook"]["id"], webhook_id);
+
+    let updated = send(
+        &app,
+        json_request(
+            "POST",
+            "/metadata",
+            json!({
+                "query": "mutation($input: UpdateWebhookInput!) { updateWebhook(input: $input) { id targetUrl operations } }",
+                "variables": {
+                    "input": {
+                        "id": webhook_id,
+                        "update": { "targetUrl": "https://example.com/hook2", "operations": ["person.updated"] }
+                    }
+                }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert!(updated.body["errors"].is_null(), "errors: {}", updated.body);
+    assert_eq!(
+        updated.body["data"]["updateWebhook"]["targetUrl"],
+        "https://example.com/hook2"
+    );
+    assert_eq!(
+        updated.body["data"]["updateWebhook"]["operations"][0],
+        "person.updated"
+    );
+
+    let deleted = send(
+        &app,
+        json_request(
+            "POST",
+            "/metadata",
+            json!({
+                "query": "mutation($id: UUID!) { deleteWebhook(id: $id) { id deletedAt } }",
+                "variables": { "id": webhook_id }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert!(deleted.body["errors"].is_null(), "errors: {}", deleted.body);
+    assert!(deleted.body["data"]["deleteWebhook"]["deletedAt"].is_string());
+
+    let empty = send(
+        &app,
+        json_request(
+            "POST",
+            "/metadata",
+            json!({ "query": "{ webhooks { id } }" }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert!(empty.body["errors"].is_null(), "errors: {}", empty.body);
+    assert!(empty.body["data"]["webhooks"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+}
+
+#[tokio::test]
 async fn role_assignment_uses_metadata_roles() {
     let app = test_app().await;
     let email = unique_email("roles");
@@ -6282,6 +6406,46 @@ async fn role_assignment_uses_metadata_roles() {
     .await;
     assert!(deleted.body["errors"].is_null(), "errors: {}", deleted.body);
     assert_eq!(deleted.body["data"]["deleteOneRole"], custom_role_id);
+
+    let member_role_id = role_list
+        .iter()
+        .find(|role| role["label"] == "Member")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let demoted = send(
+        &app,
+        json_request(
+            "POST",
+            "/metadata",
+            json!({
+                "query": "mutation($memberId: UUID!, $roleId: UUID!) { updateWorkspaceMemberRole(workspaceMemberId: $memberId, roleId: $roleId) { id roles { label } } }",
+                "variables": { "memberId": member_id, "roleId": member_role_id }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert!(demoted.body["errors"].is_null(), "errors: {}", demoted.body);
+
+    let forbidden = send(
+        &app,
+        json_request(
+            "POST",
+            "/metadata",
+            json!({
+                "query": "mutation { createOneRole(createRoleInput: { label: \"Nope\" }) { id } }"
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert_eq!(forbidden.status, StatusCode::OK);
+    assert_eq!(
+        forbidden.body["errors"][0]["extensions"]["code"],
+        "FORBIDDEN"
+    );
 }
 
 #[tokio::test]

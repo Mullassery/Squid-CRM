@@ -109,6 +109,20 @@ pub struct ApiKey {
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
+#[derive(Debug, Clone, async_graphql::SimpleObject)]
+#[graphql(name = "Webhook")]
+pub struct WebhookRecord {
+    pub id: Uuid,
+    pub target_url: String,
+    pub operations: Vec<String>,
+    pub description: Option<String>,
+    pub secret: String,
+    pub application_id: Uuid,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+    pub deleted_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
 /// Composite `FullNameMetadata` shape used by upstream for `person.name`.
 #[derive(
     Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, async_graphql::SimpleObject,

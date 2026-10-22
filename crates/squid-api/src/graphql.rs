@@ -32,7 +32,7 @@ use squid_core::{
     UpdateViewFieldGroupInput, UpdateViewFieldInput, UpdateViewFilterGroupInput,
     UpdateViewFilterInput, UpdateViewGroupInput, UpdateViewInput, UpdateViewSortInput,
     User as CoreUser, UuidOp, View, ViewField, ViewFieldGroup, ViewFilter, ViewFilterGroup,
-    ViewGroup, ViewSort, ViewType,
+    ViewGroup, ViewSort, ViewType, WebhookRecord,
 };
 use squid_db::{OrderTerm, PersonColumn};
 use uuid::Uuid;
@@ -211,6 +211,32 @@ pub struct UpdateRolePayloadGql {
     pub can_be_assigned_to_users: Option<bool>,
     pub can_be_assigned_to_agents: Option<bool>,
     pub can_be_assigned_to_api_keys: Option<bool>,
+}
+
+#[derive(Debug, InputObject)]
+#[graphql(name = "CreateWebhookInput")]
+pub struct CreateWebhookInputGql {
+    pub id: Option<Uuid>,
+    pub target_url: String,
+    pub operations: Vec<String>,
+    pub description: Option<String>,
+    pub secret: Option<String>,
+}
+
+#[derive(Debug, InputObject)]
+#[graphql(name = "UpdateWebhookInput")]
+pub struct UpdateWebhookInputGql {
+    pub id: Uuid,
+    pub update: UpdateWebhookInputUpdatesGql,
+}
+
+#[derive(Debug, InputObject)]
+#[graphql(name = "UpdateWebhookInputUpdates")]
+pub struct UpdateWebhookInputUpdatesGql {
+    pub target_url: Option<String>,
+    pub operations: Option<Vec<String>>,
+    pub description: Option<String>,
+    pub secret: Option<String>,
 }
 
 #[derive(Debug, InputObject)]
@@ -1746,6 +1772,16 @@ fn require_auth<'a>(ctx: &'a Context<'_>) -> async_graphql::Result<&'a AuthConte
     })
 }
 
+fn require_admin<'a>(ctx: &'a Context<'_>) -> async_graphql::Result<&'a AuthContext> {
+    let auth = require_auth(ctx)?;
+    if !auth.role.can_administer() {
+        return Err(gql_err(AppError::Forbidden(
+            "Insufficient permissions".to_string(),
+        )));
+    }
+    Ok(auth)
+}
+
 fn string_op_matches(ops: &[StringOp], actual: Option<&str>) -> bool {
     let actual = actual.unwrap_or_default();
     ops.iter().all(|op| match op {
@@ -3028,6 +3064,28 @@ impl QueryRoot {
             &state.config.frontend_url,
             count,
         )))
+    }
+
+    async fn webhooks(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<WebhookRecord>> {
+        let auth = require_auth(ctx)?;
+        state(ctx)
+            .db
+            .list_webhooks(auth.workspace_id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))
+    }
+
+    async fn webhook(
+        &self,
+        ctx: &Context<'_>,
+        id: Uuid,
+    ) -> async_graphql::Result<Option<WebhookRecord>> {
+        let auth = require_auth(ctx)?;
+        state(ctx)
+            .db
+            .get_webhook(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))
     }
 
     async fn get_roles(
@@ -4823,7 +4881,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         input: CreateOneObjectInput,
     ) -> async_graphql::Result<ObjectMetadata> {
-        let auth = require_auth(ctx)?;
+        let auth = require_admin(ctx)?;
         let state = state(ctx);
         let object = input.object;
         if object.name_singular.trim().is_empty() || object.name_plural.trim().is_empty() {
@@ -4856,7 +4914,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         input: UpdateOneObjectInput,
     ) -> async_graphql::Result<ObjectMetadata> {
-        let auth = require_auth(ctx)?;
+        let auth = require_admin(ctx)?;
         state(ctx)
             .db
             .update_metadata_object(auth.workspace_id, input.id, &input.update)
@@ -4870,7 +4928,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         input: DeleteOneObjectInput,
     ) -> async_graphql::Result<ObjectMetadata> {
-        let auth = require_auth(ctx)?;
+        let auth = require_admin(ctx)?;
         let state = state(ctx);
         let object = state
             .db
@@ -4896,7 +4954,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         input: CreateOneFieldMetadataInput,
     ) -> async_graphql::Result<FieldMetadata> {
-        let auth = require_auth(ctx)?;
+        let auth = require_admin(ctx)?;
         let state = state(ctx);
         let field = input.field;
         if field.name.trim().is_empty() {
@@ -4943,7 +5001,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         input: UpdateOneFieldMetadataInput,
     ) -> async_graphql::Result<FieldMetadata> {
-        let auth = require_auth(ctx)?;
+        let auth = require_admin(ctx)?;
         state(ctx)
             .db
             .update_metadata_field(auth.workspace_id, input.id, &input.update)
@@ -4957,7 +5015,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         input: DeleteOneFieldInput,
     ) -> async_graphql::Result<FieldMetadata> {
-        let auth = require_auth(ctx)?;
+        let auth = require_admin(ctx)?;
         let state = state(ctx);
         let field = state
             .db
@@ -5182,6 +5240,76 @@ impl MutationRoot {
             .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))?;
 
         Ok(ApiKeyToken { token })
+    }
+
+    async fn create_webhook(
+        &self,
+        ctx: &Context<'_>,
+        input: CreateWebhookInputGql,
+    ) -> async_graphql::Result<WebhookRecord> {
+        let auth = require_auth(ctx)?;
+        if !auth.role.can_administer() {
+            return Err(gql_err(AppError::Forbidden(
+                "Insufficient permissions".to_string(),
+            )));
+        }
+        state(ctx)
+            .db
+            .create_webhook(
+                auth.workspace_id,
+                input.id,
+                &input.target_url,
+                &input.operations,
+                input.description.as_deref(),
+                input.secret.as_deref(),
+            )
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))
+    }
+
+    async fn update_webhook(
+        &self,
+        ctx: &Context<'_>,
+        input: UpdateWebhookInputGql,
+    ) -> async_graphql::Result<WebhookRecord> {
+        let auth = require_auth(ctx)?;
+        if !auth.role.can_administer() {
+            return Err(gql_err(AppError::Forbidden(
+                "Insufficient permissions".to_string(),
+            )));
+        }
+        state(ctx)
+            .db
+            .update_webhook(
+                auth.workspace_id,
+                input.id,
+                input.update.target_url.as_deref(),
+                input.update.operations.as_deref(),
+                input.update.description.as_deref(),
+                input.update.secret.as_deref(),
+            )
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Webhook not found".to_string())))
+    }
+
+    async fn delete_webhook(
+        &self,
+        ctx: &Context<'_>,
+        id: Uuid,
+    ) -> async_graphql::Result<WebhookRecord> {
+        let auth = require_auth(ctx)?;
+        if !auth.role.can_administer() {
+            return Err(gql_err(AppError::Forbidden(
+                "Insufficient permissions".to_string(),
+            )));
+        }
+        state(ctx)
+            .db
+            .delete_webhook(auth.workspace_id, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Webhook not found".to_string())))
     }
 
     async fn create_one_role(
