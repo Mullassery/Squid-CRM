@@ -3523,6 +3523,61 @@ pub async fn custom_rest_fallback(
         return Err(AppError::NotFound("Object not found".to_string()));
     }
 
+    if method == axum::http::Method::POST && id_segment == Some("upsert") {
+        let auth = require_capability(&state, &headers, Capability::Update).await?;
+        let payload: serde_json::Value = serde_json::from_slice(&body)
+            .map_err(|_| AppError::BadRequest("Invalid JSON body".to_string()))?;
+        let records = payload
+            .as_array()
+            .cloned()
+            .or_else(|| {
+                payload
+                    .get("records")
+                    .and_then(|value| value.as_array())
+                    .cloned()
+            })
+            .ok_or_else(|| {
+                AppError::BadRequest("Expected a JSON array or { records: [...] }".to_string())
+            })?;
+        let mut upserted = Vec::new();
+        for record in records {
+            let id = record
+                .get("id")
+                .and_then(|value| value.as_str())
+                .map(|value| {
+                    Uuid::parse_str(value)
+                        .map_err(|_| AppError::BadRequest("Invalid record id".to_string()))
+                })
+                .transpose()?;
+            let values = custom_values(&object, &record);
+            let result = if let Some(id) = id {
+                state
+                    .db
+                    .update_custom_record(auth.workspace_id, &object.name_singular, id, &values)
+                    .await
+                    .map_err(AppError::Internal)?
+            } else {
+                if values.is_empty() {
+                    continue;
+                }
+                Some(
+                    state
+                        .db
+                        .create_custom_record(auth.workspace_id, &object.name_singular, &values)
+                        .await
+                        .map_err(AppError::Internal)?,
+                )
+            };
+            if let Some(result) = result {
+                upserted.push(result);
+            }
+        }
+        let mut data = BTreeMap::new();
+        let count = upserted.len();
+        data.insert(object.name_plural.clone(), upserted);
+        return Ok(Json(json!({ "data": data, "upserted": count })).into_response());
+    }
+
     if method == axum::http::Method::POST && id_segment == Some("import") {
         let auth = require_capability(&state, &headers, Capability::Update).await?;
         let (columns, rows) = csv_import_rows(&body)?;

@@ -4495,6 +4495,63 @@ async fn rest_filter_grammar_for_companies_and_tasks() {
 }
 
 #[tokio::test]
+async fn custom_object_batch_upsert_updates_and_creates() {
+    let app = test_app().await;
+    let (token, _) = signup(&app, &unique_email("custom-upsert")).await;
+    let created = send(
+        &app,
+        authorized(
+            "POST",
+            "/graphql",
+            &token,
+            Some(json!({
+                "query": "mutation { createOneObject(input: { object: { nameSingular: \"asset\", namePlural: \"assets\", labelSingular: \"Asset\", labelPlural: \"Assets\", icon: \"IconBox\" } }) { id } }"
+            })),
+        ),
+    )
+    .await;
+    assert!(created.body["errors"].is_null(), "errors: {}", created.body);
+
+    let first = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/assets/upsert",
+            &token,
+            Some(json!([{ "name": "Asset A" }, { "name": "Asset B" }])),
+        ),
+    )
+    .await;
+    assert_eq!(first.status, StatusCode::OK, "body: {}", first.body);
+    assert_eq!(first.body["upserted"], 2);
+    assert_eq!(first.body["data"]["assets"].as_array().unwrap().len(), 2);
+    let asset_a = first.body["data"]["assets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|asset| asset["name"] == "Asset A")
+        .unwrap();
+    let asset_id = asset_a["id"].as_str().unwrap().to_string();
+
+    let updated = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/assets/upsert",
+            &token,
+            Some(json!([{ "id": asset_id, "name": "Asset A2" }])),
+        ),
+    )
+    .await;
+    assert_eq!(updated.status, StatusCode::OK, "body: {}", updated.body);
+    assert_eq!(updated.body["upserted"], 1);
+    assert_eq!(updated.body["data"]["assets"][0]["name"], "Asset A2");
+
+    let listed = send(&app, authorized("GET", "/rest/assets", &token, None)).await;
+    assert_eq!(listed.body["totalCount"], 2);
+}
+
+#[tokio::test]
 async fn metadata_object_and_field_writes() {
     let app = test_app().await;
     let email = unique_email("metadata-writes");
