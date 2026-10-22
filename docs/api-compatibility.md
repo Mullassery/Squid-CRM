@@ -161,9 +161,9 @@ Metadata indexes are persisted and exposed through `createOneIndex`,
 `core.roles` and exposed through `getRoles`/`getRole`/`getApiKeyRoles` with
 built-in role seeding, member/API-key assignment and custom-role CRUD.
 `getPermissionFlags`, `upsertPermissionFlags` and
-`mostlyEmptyFieldMetadataIds` exist; view writes enforce the `VIEWS` role flag,
-but file/data permission enforcement is absent and custom roles authorize as
-the legacy `MEMBER` enum. Custom objects do **not** yet generate
+`mostlyEmptyFieldMetadataIds` exist; view writes enforce the `VIEWS` role flag and REST data routes enforce the
+role's read/update/soft-delete/destroy capabilities; GraphQL data, file flags
+and custom-role authorization beyond the legacy enum remain open. Custom objects do **not** yet generate
 physical workspace tables or dynamic GraphQL/REST schemas; relation field
 creation remains unimplemented, and index metadata does not create physical
 PostgreSQL indexes.

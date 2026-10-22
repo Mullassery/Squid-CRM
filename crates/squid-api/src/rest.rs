@@ -328,7 +328,7 @@ pub async fn list_people(
     headers: HeaderMap,
     Query(params): Query<ListPeopleParams>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Read).await?;
     params.shape.validate()?;
 
     let limit = params
@@ -392,7 +392,7 @@ pub async fn get_person(
     Path(id): Path<Uuid>,
     Query(shape): Query<ResponseShape>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Read).await?;
     shape.validate()?;
 
     let person = state
@@ -413,7 +413,7 @@ pub async fn create_person(
     Query(shape): Query<ResponseShape>,
     Json(input): Json<CreatePersonInput>,
 ) -> AppResult<(axum::http::StatusCode, Json<serde_json::Value>)> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Update).await?;
     shape.validate()?;
     validate_person(&input)?;
 
@@ -435,7 +435,7 @@ pub async fn update_person(
     Query(shape): Query<ResponseShape>,
     Json(input): Json<UpdatePersonInput>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Update).await?;
     shape.validate()?;
 
     let person = state
@@ -457,6 +457,16 @@ pub async fn delete_person(
     Query(params): Query<DeletePersonParams>,
 ) -> AppResult<Json<serde_json::Value>> {
     let auth = require(&state, &headers).await?;
+    let capability = if params.soft_delete {
+        Capability::SoftDelete
+    } else {
+        Capability::Destroy
+    };
+    if !role_can(&state, &auth, capability).await? {
+        return Err(AppError::Forbidden(
+            "You do not have permission to perform this action".to_string(),
+        ));
+    }
 
     let deleted = if params.soft_delete {
         state
@@ -485,7 +495,7 @@ pub async fn restore_person(
     Path(id): Path<Uuid>,
     Query(shape): Query<ResponseShape>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Update).await?;
     shape.validate()?;
 
     let person = state
@@ -517,7 +527,7 @@ pub async fn list_companies(
     headers: HeaderMap,
     Query(params): Query<ListCompaniesParams>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Read).await?;
     params.shape.validate()?;
     let filter = params
         .filter
@@ -647,7 +657,7 @@ pub async fn get_company(
     Path(id): Path<Uuid>,
     Query(shape): Query<ResponseShape>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Read).await?;
     shape.validate()?;
     let company = state
         .db
@@ -666,7 +676,7 @@ pub async fn create_company(
     Query(shape): Query<ResponseShape>,
     Json(input): Json<CreateCompanyInput>,
 ) -> AppResult<(axum::http::StatusCode, Json<serde_json::Value>)> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Update).await?;
     shape.validate()?;
     let company = state
         .db
@@ -689,7 +699,7 @@ pub async fn update_company(
     Query(shape): Query<ResponseShape>,
     Json(input): Json<UpdateCompanyInput>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Update).await?;
     shape.validate()?;
     let company = state
         .db
@@ -713,6 +723,16 @@ pub async fn delete_company(
     Query(params): Query<DeletePersonParams>,
 ) -> AppResult<Json<serde_json::Value>> {
     let auth = require(&state, &headers).await?;
+    let capability = if params.soft_delete {
+        Capability::SoftDelete
+    } else {
+        Capability::Destroy
+    };
+    if !role_can(&state, &auth, capability).await? {
+        return Err(AppError::Forbidden(
+            "You do not have permission to perform this action".to_string(),
+        ));
+    }
     let deleted = if params.soft_delete {
         state
             .db
@@ -738,7 +758,7 @@ pub async fn restore_company(
     Path(id): Path<Uuid>,
     Query(shape): Query<ResponseShape>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Update).await?;
     shape.validate()?;
     let company = state
         .db
@@ -772,7 +792,7 @@ pub async fn list_opportunities(
     headers: HeaderMap,
     Query(params): Query<ListOpportunitiesParams>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Read).await?;
     params.shape.validate()?;
     let filter = params
         .filter
@@ -965,7 +985,7 @@ pub async fn get_opportunity(
     Path(id): Path<Uuid>,
     Query(shape): Query<ResponseShape>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Read).await?;
     shape.validate()?;
     let opportunity = state
         .db
@@ -988,7 +1008,7 @@ pub async fn create_opportunity(
     Query(shape): Query<ResponseShape>,
     Json(input): Json<CreateOpportunityInput>,
 ) -> AppResult<(axum::http::StatusCode, Json<serde_json::Value>)> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Update).await?;
     shape.validate()?;
     let opportunity = state
         .db
@@ -1011,7 +1031,7 @@ pub async fn update_opportunity(
     Query(shape): Query<ResponseShape>,
     Json(input): Json<UpdateOpportunityInput>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Update).await?;
     shape.validate()?;
     let opportunity = state
         .db
@@ -1035,6 +1055,16 @@ pub async fn delete_opportunity(
     Query(params): Query<DeletePersonParams>,
 ) -> AppResult<Json<serde_json::Value>> {
     let auth = require(&state, &headers).await?;
+    let capability = if params.soft_delete {
+        Capability::SoftDelete
+    } else {
+        Capability::Destroy
+    };
+    if !role_can(&state, &auth, capability).await? {
+        return Err(AppError::Forbidden(
+            "You do not have permission to perform this action".to_string(),
+        ));
+    }
     let deleted = if params.soft_delete {
         state
             .db
@@ -1062,7 +1092,7 @@ pub async fn restore_opportunity(
     Path(id): Path<Uuid>,
     Query(shape): Query<ResponseShape>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Update).await?;
     shape.validate()?;
     let opportunity = state
         .db
@@ -1084,7 +1114,7 @@ pub async fn list_tasks(
     headers: HeaderMap,
     Query(params): Query<ListOpportunitiesParams>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Read).await?;
     params.shape.validate()?;
     let filter = params
         .filter
@@ -1205,7 +1235,7 @@ pub async fn get_task(
     Path(id): Path<Uuid>,
     Query(shape): Query<ResponseShape>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Read).await?;
     shape.validate()?;
     let task = state
         .db
@@ -1224,7 +1254,7 @@ pub async fn create_task(
     Query(shape): Query<ResponseShape>,
     Json(input): Json<CreateTaskInput>,
 ) -> AppResult<(axum::http::StatusCode, Json<serde_json::Value>)> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Update).await?;
     shape.validate()?;
     let task = state
         .db
@@ -1243,7 +1273,7 @@ pub async fn update_task(
     Query(shape): Query<ResponseShape>,
     Json(input): Json<UpdateTaskInput>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Update).await?;
     shape.validate()?;
     let task = state
         .db
@@ -1263,6 +1293,16 @@ pub async fn delete_task(
     Query(params): Query<DeletePersonParams>,
 ) -> AppResult<Json<serde_json::Value>> {
     let auth = require(&state, &headers).await?;
+    let capability = if params.soft_delete {
+        Capability::SoftDelete
+    } else {
+        Capability::Destroy
+    };
+    if !role_can(&state, &auth, capability).await? {
+        return Err(AppError::Forbidden(
+            "You do not have permission to perform this action".to_string(),
+        ));
+    }
     let deleted = if params.soft_delete {
         state
             .db
@@ -1288,7 +1328,7 @@ pub async fn restore_task(
     Path(id): Path<Uuid>,
     Query(shape): Query<ResponseShape>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Update).await?;
     shape.validate()?;
     let task = state
         .db
@@ -1306,7 +1346,7 @@ pub async fn list_notes(
     headers: HeaderMap,
     Query(params): Query<ListOpportunitiesParams>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Read).await?;
     params.shape.validate()?;
     let filter = params
         .filter
@@ -1409,7 +1449,7 @@ pub async fn get_note(
     Path(id): Path<Uuid>,
     Query(shape): Query<ResponseShape>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Read).await?;
     shape.validate()?;
     let note = state
         .db
@@ -1428,7 +1468,7 @@ pub async fn create_note(
     Query(shape): Query<ResponseShape>,
     Json(input): Json<CreateNoteInput>,
 ) -> AppResult<(axum::http::StatusCode, Json<serde_json::Value>)> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Update).await?;
     shape.validate()?;
     let note = state
         .db
@@ -1447,7 +1487,7 @@ pub async fn update_note(
     Query(shape): Query<ResponseShape>,
     Json(input): Json<UpdateNoteInput>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Update).await?;
     shape.validate()?;
     let note = state
         .db
@@ -1467,6 +1507,16 @@ pub async fn delete_note(
     Query(params): Query<DeletePersonParams>,
 ) -> AppResult<Json<serde_json::Value>> {
     let auth = require(&state, &headers).await?;
+    let capability = if params.soft_delete {
+        Capability::SoftDelete
+    } else {
+        Capability::Destroy
+    };
+    if !role_can(&state, &auth, capability).await? {
+        return Err(AppError::Forbidden(
+            "You do not have permission to perform this action".to_string(),
+        ));
+    }
     let deleted = if params.soft_delete {
         state
             .db
@@ -1492,7 +1542,7 @@ pub async fn restore_note(
     Path(id): Path<Uuid>,
     Query(shape): Query<ResponseShape>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Update).await?;
     shape.validate()?;
     let note = state
         .db
@@ -1548,7 +1598,7 @@ pub async fn list_task_targets(
     headers: HeaderMap,
     Query(params): Query<ListOpportunitiesParams>,
 ) -> AppResult<Json<FindManyResponse<TaskTarget>>> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Read).await?;
     let filter = params
         .filter
         .as_deref()
@@ -1696,7 +1746,7 @@ pub async fn get_task_target(
     headers: HeaderMap,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Read).await?;
     let target = state
         .db
         .get_task_target(auth.workspace_id, id)
@@ -1711,7 +1761,7 @@ pub async fn create_task_target(
     headers: HeaderMap,
     Json(input): Json<CreateTaskTargetInput>,
 ) -> AppResult<(axum::http::StatusCode, Json<serde_json::Value>)> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Update).await?;
     let target = state
         .db
         .create_task_target(auth.workspace_id, &input)
@@ -1729,7 +1779,7 @@ pub async fn update_task_target(
     Path(id): Path<Uuid>,
     Json(input): Json<UpdateTaskTargetInput>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Update).await?;
     let target = state
         .db
         .update_task_target(auth.workspace_id, id, &input)
@@ -1746,6 +1796,16 @@ pub async fn delete_task_target(
     Query(params): Query<DeletePersonParams>,
 ) -> AppResult<Json<serde_json::Value>> {
     let auth = require(&state, &headers).await?;
+    let capability = if params.soft_delete {
+        Capability::SoftDelete
+    } else {
+        Capability::Destroy
+    };
+    if !role_can(&state, &auth, capability).await? {
+        return Err(AppError::Forbidden(
+            "You do not have permission to perform this action".to_string(),
+        ));
+    }
     let deleted = if params.soft_delete {
         state
             .db
@@ -1772,7 +1832,7 @@ pub async fn restore_task_target(
     headers: HeaderMap,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Update).await?;
     let target = state
         .db
         .restore_task_target(auth.workspace_id, id)
@@ -1787,7 +1847,7 @@ pub async fn list_note_targets(
     headers: HeaderMap,
     Query(params): Query<ListOpportunitiesParams>,
 ) -> AppResult<Json<FindManyResponse<NoteTarget>>> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Read).await?;
     let filter = params
         .filter
         .as_deref()
@@ -1934,7 +1994,7 @@ pub async fn get_note_target(
     headers: HeaderMap,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Read).await?;
     let target = state
         .db
         .get_note_target(auth.workspace_id, id)
@@ -1949,7 +2009,7 @@ pub async fn create_note_target(
     headers: HeaderMap,
     Json(input): Json<CreateNoteTargetInput>,
 ) -> AppResult<(axum::http::StatusCode, Json<serde_json::Value>)> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Update).await?;
     let target = state
         .db
         .create_note_target(auth.workspace_id, &input)
@@ -1967,7 +2027,7 @@ pub async fn update_note_target(
     Path(id): Path<Uuid>,
     Json(input): Json<UpdateNoteTargetInput>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Update).await?;
     let target = state
         .db
         .update_note_target(auth.workspace_id, id, &input)
@@ -1984,6 +2044,16 @@ pub async fn delete_note_target(
     Query(params): Query<DeletePersonParams>,
 ) -> AppResult<Json<serde_json::Value>> {
     let auth = require(&state, &headers).await?;
+    let capability = if params.soft_delete {
+        Capability::SoftDelete
+    } else {
+        Capability::Destroy
+    };
+    if !role_can(&state, &auth, capability).await? {
+        return Err(AppError::Forbidden(
+            "You do not have permission to perform this action".to_string(),
+        ));
+    }
     let deleted = if params.soft_delete {
         state
             .db
@@ -2010,7 +2080,7 @@ pub async fn restore_note_target(
     headers: HeaderMap,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Update).await?;
     let target = state
         .db
         .restore_note_target(auth.workspace_id, id)
@@ -2178,6 +2248,55 @@ async fn workspace_member_map(
         .into_iter()
         .map(|(member, user)| (member.user_id, (member, user)))
         .collect())
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Capability {
+    Read,
+    Update,
+    SoftDelete,
+    Destroy,
+}
+
+async fn role_can(
+    state: &AppState,
+    auth: &squid_auth::AuthContext,
+    cap: Capability,
+) -> AppResult<bool> {
+    if let Some(role_id) = auth.role_id {
+        if let Some(role) = state
+            .db
+            .get_role(auth.workspace_id, role_id)
+            .await
+            .map_err(AppError::Internal)?
+        {
+            return Ok(match cap {
+                Capability::Read => role.can_read_all_object_records,
+                Capability::Update => role.can_update_all_object_records,
+                Capability::SoftDelete => role.can_soft_delete_all_object_records,
+                Capability::Destroy => role.can_destroy_all_object_records,
+            });
+        }
+    }
+    Ok(match auth.role {
+        squid_core::Role::Owner | squid_core::Role::Admin => true,
+        squid_core::Role::Member => !matches!(cap, Capability::Destroy),
+    })
+}
+
+async fn require_capability(
+    state: &AppState,
+    headers: &HeaderMap,
+    cap: Capability,
+) -> AppResult<squid_auth::AuthContext> {
+    let auth = require(state, headers).await?;
+    if role_can(state, &auth, cap).await? {
+        Ok(auth)
+    } else {
+        Err(AppError::Forbidden(
+            "You do not have permission to perform this action".to_string(),
+        ))
+    }
 }
 
 fn opportunity_relation_value(
@@ -2895,7 +3014,7 @@ pub async fn group_by_people(
     headers: HeaderMap,
     Query(params): Query<GroupByParams>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Read).await?;
     let records = all_people(&state, auth.workspace_id).await?;
     group_by_response(
         &state,
@@ -2913,7 +3032,7 @@ pub async fn group_by_companies(
     headers: HeaderMap,
     Query(params): Query<GroupByParams>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Read).await?;
     let (companies, _) = state
         .db
         .list_companies(auth.workspace_id, 10_000, 0)
@@ -2936,7 +3055,7 @@ pub async fn group_by_opportunities(
     headers: HeaderMap,
     Query(params): Query<GroupByParams>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Read).await?;
     let (opportunities, _) = state
         .db
         .list_opportunities(auth.workspace_id, 10_000, 0)
@@ -2959,7 +3078,7 @@ pub async fn group_by_tasks(
     headers: HeaderMap,
     Query(params): Query<GroupByParams>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Read).await?;
     let (tasks, _) = state
         .db
         .list_tasks(auth.workspace_id, 10_000, 0)
@@ -2982,7 +3101,7 @@ pub async fn group_by_notes(
     headers: HeaderMap,
     Query(params): Query<GroupByParams>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Read).await?;
     let (notes, _) = state
         .db
         .list_notes(auth.workspace_id, 10_000, 0)
@@ -3005,7 +3124,7 @@ pub async fn group_by_task_targets(
     headers: HeaderMap,
     Query(params): Query<GroupByParams>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Read).await?;
     let targets = state
         .db
         .list_task_targets(auth.workspace_id, None, None, None, None)
@@ -3028,7 +3147,7 @@ pub async fn group_by_note_targets(
     headers: HeaderMap,
     Query(params): Query<GroupByParams>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let auth = require(&state, &headers).await?;
+    let auth = require_capability(&state, &headers, Capability::Read).await?;
     let targets = state
         .db
         .list_note_targets(auth.workspace_id, None, None, None, None)
