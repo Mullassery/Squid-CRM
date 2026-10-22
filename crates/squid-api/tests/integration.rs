@@ -11,7 +11,7 @@ use axum::http::{header, HeaderMap, Request, StatusCode};
 use axum::Router;
 use serde_json::{json, Value};
 use squid_api::{app, AppState};
-use squid_core::Config;
+use squid_core::{Config, S3Config};
 use squid_db::Db;
 use tower::ServiceExt;
 
@@ -23,6 +23,10 @@ fn database_url() -> String {
 }
 
 async fn test_app() -> Router {
+    test_app_with_s3(None).await
+}
+
+async fn test_app_with_s3(s3: Option<S3Config>) -> Router {
     let url = database_url();
     let db = Db::connect(&url, 5).await.expect("connect test db");
     db.migrate().await.expect("core migrations");
@@ -37,6 +41,7 @@ async fn test_app() -> Router {
         refresh_token_ttl_secs: 86_400,
         max_page_size: 100,
         cookie_secure: false,
+        s3,
     };
 
     app(AppState::new(db, config))
@@ -65,6 +70,47 @@ async fn send(app: &Router, request: Request<Body>) -> HttpResult {
         headers,
         body,
     }
+}
+
+async fn mock_s3_server() -> (
+    String,
+    std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, Vec<u8>>>>,
+) {
+    use axum::extract::{OriginalUri, State};
+    use axum::response::IntoResponse;
+
+    type Store = std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, Vec<u8>>>>;
+    async fn handler(
+        State(store): State<Store>,
+        method: axum::http::Method,
+        OriginalUri(uri): OriginalUri,
+        body: axum::body::Bytes,
+    ) -> axum::response::Response {
+        let key = uri.path().to_string();
+        match method {
+            axum::http::Method::PUT => {
+                store.lock().unwrap().insert(key, body.to_vec());
+                StatusCode::OK.into_response()
+            }
+            axum::http::Method::GET => {
+                let value = store.lock().unwrap().get(&key).cloned();
+                match value {
+                    Some(bytes) => (StatusCode::OK, bytes).into_response(),
+                    None => StatusCode::NOT_FOUND.into_response(),
+                }
+            }
+            _ => StatusCode::METHOD_NOT_ALLOWED.into_response(),
+        }
+    }
+
+    let store: Store = std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let router = Router::new().fallback(handler).with_state(store.clone());
+    tokio::spawn(async move {
+        axum::serve(listener, router).await.ok();
+    });
+    (format!("http://{address}"), store)
 }
 
 fn json_request(method: &str, uri: &str, body: Value) -> Request<Body> {
@@ -4711,6 +4757,27 @@ async fn metadata_object_and_field_writes() {
         "Lunar mission"
     );
 
+    let custom_import = Request::builder()
+        .method("POST")
+        .uri("/rest/projects/import")
+        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+        .header(header::CONTENT_TYPE, "text/csv")
+        .body(Body::from("name,description\nImported,CSV project\n"))
+        .unwrap();
+    let custom_import = app
+        .clone()
+        .oneshot(custom_import)
+        .await
+        .expect("custom import");
+    assert_eq!(custom_import.status(), StatusCode::OK);
+    let custom_import_body = to_bytes(custom_import.into_body(), usize::MAX)
+        .await
+        .expect("custom import body");
+    assert_eq!(
+        serde_json::from_slice::<Value>(&custom_import_body).unwrap()["imported"],
+        1
+    );
+
     let custom_delete = send(
         &app,
         authorized(
@@ -4727,8 +4794,64 @@ async fn metadata_object_and_field_writes() {
         "body: {}",
         custom_delete.body
     );
-    let custom_empty = send(&app, authorized("GET", "/rest/projects", &token, None)).await;
-    assert_eq!(custom_empty.body["totalCount"], 0);
+    let custom_graphql = send(
+        &app,
+        authorized(
+            "POST",
+            "/graphql",
+            &token,
+            Some(json!({
+                "query": "mutation { createCustomObjectRecord(objectNameSingular: \"project\", data: { name: \"GraphQL\", description: \"From GraphQL\" }) }"
+            })),
+        ),
+    )
+    .await;
+    assert!(
+        custom_graphql.body["errors"].is_null(),
+        "errors: {}",
+        custom_graphql.body
+    );
+    assert_eq!(
+        custom_graphql.body["data"]["createCustomObjectRecord"]["name"],
+        "GraphQL"
+    );
+    let custom_graphql_list = send(
+        &app,
+        authorized(
+            "POST",
+            "/graphql",
+            &token,
+            Some(json!({
+                "query": "{ customObjectRecords(objectNameSingular: \"project\") }"
+            })),
+        ),
+    )
+    .await;
+    assert!(
+        custom_graphql_list.body["errors"].is_null(),
+        "errors: {}",
+        custom_graphql_list.body
+    );
+    assert_eq!(
+        custom_graphql_list.body["data"]["customObjectRecords"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    let custom_remaining = send(&app, authorized("GET", "/rest/projects", &token, None)).await;
+    assert_eq!(custom_remaining.body["totalCount"], 2);
+    assert!(custom_remaining.body["data"]["projects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|project| project["name"] == "Imported"));
+    assert!(custom_remaining.body["data"]["projects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|project| project["name"] == "GraphQL"));
 
     let updated_field = send(
         &app,
@@ -6854,6 +6977,167 @@ async fn graphql_mutations_replay_with_idempotency_key() {
     let second_body = to_bytes(second.into_body(), usize::MAX).await.unwrap();
     let second_json: Value = serde_json::from_slice(&second_body).unwrap();
     assert_eq!(second_json["data"]["createPerson"]["id"], first_id);
+}
+
+#[tokio::test]
+async fn job_queue_enqueue_and_run() {
+    let app = test_app().await;
+    let (token, _) = signup(&app, &unique_email("jobs")).await;
+    let queued = send(
+        &app,
+        authorized(
+            "POST",
+            "/graphql",
+            &token,
+            Some(json!({
+                "query": "mutation { enqueueJob(kind: \"maintenance.prune\") { id state kind } }"
+            })),
+        ),
+    )
+    .await;
+    assert!(queued.body["errors"].is_null(), "errors: {}", queued.body);
+    let job_id = queued.body["data"]["enqueueJob"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(queued.body["data"]["enqueueJob"]["state"], "pending");
+
+    let listed = send(
+        &app,
+        authorized(
+            "POST",
+            "/graphql",
+            &token,
+            Some(json!({ "query": "{ jobs { id kind state } }" })),
+        ),
+    )
+    .await;
+    assert!(listed.body["errors"].is_null(), "errors: {}", listed.body);
+    assert!(listed.body["data"]["jobs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|job| job["id"] == job_id));
+
+    let run = send(
+        &app,
+        authorized(
+            "POST",
+            "/graphql",
+            &token,
+            Some(json!({
+                "query": "mutation($id: UUID!) { runJob(id: $id) { id state attempts } }",
+                "variables": { "id": job_id }
+            })),
+        ),
+    )
+    .await;
+    assert!(run.body["errors"].is_null(), "errors: {}", run.body);
+    assert_eq!(run.body["data"]["runJob"]["state"], "succeeded");
+    assert_eq!(run.body["data"]["runJob"]["attempts"], 0);
+}
+
+#[tokio::test]
+async fn s3_storage_round_trip_uses_mock_endpoint() {
+    let (endpoint, store) = mock_s3_server().await;
+    let app = test_app_with_s3(Some(S3Config {
+        endpoint,
+        bucket: "squid-test".to_string(),
+        region: "us-east-1".to_string(),
+        access_key_id: "test-key".to_string(),
+        secret_access_key: "test-secret".to_string(),
+    }))
+    .await;
+    let (token, _) = signup(&app, &unique_email("s3")).await;
+
+    let upload = send(
+        &app,
+        authorized(
+            "POST",
+            "/graphql",
+            &token,
+            Some(json!({
+                "query": "mutation($filename: String!, $size: Float!, $folder: FileFolder!) { createFileUpload(filename:$filename, size:$size, fileFolder:$folder) { fileId uploadUrl } }",
+                "variables": { "filename": "s3.bin", "size": 3.0, "folder": "CorePicture" }
+            })),
+        ),
+    )
+    .await;
+    assert!(upload.body["errors"].is_null(), "errors: {}", upload.body);
+    let file_id = upload.body["data"]["createFileUpload"]["fileId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let upload_url = upload.body["data"]["createFileUpload"]["uploadUrl"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let stored = send(
+        &app,
+        Request::builder()
+            .method("PUT")
+            .uri(&upload_url)
+            .header(header::CONTENT_TYPE, "application/octet-stream")
+            .body(Body::from(vec![1u8, 2, 3]))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        stored.status,
+        StatusCode::NO_CONTENT,
+        "body: {}",
+        stored.body
+    );
+    assert!(store
+        .lock()
+        .unwrap()
+        .values()
+        .any(|value| value.as_slice() == [1, 2, 3]));
+
+    let completed = send(
+        &app,
+        authorized(
+            "POST",
+            "/graphql",
+            &token,
+            Some(json!({
+                "query": "mutation($id: String!) { completeFileUpload(fileId:$id) { id size url } }",
+                "variables": { "id": file_id }
+            })),
+        ),
+    )
+    .await;
+    assert!(
+        completed.body["errors"].is_null(),
+        "errors: {}",
+        completed.body
+    );
+    assert_eq!(completed.body["data"]["completeFileUpload"]["size"], 3.0);
+    let download_url = completed.body["data"]["completeFileUpload"]["url"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let downloaded = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(download_url)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .expect("download request");
+    assert_eq!(downloaded.status(), StatusCode::OK);
+    assert_eq!(
+        to_bytes(downloaded.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+        vec![1u8, 2, 3]
+    );
 }
 
 #[tokio::test]

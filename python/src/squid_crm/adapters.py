@@ -9,10 +9,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, Mapping, Optional
 
-__all__ = ["person_activation_payload", "to_messagebirds_event"]
+__all__ = ["person_activation_payload", "to_pycustomerhub_event"]
 
 
-def to_messagebirds_event(
+def to_pycustomerhub_event(
     envelope: Mapping[str, Any],
     *,
     identity: Mapping[str, Any],
@@ -21,11 +21,11 @@ def to_messagebirds_event(
     correlation_id: Optional[str] = None,
     source: str = "squid-crm",
 ) -> Dict[str, Any]:
-    """Map Squid envelope v1 to the documented MessageBirds/OCDS field names.
+    """Map Squid envelope v1 to the documented PyCustomerHub/OCDS field names.
 
-    MessageBirds' exact nested schema is not available in this repository, so
+    PyCustomerHub's exact nested schema is not available in this repository, so
     this adapter uses the documented top-level fields only. Treat it as
-    unverified until MessageBirds confirms or replaces the mapping.
+    unverified until PyCustomerHub confirms or replaces the mapping.
     """
     if not identity:
         raise ValueError("identity is required for destination routing")

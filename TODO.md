@@ -120,13 +120,17 @@
       capabilities.
 - [x] File permission enforcement: upload/download URLs are HMAC-signed and
       issuance requires `UPLOAD_FILE`/`DOWNLOAD_FILE`.
-- [ ] Metadata-generated GraphQL types/routes for custom objects.
+- [x] Generic JSON GraphQL CRUD for custom objects
+      (`customObjectRecords`/`createCustomObjectRecord`/...).
+- [ ] Generated typed GraphQL schema for custom objects.
 - [x] Custom-object physical tables and scalar column DDL: create table on
       object creation, add/rename/drop columns on field writes.
 - [x] Generic REST CRUD for custom objects (`/rest/{object}` fallback routes).
 - [x] Relation-field DDL for custom objects: MANY_TO_ONE fields create a UUID
       column, metadata relation settings and a reverse ONE_TO_MANY field.
-- [ ] Metadata-generated GraphQL types/routes for custom objects.
+- [x] Generic JSON GraphQL CRUD for custom objects
+      (`customObjectRecords`/`createCustomObjectRecord`/...).
+- [ ] Generated typed GraphQL schema for custom objects.
 - [x] `currentUser`/`currentWorkspace` full frontend boot fragment (ADR 0005;
       enterprise surfaces are explicit empty/static defaults).
 - [x] `workspaceMembers`/`workspaceMember` GraphQL queries with filters,
@@ -156,8 +160,9 @@
       ranked `tsRankCD`/`tsRank`, cursors and include/exclude object filters.
 - [x] Search `ObjectRecordFilterInput` semantics (id/createdAt/updatedAt/
       deletedAt plus and/or/not).
-- [x] CSV export and import for people/companies/opportunities/tasks/notes.
-- [ ] S3-compatible object storage.
+- [x] CSV export and import for people/companies/opportunities/tasks/notes and
+      custom objects.
+- [x] S3-compatible object storage (path-style SigV4 client, PostgreSQL fallback).
 - [x] Webhook settings CRUD (`webhooks`/`webhook`,
       `createWebhook`/`updateWebhook`/`deleteWebhook`); delivery workers are not
       implemented.
@@ -169,7 +174,9 @@
       durable delivery log, admin listing/replay and a background retry worker.
 - [x] Background webhook retry and hourly maintenance workers (idempotency and
       delivery-log retention).
-- [ ] General job queue/cron scheduler, workflows and integrations.
+- [x] Durable job queue (`core.jobs`) with claim/retry semantics, worker,
+      admin `jobs`/`enqueueJob`/`runJob`, and rescheduled maintenance cron.
+- [ ] Workflows and third-party integrations.
 
 ## Phase 6-8
 - [ ] Threat model (`docs/threat-model.md`).

@@ -14,6 +14,16 @@ pub struct Config {
     pub refresh_token_ttl_secs: i64,
     pub max_page_size: i64,
     pub cookie_secure: bool,
+    pub s3: Option<S3Config>,
+}
+
+#[derive(Clone)]
+pub struct S3Config {
+    pub endpoint: String,
+    pub bucket: String,
+    pub region: String,
+    pub access_key_id: String,
+    pub secret_access_key: String,
 }
 
 impl Config {
@@ -43,6 +53,7 @@ impl Config {
             cookie_secure: env::var("COOKIE_SECURE")
                 .map(|v| v == "true" || v == "1")
                 .unwrap_or(false),
+            s3: s3_from_env()?,
         })
     }
 }
@@ -52,4 +63,34 @@ fn parse_env<T: std::str::FromStr>(key: &str, default: T) -> T {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(default)
+}
+
+fn s3_from_env() -> Result<Option<S3Config>, String> {
+    let values = [
+        ("S3_ENDPOINT", env::var("S3_ENDPOINT").ok()),
+        ("S3_BUCKET", env::var("S3_BUCKET").ok()),
+        ("S3_REGION", env::var("S3_REGION").ok()),
+        ("S3_ACCESS_KEY_ID", env::var("S3_ACCESS_KEY_ID").ok()),
+        (
+            "S3_SECRET_ACCESS_KEY",
+            env::var("S3_SECRET_ACCESS_KEY").ok(),
+        ),
+    ];
+    if values.iter().all(|(_, value)| value.is_none()) {
+        return Ok(None);
+    }
+    let mut resolved = std::collections::HashMap::new();
+    for (name, value) in values {
+        let Some(value) = value.filter(|value| !value.trim().is_empty()) else {
+            return Err(format!("{name} must be set when S3 storage is configured"));
+        };
+        resolved.insert(name, value);
+    }
+    Ok(Some(S3Config {
+        endpoint: resolved["S3_ENDPOINT"].trim_end_matches('/').to_string(),
+        bucket: resolved["S3_BUCKET"].clone(),
+        region: resolved["S3_REGION"].clone(),
+        access_key_id: resolved["S3_ACCESS_KEY_ID"].clone(),
+        secret_access_key: resolved["S3_SECRET_ACCESS_KEY"].clone(),
+    }))
 }

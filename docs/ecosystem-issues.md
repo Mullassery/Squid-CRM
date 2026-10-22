@@ -14,7 +14,7 @@ Status labels: **OPEN**, **FIXED IN WORKING TREE**, **BLOCKED**, **UNVERIFIED**,
 | --- | --- | --- | --- |
 | Squid-CRM | CRM system of record, REST/GraphQL API, webhooks | OPEN / FIXED IN WORKING TREE | See section 2. |
 | PyReverseETL | Warehouse-to-CRM/marketing activation | OPEN | No Squid-CRM connector. Its generic webhook destination posts one record object at a time and cannot add an `Idempotency-Key` header, so it does not match Squid's REST create envelope and cannot use Squid's idempotent write path. CRM adapters are mock-verified only, not live-account verified. Encryption compliance action is reported unresolved. Python connector plugins do not run in the Rust core path. |
-| MessageBirds | Event ingestion, CDP, profile/audience pipeline | OPEN | No Squid-CRM ingestion adapter. Squid's webhook envelope is not the MessageBirds/OCDS envelope: it lacks `event_id`, `event_type`, `timestamp`, `source`, `identity`, `schema`, `tenant_id`, `correlation_id`. MessageBirds `POST /events` requires a structurally valid OCDS envelope and then a registered event schema, so Squid webhooks cannot be sent to it unchanged. No batch event endpoint. Edge ingestion gateway is not deployed and has no write-key auth. |
+| PyCustomerHub | Event ingestion, CDP, profile/audience pipeline | OPEN | No Squid-CRM ingestion adapter. Squid's webhook envelope is not the PyCustomerHub/OCDS envelope: it lacks `event_id`, `event_type`, `timestamp`, `source`, `identity`, `schema`, `tenant_id`, `correlation_id`. PyCustomerHub `POST /events` requires a structurally valid OCDS envelope and then a registered event schema, so Squid webhooks cannot be sent to it unchanged. No batch event endpoint. Edge ingestion gateway is not deployed and has no write-key auth. |
 | PyTagShield | Consent-aware event validation, pseudonymization, routing | UNVERIFIED / OPEN | GitHub repository had no README and no workflows at audit time. The server binary was previously found to be a no-op (`fn main() {}`), so a runnable HTTP service contract is not evidenced. No Squid-CRM destination adapter. No executable evidence that consent decisions are attached to outbound CRM records. |
 | PyTagManager | GTM/tag diagnosis and structured findings | OPEN | No direct Squid-CRM adapter or agreed findings schema/version. The improved README and `pyproject.toml` description were uncommitted locally at audit time. GitHub Actions showed no recent run for its configured workflows, so CI status was unverified. |
 | ClusterAudienceKit | Segmentation, scoring, streaming audiences | OPEN | No direct Squid-CRM adapter. Audience activation is expected to pass through PyReverseETL, but no Squid payload mapping or custom-object schema contract is defined. |
@@ -29,7 +29,7 @@ Status labels: **OPEN**, **FIXED IN WORKING TREE**, **BLOCKED**, **UNVERIFIED**,
 | REST writes are not idempotent; retrying a create can duplicate records. | FIXED IN WORKING TREE | No `Idempotency-Key` handling or deduplication table at audit time. |
 | Webhook delivery is fire-and-forget with a single attempt. | FIXED IN WORKING TREE | `emit_webhooks` now retries with bounded backoff and records attempts in `core.webhook_deliveries`. |
 | Webhook failures are not observable and there is no dead-letter queue. | PARTIAL | Attempts, last status/error, terminal state and replayable bodies are stored in `core.webhook_deliveries`; admin listing/manual replay and a background retry worker exist; ordering and retention policy remain open. |
-| No shared event-schema contract with MessageBirds. | BLOCKED | Squid envelope differs from MessageBirds/OCDS; a counterpart mapping decision is required. |
+| No shared event-schema contract with PyCustomerHub. | BLOCKED | Squid envelope differs from PyCustomerHub/OCDS; a counterpart mapping decision is required. |
 | No PyReverseETL Squid adapter or mutually verified payload contract. | BLOCKED | PyReverseETL webhook payload and header support do not match Squid REST writes. |
 | README and About text describe Twenty API compatibility. | OPEN | Branding removal must preserve AGPL `NOTICE`/`LICENSE` attribution and generated fixture provenance. |
 | No branch protection and vulnerability alerts disabled on GitHub. | OPEN | Repository settings, not code. |
@@ -82,7 +82,7 @@ already be fixed on the default branch. Logs were captured under
 
 ## 5. Cross-repository blockers
 
-1. MessageBirds and Squid must agree on either the OCDS envelope or a documented
+1. PyCustomerHub and Squid must agree on either the OCDS envelope or a documented
    mapping into it, including event type, schema registration, identity,
    tenant and correlation semantics.
 2. PyReverseETL and Squid must agree on an activation payload plus an

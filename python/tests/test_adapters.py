@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from squid_crm import person_activation_payload, to_messagebirds_event  # noqa: E402
+from squid_crm import person_activation_payload, to_pycustomerhub_event  # noqa: E402
 
 
 class AdapterTests(unittest.TestCase):
@@ -19,7 +19,7 @@ class AdapterTests(unittest.TestCase):
         }
 
     def test_maps_documented_top_level_fields(self):
-        mapped = to_messagebirds_event(
+        mapped = to_pycustomerhub_event(
             self.envelope(),
             identity={"anonymous_id": "person-1"},
             schema="crm.person.v1",
@@ -35,18 +35,18 @@ class AdapterTests(unittest.TestCase):
 
     def test_requires_identity_and_core_fields(self):
         with self.assertRaises(ValueError):
-            to_messagebirds_event(
+            to_pycustomerhub_event(
                 self.envelope(), identity={}, schema="s", tenant_id="t"
             )
         broken = self.envelope()
         del broken["data"]
         with self.assertRaises(ValueError):
-            to_messagebirds_event(
+            to_pycustomerhub_event(
                 broken, identity={"id": "p"}, schema="s", tenant_id="t"
             )
 
     def test_correlation_id_can_be_supplied(self):
-        mapped = to_messagebirds_event(
+        mapped = to_pycustomerhub_event(
             self.envelope(),
             identity={"id": "p"},
             schema="s",

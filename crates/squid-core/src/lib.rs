@@ -23,7 +23,7 @@ pub mod view;
 
 pub use async_graphql::Json as GqlJson;
 pub use company::*;
-pub use config::Config;
+pub use config::{Config, S3Config};
 pub use error::{AppError, AppResult};
 pub use metadata::*;
 pub use note::*;

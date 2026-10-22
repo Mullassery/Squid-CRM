@@ -236,6 +236,42 @@ impl From<squid_db::WebhookDeliveryRecord> for WebhookDeliveryGql {
     }
 }
 
+#[derive(Debug, Clone, SimpleObject)]
+#[graphql(name = "Job")]
+pub struct JobGql {
+    pub id: Uuid,
+    pub workspace_id: Option<Uuid>,
+    pub kind: String,
+    pub payload: GqlJson<serde_json::Value>,
+    pub state: String,
+    pub attempts: i32,
+    pub max_attempts: i32,
+    pub run_at: DateTime<Utc>,
+    pub last_error: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub completed_at: Option<DateTime<Utc>>,
+}
+
+impl From<squid_db::JobRecord> for JobGql {
+    fn from(job: squid_db::JobRecord) -> Self {
+        Self {
+            id: job.id,
+            workspace_id: job.workspace_id,
+            kind: job.kind,
+            payload: GqlJson(job.payload),
+            state: job.state,
+            attempts: job.attempts,
+            max_attempts: job.max_attempts,
+            run_at: job.run_at,
+            last_error: job.last_error,
+            created_at: job.created_at,
+            updated_at: job.updated_at,
+            completed_at: job.completed_at,
+        }
+    }
+}
+
 #[derive(Debug, SimpleObject)]
 #[graphql(name = "SearchRecord")]
 pub struct SearchRecord {
@@ -2367,6 +2403,27 @@ fn person_filter_matches(
     true
 }
 
+fn custom_record_values(
+    object: &squid_core::ObjectMetadata,
+    data: &serde_json::Value,
+) -> Vec<(String, squid_core::FieldMetadataType, serde_json::Value)> {
+    let Some(map) = data.as_object() else {
+        return Vec::new();
+    };
+    object
+        .fields
+        .iter()
+        .filter(|field| {
+            !field.is_system && field.field_type != squid_core::FieldMetadataType::MorphRelation
+        })
+        .filter_map(|field| {
+            map.get(&field.name)
+                .cloned()
+                .map(|value| (field.name.clone(), field.field_type, value))
+        })
+        .collect()
+}
+
 async fn role_map(
     state: &AppState,
     workspace_id: Uuid,
@@ -3517,6 +3574,84 @@ impl QueryRoot {
             &state.config.frontend_url,
             count,
         )))
+    }
+
+    async fn custom_object_records(
+        &self,
+        ctx: &Context<'_>,
+        object_name_singular: String,
+        limit: Option<i32>,
+        offset: Option<i32>,
+    ) -> async_graphql::Result<Vec<GqlJson<serde_json::Value>>> {
+        let auth = require_data_capability(ctx, DataCapability::Read).await?;
+        let object = state(ctx)
+            .db
+            .find_object_by_name(auth.workspace_id, &object_name_singular)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Object not found".to_string())))?;
+        if object.is_system {
+            return Err(gql_err(AppError::BadRequest(
+                "Use the typed API for system objects".to_string(),
+            )));
+        }
+        let (records, _) = state(ctx)
+            .db
+            .list_custom_records(
+                auth.workspace_id,
+                &object.name_singular,
+                i64::from(
+                    limit
+                        .unwrap_or(20)
+                        .clamp(1, state(ctx).config.max_page_size as i32),
+                ),
+                i64::from(offset.unwrap_or(0).max(0)),
+            )
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        Ok(records.into_iter().map(GqlJson).collect())
+    }
+
+    async fn custom_object_record(
+        &self,
+        ctx: &Context<'_>,
+        object_name_singular: String,
+        id: Uuid,
+    ) -> async_graphql::Result<Option<GqlJson<serde_json::Value>>> {
+        let auth = require_data_capability(ctx, DataCapability::Read).await?;
+        let object = state(ctx)
+            .db
+            .find_object_by_name(auth.workspace_id, &object_name_singular)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Object not found".to_string())))?;
+        Ok(state(ctx)
+            .db
+            .get_custom_record(auth.workspace_id, &object.name_singular, id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .map(GqlJson))
+    }
+
+    async fn jobs(
+        &self,
+        ctx: &Context<'_>,
+        job_state: Option<String>,
+        limit: Option<i32>,
+    ) -> async_graphql::Result<Vec<JobGql>> {
+        let auth = require_admin(ctx)?;
+        Ok(state(ctx)
+            .db
+            .list_jobs(
+                Some(auth.workspace_id),
+                job_state.as_deref(),
+                i64::from(limit.unwrap_or(100)),
+            )
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .into_iter()
+            .map(JobGql::from)
+            .collect())
     }
 
     async fn webhooks(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<WebhookRecord>> {
@@ -5929,6 +6064,130 @@ impl MutationRoot {
             .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))?;
 
         Ok(ApiKeyToken { token })
+    }
+
+    async fn create_custom_object_record(
+        &self,
+        ctx: &Context<'_>,
+        object_name_singular: String,
+        data: GqlJson<serde_json::Value>,
+    ) -> async_graphql::Result<GqlJson<serde_json::Value>> {
+        let auth = require_data_capability(ctx, DataCapability::Update).await?;
+        let object = state(ctx)
+            .db
+            .find_object_by_name(auth.workspace_id, &object_name_singular)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Object not found".to_string())))?;
+        if object.is_system {
+            return Err(gql_err(AppError::BadRequest(
+                "Use the typed API for system objects".to_string(),
+            )));
+        }
+        let values = custom_record_values(&object, &data.0);
+        if values.is_empty() {
+            return Err(gql_err(AppError::BadRequest(
+                "No writable fields supplied".to_string(),
+            )));
+        }
+        state(ctx)
+            .db
+            .create_custom_record(auth.workspace_id, &object.name_singular, &values)
+            .await
+            .map(GqlJson)
+            .map_err(|e| gql_err(AppError::Internal(e)))
+    }
+
+    async fn update_custom_object_record(
+        &self,
+        ctx: &Context<'_>,
+        object_name_singular: String,
+        id: Uuid,
+        data: GqlJson<serde_json::Value>,
+    ) -> async_graphql::Result<GqlJson<serde_json::Value>> {
+        let auth = require_data_capability(ctx, DataCapability::Update).await?;
+        let object = state(ctx)
+            .db
+            .find_object_by_name(auth.workspace_id, &object_name_singular)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Object not found".to_string())))?;
+        let values = custom_record_values(&object, &data.0);
+        state(ctx)
+            .db
+            .update_custom_record(auth.workspace_id, &object.name_singular, id, &values)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .map(GqlJson)
+            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))
+    }
+
+    async fn delete_custom_object_record(
+        &self,
+        ctx: &Context<'_>,
+        object_name_singular: String,
+        id: Uuid,
+        #[graphql(default)] soft_delete: bool,
+    ) -> async_graphql::Result<bool> {
+        let capability = if soft_delete {
+            DataCapability::SoftDelete
+        } else {
+            DataCapability::Destroy
+        };
+        let auth = require_data_capability(ctx, capability).await?;
+        let object = state(ctx)
+            .db
+            .find_object_by_name(auth.workspace_id, &object_name_singular)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Object not found".to_string())))?;
+        state(ctx)
+            .db
+            .delete_custom_record(auth.workspace_id, &object.name_singular, id, soft_delete)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))
+    }
+
+    async fn enqueue_job(
+        &self,
+        ctx: &Context<'_>,
+        kind: String,
+        payload: Option<GqlJson<serde_json::Value>>,
+        run_at: Option<DateTime<Utc>>,
+        max_attempts: Option<i32>,
+    ) -> async_graphql::Result<JobGql> {
+        let auth = require_admin(ctx)?;
+        if !matches!(kind.as_str(), "maintenance.prune" | "webhook.replay") {
+            return Err(gql_err(AppError::BadRequest(format!(
+                "Unknown job kind '{kind}'"
+            ))));
+        }
+        let id = state(ctx)
+            .db
+            .enqueue_job(
+                Some(auth.workspace_id),
+                &kind,
+                &payload.map(|value| value.0).unwrap_or_default(),
+                run_at.unwrap_or_else(Utc::now),
+                max_attempts.unwrap_or(5).clamp(1, 20),
+            )
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        state(ctx)
+            .db
+            .get_job(id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .map(JobGql::from)
+            .ok_or_else(|| gql_err(AppError::NotFound("Job not found".to_string())))
+    }
+
+    async fn run_job(&self, ctx: &Context<'_>, id: Uuid) -> async_graphql::Result<JobGql> {
+        let auth = require_admin(ctx)?;
+        crate::rest::run_job_now(state(ctx), auth.workspace_id, id)
+            .await
+            .map(JobGql::from)
+            .map_err(gql_err)
     }
 
     async fn replay_webhook_delivery(

@@ -321,6 +321,25 @@ pub async fn upload_file(
     body: axum::body::Bytes,
 ) -> AppResult<axum::http::StatusCode> {
     validate_file_token(&state, id, "upload", &params)?;
+    if let Some(storage) = &state.storage {
+        let file = state
+            .db
+            .file_content(id)
+            .await
+            .map_err(AppError::Internal)?
+            .map(|(file, _)| file)
+            .ok_or_else(|| AppError::NotFound("File not found".to_string()))?;
+        storage
+            .put(&file.path, &body, &file.content_type)
+            .await
+            .map_err(|error| AppError::Internal(anyhow::anyhow!(error)))?;
+        state
+            .db
+            .mark_file_uploaded(id, body.len() as i64)
+            .await
+            .map_err(AppError::Internal)?;
+        return Ok(axum::http::StatusCode::NO_CONTENT);
+    }
     let stored = state
         .db
         .store_file_content(id, &body)
@@ -342,7 +361,7 @@ pub async fn download_file(
 
     validate_file_token(&state, id, "download", &params)?;
 
-    let Some((file, content)) = state
+    let Some((file, mut content)) = state
         .db
         .file_content(id)
         .await
@@ -350,6 +369,12 @@ pub async fn download_file(
     else {
         return Err(AppError::NotFound("File not found".to_string()));
     };
+    if let Some(storage) = &state.storage {
+        content = storage
+            .get(&file.path)
+            .await
+            .map_err(|error| AppError::Internal(anyhow::anyhow!(error)))?;
+    }
     Ok((
         [
             (axum::http::header::CONTENT_TYPE, file.content_type.clone()),
@@ -3268,6 +3293,106 @@ pub(crate) async fn requeue_webhook_delivery(
     Ok(())
 }
 
+async fn execute_job(state: &AppState, job: &squid_db::JobRecord) -> AppResult<()> {
+    match job.kind.as_str() {
+        "maintenance.prune" => {
+            state
+                .db
+                .prune_expired_state()
+                .await
+                .map_err(AppError::Internal)?;
+            Ok(())
+        }
+        "webhook.replay" => {
+            let id = job
+                .payload
+                .get("deliveryId")
+                .and_then(|value| value.as_str())
+                .and_then(|value| Uuid::parse_str(value).ok())
+                .ok_or_else(|| {
+                    AppError::BadRequest("webhook.replay requires deliveryId".to_string())
+                })?;
+            let workspace_id = job
+                .workspace_id
+                .ok_or_else(|| AppError::BadRequest("workspace is required".to_string()))?;
+            replay_webhook_delivery(state, workspace_id, id)
+                .await
+                .map(|_| ())
+        }
+        other => Err(AppError::BadRequest(format!("Unknown job kind '{other}'"))),
+    }
+}
+
+pub(crate) async fn run_job_now(
+    state: &AppState,
+    workspace_id: Uuid,
+    id: Uuid,
+) -> AppResult<squid_db::JobRecord> {
+    let job = state
+        .db
+        .get_job(id)
+        .await
+        .map_err(AppError::Internal)?
+        .ok_or_else(|| AppError::NotFound("Job not found".to_string()))?;
+    if job.workspace_id.is_some() && job.workspace_id != Some(workspace_id) {
+        return Err(AppError::NotFound("Job not found".to_string()));
+    }
+    match execute_job(state, &job).await {
+        Ok(()) => {
+            state
+                .db
+                .complete_job(id)
+                .await
+                .map_err(AppError::Internal)?;
+        }
+        Err(error) => {
+            state
+                .db
+                .fail_job(id, &error.to_string())
+                .await
+                .map_err(AppError::Internal)?;
+        }
+    }
+    state
+        .db
+        .get_job(id)
+        .await
+        .map_err(AppError::Internal)?
+        .ok_or_else(|| AppError::NotFound("Job not found".to_string()))
+}
+
+pub async fn run_job_worker(state: AppState) {
+    let mut ticker = tokio::time::interval(std::time::Duration::from_secs(15));
+    loop {
+        ticker.tick().await;
+        let Ok(jobs) = state.db.claim_due_jobs(10).await else {
+            continue;
+        };
+        for job in jobs {
+            match execute_job(&state, &job).await {
+                Ok(()) => {
+                    let _ = state.db.complete_job(job.id).await;
+                    if job.kind == "maintenance.prune" {
+                        let _ = state
+                            .db
+                            .enqueue_job(
+                                None,
+                                "maintenance.prune",
+                                &serde_json::json!({}),
+                                chrono::Utc::now() + chrono::Duration::hours(1),
+                                3,
+                            )
+                            .await;
+                    }
+                }
+                Err(error) => {
+                    let _ = state.db.fail_job(job.id, &error.to_string()).await;
+                }
+            }
+        }
+    }
+}
+
 pub async fn run_maintenance_worker(state: AppState) {
     let mut ticker = tokio::time::interval(std::time::Duration::from_secs(3600));
     loop {
@@ -3396,6 +3521,50 @@ pub async fn custom_rest_fallback(
         .ok_or_else(|| AppError::NotFound("Object not found".to_string()))?;
     if object.is_system {
         return Err(AppError::NotFound("Object not found".to_string()));
+    }
+
+    if method == axum::http::Method::POST && id_segment == Some("import") {
+        let auth = require_capability(&state, &headers, Capability::Update).await?;
+        let (columns, rows) = csv_import_rows(&body)?;
+        let lower_columns = columns
+            .iter()
+            .map(|column| column.to_ascii_lowercase())
+            .collect::<Vec<_>>();
+        let mut imported = 0i64;
+        for values in rows {
+            let mut record = Vec::new();
+            for field in &object.fields {
+                if field.is_system
+                    || field.field_type == squid_core::FieldMetadataType::MorphRelation
+                {
+                    continue;
+                }
+                let Some(index) = lower_columns
+                    .iter()
+                    .position(|column| column == &field.name.to_ascii_lowercase())
+                else {
+                    continue;
+                };
+                let Some(value) = values.get(index).filter(|value| !value.is_empty()) else {
+                    continue;
+                };
+                record.push((
+                    field.name.clone(),
+                    field.field_type,
+                    serde_json::Value::String(value.clone()),
+                ));
+            }
+            if record.is_empty() {
+                continue;
+            }
+            state
+                .db
+                .create_custom_record(auth.workspace_id, &object.name_singular, &record)
+                .await
+                .map_err(AppError::Internal)?;
+            imported += 1;
+        }
+        return Ok(Json(json!({ "imported": imported })).into_response());
     }
 
     let id = id_segment

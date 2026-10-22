@@ -15,7 +15,7 @@ MarTech/CDP ecosystem. It owns:
 
 It does **not** own tagging, consent adjudication, segmentation/clustering,
 reverse ETL orchestration, event streaming, scraping or crawling. Those remain
-with PyTagManager, PyTagShield, ClusterAudienceKit, PyReverseETL, MessageBirds,
+with PyTagManager, PyTagShield, ClusterAudienceKit, PyReverseETL, PyCustomerHub,
 ScrapeOwl and MudFish respectively.
 
 No sibling repository was modified. No sibling API is assumed beyond the
@@ -33,10 +33,10 @@ Statuses: **VERIFIED** (executable evidence in this repository), **PARTIAL**
 | ClusterAudienceKit | inbound audience/custom-object sync | Custom-object REST `/rest/{object}` | PARTIAL | Custom-object tables, relation fields and generic CRUD are tested in `metadata_object_and_field_writes`. No batch/upsert endpoint or audience-specific schema contract. |
 | PyTagShield | inbound validated events/records | REST/GraphQL, custom objects | PARTIAL | Record APIs and relation fields exist. Consent enforcement belongs to PyTagShield; Squid does not independently prove consent and must not be treated as a consent authority. |
 | PyTagManager | inbound findings storage | Custom-object REST | PARTIAL | Generic custom objects can store findings, but no agreed findings schema/version is available in this repository. |
-| MessageBirds | outbound record events | Webhooks + Python adapter | PARTIAL | Envelope v1, HMAC signatures, retries and replay are tested. `squid_crm.adapters.to_messagebirds_event` maps the documented top-level OCDS fields, but the exact MessageBirds schema and nested identity contract still need confirmation. |
+| PyCustomerHub | outbound record events | Webhooks + Python adapter | PARTIAL | Envelope v1, HMAC signatures, retries and replay are tested. `squid_crm.adapters.to_pycustomerhub_event` maps the documented top-level OCDS fields, but the exact PyCustomerHub schema and nested identity contract still need confirmation. |
 | ScrapeOwl | none | none | NOT APPLICABLE | No direct data contract; scraping output would arrive through another ecosystem service. |
 | MudFish | none | none | NOT APPLICABLE | No direct data contract; crawling output would arrive through another ecosystem service. |
-| Any counterpart | Python integration | `python/` `squid_crm` client | VERIFIED | 0.2.0 installed from PyPI; import/version and six client tests cover idempotency, correlation and retry headers. REST/GraphQL contract tests live in the Rust suite. |
+| Any counterpart | Python integration | `python/` `squid_crm` client | VERIFIED | 0.2.2 installed from PyPI; import/version and twelve client/adapter tests cover idempotency, correlation and retry headers. REST/GraphQL contract tests live in the Rust suite. |
 
 ## C. Implemented changes
 
@@ -56,12 +56,12 @@ Statuses: **VERIFIED** (executable evidence in this repository), **PARTIAL**
 - Added `examples/webhook_receiver.py` as a runnable HMAC-verifying receiver.
 - Added the Python client package under `python/`, including `Idempotency-Key`,
   `X-Correlation-Id`, `Retry-After` and safe-retry support, and published
-  `squid-crm` 0.2.0 to PyPI.
+  `squid-crm` 0.2.2 to PyPI.
 - Added replay-safe REST POSTs via `Idempotency-Key` with request-body hashing,
   conflict detection and stored responses; added `X-Correlation-Id` propagation.
 - Python client retries use the same idempotency key and correlation ID.
 - Added a dependency-free Python adapter mapping Squid envelope v1 to the
-  documented MessageBirds top-level field names, with explicit validation.
+  documented PyCustomerHub top-level field names, with explicit validation.
 - Added a reverse-ETL person payload adapter with an explicit field allowlist
   and a runnable activation example.
 - Added CSV export/import and role/data/file permission enforcement in earlier
@@ -108,7 +108,7 @@ Last verified result (2026-10-22):
   `webhook_delivery_posts_record_events` with a live local HTTP receiver.
 - Idempotent replay, conflict, tenant scoping and failed-request retry are
   covered by integration tests.
-- Python package import check from PyPI: `squid_crm.__version__ == "0.2.0"`.
+- Python package import check from PyPI: `squid_crm.__version__ == "0.2.2"`.
 - Python client tests: 6 passing (`python3 -m unittest discover -s python/tests`).
 
 Runnable reverse-ETL example:
@@ -148,9 +148,9 @@ SQUID_WEBHOOK_SECRET='the-webhook-secret' \
 ## G. Remaining gaps and blockers
 
 - **No counterpart contracts verified live.** Sibling repositories and their
-  OpenAPI/GraphQL schemas are not present in this workspace. The MessageBirds
+  OpenAPI/GraphQL schemas are not present in this workspace. The PyCustomerHub
   adapter encodes only the top-level fields documented in the audit and remains
-  unverified until MessageBirds confirms its nested schema.
+  unverified until PyCustomerHub confirms its nested schema.
 - **Idempotency**: header-bearing mutating requests are replay-safe, but
   counterparts must still be taught to send stable keys, and expired-key
   cleanup/retention is not automated.
@@ -159,19 +159,20 @@ SQUID_WEBHOOK_SECRET='the-webhook-secret' \
   worker exist; ordering guarantees and a long-term retention policy remain
   open.
 - **Event schema governance**: envelope v1 exists, but no shared schema registry
-  or compatibility tests with MessageBirds.
+  or compatibility tests with PyCustomerHub.
 - **Consent/PII**: Squid does not emit consent decisions or field-level
   minimization metadata.
-- **Custom-object GraphQL**: generic REST CRUD exists; metadata-generated
-  GraphQL types are not implemented.
-- **S3 storage**: local PostgreSQL file bytes only.
-- **Jobs/cron/workflows/integrations**: background webhook-retry and hourly
-  maintenance workers exist; a general job queue/cron scheduler, workflows and
-  integrations are still missing.
+- **Custom-object GraphQL**: generic JSON CRUD exists over GraphQL and REST;
+  metadata-generated typed GraphQL schemas are not implemented.
+- **S3 storage**: optional path-style S3-compatible storage now works alongside
+  the PostgreSQL fallback; live-provider verification is environment-specific.
+- **Jobs/cron/workflows/integrations**: a durable general job queue, background
+  worker and rescheduled maintenance jobs exist; workflow definitions and
+  third-party connectors are still missing.
 
 Required counterpart decisions:
 
-- MessageBirds/PyReverseETL should confirm envelope v1 and signature
+- PyCustomerHub/PyReverseETL should confirm envelope v1 and signature
   verification, or provide their canonical event schema.
 - Reverse-ETL/audience consumers should define idempotency keys and retry
   semantics.
@@ -185,7 +186,7 @@ Required counterpart decisions:
 2. Harden the background retry worker with cross-instance claiming and ordering
    guarantees; keep envelope v1 and the existing manual replay stable.
 3. Publish a JSON Schema for webhook envelope v1 and contract-test it against
-   MessageBirds when its schema is available.
+   PyCustomerHub when its schema is available.
 4. Add batch/upsert endpoints for reverse-ETL and audience sync.
 5. Add consent/PII metadata only after PyTagShield defines the contract.
 6. Consider generated GraphQL for custom objects separately; do not claim it

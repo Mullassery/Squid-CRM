@@ -97,6 +97,7 @@ const CORE_WEBHOOK_DELIVERIES_SQL: &str =
     include_str!("../migrations/core/0012_webhook_deliveries.sql");
 const CORE_WEBHOOK_DELIVERY_REPLAY_SQL: &str =
     include_str!("../migrations/core/0013_webhook_delivery_replay.sql");
+const CORE_JOBS_SQL: &str = include_str!("../migrations/core/0014_jobs.sql");
 
 #[derive(Debug, Clone)]
 pub struct WebhookDeliveryRecord {
@@ -111,6 +112,22 @@ pub struct WebhookDeliveryRecord {
     pub target_url: Option<String>,
     pub request_body: Option<Vec<u8>>,
     pub signature: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub completed_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct JobRecord {
+    pub id: Uuid,
+    pub workspace_id: Option<Uuid>,
+    pub kind: String,
+    pub payload: serde_json::Value,
+    pub state: String,
+    pub attempts: i32,
+    pub max_attempts: i32,
+    pub run_at: DateTime<Utc>,
+    pub last_error: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub completed_at: Option<DateTime<Utc>>,
@@ -486,6 +503,7 @@ impl Db {
             CORE_IDEMPOTENCY_KEYS_SQL,
             CORE_WEBHOOK_DELIVERIES_SQL,
             CORE_WEBHOOK_DELIVERY_REPLAY_SQL,
+            CORE_JOBS_SQL,
         ] {
             result = sqlx::raw_sql(ddl).execute(&mut *conn).await.map(|_| ());
             if result.is_err() {
@@ -2319,6 +2337,110 @@ impl Db {
         .await?
         .rows_affected();
         Ok((idempotency, deliveries))
+    }
+
+    pub async fn enqueue_job(
+        &self,
+        workspace_id: Option<Uuid>,
+        kind: &str,
+        payload: &serde_json::Value,
+        run_at: DateTime<Utc>,
+        max_attempts: i32,
+    ) -> anyhow::Result<Uuid> {
+        Ok(sqlx::query_scalar(
+            "INSERT INTO core.jobs (workspace_id, kind, payload, run_at, max_attempts)
+             VALUES ($1, $2, $3::text::jsonb, $4, $5) RETURNING id",
+        )
+        .bind(workspace_id)
+        .bind(kind)
+        .bind(payload.to_string())
+        .bind(run_at)
+        .bind(max_attempts)
+        .fetch_one(&self.pool)
+        .await?)
+    }
+
+    pub async fn claim_due_jobs(&self, limit: i64) -> anyhow::Result<Vec<JobRecord>> {
+        let rows = sqlx::query(
+            "UPDATE core.jobs SET state = 'running', attempts = attempts + 1, updated_at = now()
+             WHERE id IN (
+                 SELECT id FROM core.jobs
+                 WHERE state = 'pending' AND run_at <= now()
+                 ORDER BY run_at ASC
+                 FOR UPDATE SKIP LOCKED
+                 LIMIT $1
+             )
+             RETURNING id, workspace_id, kind, payload, state, attempts, max_attempts,
+                       run_at, last_error, created_at, updated_at, completed_at",
+        )
+        .bind(limit.clamp(1, 100))
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.iter().map(row_to_job).collect())
+    }
+
+    pub async fn complete_job(&self, id: Uuid) -> anyhow::Result<()> {
+        sqlx::query(
+            "UPDATE core.jobs SET state = 'succeeded', last_error = NULL,
+                    updated_at = now(), completed_at = now()
+             WHERE id = $1",
+        )
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn fail_job(&self, id: Uuid, error: &str) -> anyhow::Result<()> {
+        sqlx::query(
+            "UPDATE core.jobs SET
+                state = CASE WHEN attempts >= max_attempts THEN 'failed' ELSE 'pending' END,
+                last_error = $2,
+                run_at = CASE WHEN attempts >= max_attempts THEN run_at
+                              ELSE now() + (interval '30 seconds' * attempts) END,
+                updated_at = now(),
+                completed_at = CASE WHEN attempts >= max_attempts THEN now() ELSE NULL END
+             WHERE id = $1",
+        )
+        .bind(id)
+        .bind(error)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn list_jobs(
+        &self,
+        workspace_id: Option<Uuid>,
+        state: Option<&str>,
+        limit: i64,
+    ) -> anyhow::Result<Vec<JobRecord>> {
+        let rows = sqlx::query(
+            "SELECT id, workspace_id, kind, payload, state, attempts, max_attempts,
+                    run_at, last_error, created_at, updated_at, completed_at
+             FROM core.jobs
+             WHERE ($1::uuid IS NULL OR workspace_id = $1)
+               AND ($2::text IS NULL OR state = $2)
+             ORDER BY created_at DESC LIMIT $3",
+        )
+        .bind(workspace_id)
+        .bind(state)
+        .bind(limit.clamp(1, 500))
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.iter().map(row_to_job).collect())
+    }
+
+    pub async fn get_job(&self, id: Uuid) -> anyhow::Result<Option<JobRecord>> {
+        let row = sqlx::query(
+            "SELECT id, workspace_id, kind, payload, state, attempts, max_attempts,
+                    run_at, last_error, created_at, updated_at, completed_at
+             FROM core.jobs WHERE id = $1",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.as_ref().map(row_to_job))
     }
 
     pub async fn ensure_roles(&self, workspace_id: Uuid) -> anyhow::Result<()> {
@@ -5015,6 +5137,18 @@ impl Db {
         .bind(file_id)
         .bind(content)
         .bind(content.len() as i64)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    pub async fn mark_file_uploaded(&self, file_id: Uuid, size: i64) -> anyhow::Result<bool> {
+        let result = sqlx::query(
+            "UPDATE core.files SET uploaded = TRUE, size = $2, updated_at = now()
+             WHERE id = $1",
+        )
+        .bind(file_id)
+        .bind(size)
         .execute(&self.pool)
         .await?;
         Ok(result.rows_affected() > 0)
@@ -7814,6 +7948,23 @@ fn row_to_object(row: &sqlx::postgres::PgRow) -> anyhow::Result<ObjectMetadata> 
         index_metadata: Vec::new(),
         search_field_metadata: Vec::new(),
     })
+}
+
+fn row_to_job(row: &sqlx::postgres::PgRow) -> JobRecord {
+    JobRecord {
+        id: row.get("id"),
+        workspace_id: row.get("workspace_id"),
+        kind: row.get("kind"),
+        payload: row.get("payload"),
+        state: row.get("state"),
+        attempts: row.get("attempts"),
+        max_attempts: row.get("max_attempts"),
+        run_at: row.get("run_at"),
+        last_error: row.get("last_error"),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+        completed_at: row.get("completed_at"),
+    }
 }
 
 fn row_to_webhook_delivery(row: &sqlx::postgres::PgRow) -> WebhookDeliveryRecord {

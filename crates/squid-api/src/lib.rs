@@ -8,7 +8,8 @@ pub mod graphql;
 pub mod group_by;
 pub mod rate_limit;
 pub mod rest;
-pub use rest::{run_maintenance_worker, run_webhook_replay_worker};
+pub mod s3;
+pub use rest::{run_job_worker, run_maintenance_worker, run_webhook_replay_worker};
 pub mod sorting;
 
 use std::sync::Arc;
@@ -36,6 +37,7 @@ pub struct AppState {
     pub config: Arc<Config>,
     pub tokens: TokenService,
     pub auth_limiter: Arc<crate::rate_limit::AuthRateLimiter>,
+    pub storage: Option<s3::S3Storage>,
 }
 
 impl AppState {
@@ -45,9 +47,11 @@ impl AppState {
             config.login_token_ttl_secs,
             config.access_token_ttl_secs,
         );
+        let storage = config.s3.clone().and_then(|s3| s3::S3Storage::new(s3).ok());
         Self {
             db,
             config: Arc::new(config),
+            storage,
             tokens,
             auth_limiter: Arc::new(crate::rate_limit::AuthRateLimiter::default()),
         }
