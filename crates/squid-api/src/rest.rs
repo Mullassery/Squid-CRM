@@ -752,6 +752,13 @@ pub async fn create_company(
         "company",
         COMPANY_FIELDS,
     )?;
+    emit_webhooks(
+        &state,
+        auth.workspace_id,
+        "company.created",
+        body["data"]["createCompany"].clone(),
+    )
+    .await;
     Ok((axum::http::StatusCode::CREATED, Json(body)))
 }
 
@@ -776,6 +783,13 @@ pub async fn update_company(
         "company",
         COMPANY_FIELDS,
     )?;
+    emit_webhooks(
+        &state,
+        auth.workspace_id,
+        "company.updated",
+        body["data"]["updateCompany"].clone(),
+    )
+    .await;
     Ok(Json(body))
 }
 
@@ -812,6 +826,17 @@ pub async fn delete_company(
     if !deleted {
         return Err(AppError::NotFound("Record not found".to_string()));
     }
+    emit_webhooks(
+        &state,
+        auth.workspace_id,
+        if params.soft_delete {
+            "company.soft_deleted"
+        } else {
+            "company.deleted"
+        },
+        json!({ "id": id }),
+    )
+    .await;
     Ok(Json(json!({ "data": { "deleteCompany": { "id": id } } })))
 }
 
@@ -1084,6 +1109,13 @@ pub async fn create_opportunity(
         "opportunity",
         OPPORTUNITY_FIELDS,
     )?;
+    emit_webhooks(
+        &state,
+        auth.workspace_id,
+        "opportunity.created",
+        body["data"]["createOpportunity"].clone(),
+    )
+    .await;
     Ok((axum::http::StatusCode::CREATED, Json(body)))
 }
 
@@ -1108,6 +1140,13 @@ pub async fn update_opportunity(
         "opportunity",
         OPPORTUNITY_FIELDS,
     )?;
+    emit_webhooks(
+        &state,
+        auth.workspace_id,
+        "opportunity.updated",
+        body["data"]["updateOpportunity"].clone(),
+    )
+    .await;
     Ok(Json(body))
 }
 
@@ -1326,6 +1365,13 @@ pub async fn create_task(
         .map_err(AppError::Internal)?;
     let mut body = json!({ "data": { "createTask": task } });
     shape.project(&mut body["data"]["createTask"], "task", TASK_FIELDS)?;
+    emit_webhooks(
+        &state,
+        auth.workspace_id,
+        "task.created",
+        body["data"]["createTask"].clone(),
+    )
+    .await;
     Ok((axum::http::StatusCode::CREATED, Json(body)))
 }
 
@@ -1346,6 +1392,13 @@ pub async fn update_task(
         .ok_or_else(|| AppError::NotFound("Record not found".to_string()))?;
     let mut body = json!({ "data": { "updateTask": task } });
     shape.project(&mut body["data"]["updateTask"], "task", TASK_FIELDS)?;
+    emit_webhooks(
+        &state,
+        auth.workspace_id,
+        "task.updated",
+        body["data"]["updateTask"].clone(),
+    )
+    .await;
     Ok(Json(body))
 }
 
@@ -1382,6 +1435,17 @@ pub async fn delete_task(
     if !deleted {
         return Err(AppError::NotFound("Record not found".to_string()));
     }
+    emit_webhooks(
+        &state,
+        auth.workspace_id,
+        if params.soft_delete {
+            "task.soft_deleted"
+        } else {
+            "task.deleted"
+        },
+        json!({ "id": id }),
+    )
+    .await;
     Ok(Json(json!({ "data": { "deleteTask": { "id": id } } })))
 }
 
@@ -1540,6 +1604,13 @@ pub async fn create_note(
         .map_err(AppError::Internal)?;
     let mut body = json!({ "data": { "createNote": note } });
     shape.project(&mut body["data"]["createNote"], "note", NOTE_FIELDS)?;
+    emit_webhooks(
+        &state,
+        auth.workspace_id,
+        "note.created",
+        body["data"]["createNote"].clone(),
+    )
+    .await;
     Ok((axum::http::StatusCode::CREATED, Json(body)))
 }
 
@@ -1560,6 +1631,13 @@ pub async fn update_note(
         .ok_or_else(|| AppError::NotFound("Record not found".to_string()))?;
     let mut body = json!({ "data": { "updateNote": note } });
     shape.project(&mut body["data"]["updateNote"], "note", NOTE_FIELDS)?;
+    emit_webhooks(
+        &state,
+        auth.workspace_id,
+        "note.updated",
+        body["data"]["updateNote"].clone(),
+    )
+    .await;
     Ok(Json(body))
 }
 
@@ -1596,6 +1674,17 @@ pub async fn delete_note(
     if !deleted {
         return Err(AppError::NotFound("Record not found".to_string()));
     }
+    emit_webhooks(
+        &state,
+        auth.workspace_id,
+        if params.soft_delete {
+            "note.soft_deleted"
+        } else {
+            "note.deleted"
+        },
+        json!({ "id": id }),
+    )
+    .await;
     Ok(Json(json!({ "data": { "deleteNote": { "id": id } } })))
 }
 

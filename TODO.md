@@ -160,10 +160,10 @@
 - [x] Webhook settings CRUD (`webhooks`/`webhook`,
       `createWebhook`/`updateWebhook`/`deleteWebhook`); delivery workers are not
       implemented.
-- [x] Webhook delivery for person REST create/update/delete events
-      (fire-and-forget HTTP with the stored secret).
-- [ ] Webhook delivery for the remaining object events, jobs/cron, workflows
-      and integrations.
+- [x] Webhook delivery for person/company/opportunity/task/note REST
+      create/update/delete events (fire-and-forget HTTP with the stored secret).
+- [ ] Webhook delivery for GraphQL/target events, jobs/cron, workflows and
+      integrations.
 
 ## Phase 6-8
 - [ ] Threat model (`docs/threat-model.md`).
