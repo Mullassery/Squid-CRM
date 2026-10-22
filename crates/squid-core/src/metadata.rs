@@ -738,6 +738,7 @@ pub struct RoleRecord {
     pub can_be_assigned_to_api_keys: bool,
     pub application_id: Uuid,
     pub universal_identifier: Option<String>,
+    pub permission_flags: Vec<String>,
 }
 
 #[derive(Debug, Clone)]

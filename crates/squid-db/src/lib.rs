@@ -32,6 +32,42 @@ use squid_core::{
 use squid_core::{RolePatch, RoleRecord, RoleWrite, WebhookRecord};
 use uuid::Uuid;
 
+const PERMISSION_FLAG_KEYS: &[&str] = &[
+    "API_KEYS_AND_WEBHOOKS",
+    "WORKSPACE",
+    "WORKSPACE_MEMBERS",
+    "ROLES",
+    "DATA_MODEL",
+    "SECURITY",
+    "WORKFLOWS",
+    "IMPERSONATE",
+    "SSO_BYPASS",
+    "APPLICATIONS",
+    "MARKETPLACE_APPS",
+    "LAYOUTS",
+    "BILLING",
+    "AI_SETTINGS",
+    "AI",
+    "VIEWS",
+    "UPLOAD_FILE",
+    "DOWNLOAD_FILE",
+    "SEND_EMAIL_TOOL",
+    "CREATE_CALENDAR_EVENT_TOOL",
+    "HTTP_REQUEST_TOOL",
+    "CODE_INTERPRETER_TOOL",
+    "IMPORT_CSV",
+    "EXPORT_CSV",
+    "CONNECTED_ACCOUNTS",
+    "PROFILE_INFORMATION",
+];
+
+const MEMBER_PERMISSION_FLAG_KEYS: &[&str] = &[
+    "VIEWS",
+    "UPLOAD_FILE",
+    "DOWNLOAD_FILE",
+    "PROFILE_INFORMATION",
+];
+
 const CORE_SCHEMA_SQL: &str = include_str!("../migrations/core/0001_core.sql");
 const WORKSPACE_PERSON_SQL: &str = include_str!("../migrations/workspace/0001_person.sql");
 const WORKSPACE_PERSON_CONTRACT_SQL: &str =
@@ -53,6 +89,8 @@ const CORE_FILES_SQL: &str = include_str!("../migrations/core/0006_files.sql");
 const CORE_INDEXES_SQL: &str = include_str!("../migrations/core/0007_indexes.sql");
 const CORE_ROLES_SQL: &str = include_str!("../migrations/core/0008_roles.sql");
 const CORE_WEBHOOKS_SQL: &str = include_str!("../migrations/core/0009_webhooks.sql");
+const CORE_ROLE_PERMISSION_FLAGS_SQL: &str =
+    include_str!("../migrations/core/0010_role_permission_flags.sql");
 
 #[derive(Clone)]
 pub struct Db {
@@ -401,6 +439,7 @@ impl Db {
             CORE_INDEXES_SQL,
             CORE_ROLES_SQL,
             CORE_WEBHOOKS_SQL,
+            CORE_ROLE_PERMISSION_FLAGS_SQL,
         ] {
             result = sqlx::raw_sql(ddl).execute(&mut *conn).await.map(|_| ());
             if result.is_err() {
@@ -1991,6 +2030,25 @@ impl Db {
             .execute(&self.pool)
             .await?;
         }
+        for (label, flags) in [
+            ("Owner", PERMISSION_FLAG_KEYS),
+            ("Admin", PERMISSION_FLAG_KEYS),
+            ("Member", MEMBER_PERMISSION_FLAG_KEYS),
+        ] {
+            let role_id = Uuid::new_v5(&workspace_id, label.as_bytes());
+            for flag in flags {
+                sqlx::query(
+                    "INSERT INTO core.role_permission_flags (workspace_id, role_id, flag)
+                     VALUES ($1, $2, $3)
+                     ON CONFLICT (role_id, flag) DO NOTHING",
+                )
+                .bind(workspace_id)
+                .bind(role_id)
+                .bind(flag)
+                .execute(&self.pool)
+                .await?;
+            }
+        }
         sqlx::query(
             "UPDATE core.workspace_members wm
              SET role_id = r.id
@@ -2039,7 +2097,59 @@ impl Db {
         .bind(workspace_id)
         .fetch_all(&self.pool)
         .await?;
-        Ok(rows.iter().map(row_to_role).collect())
+        let mut roles: Vec<RoleRecord> = rows.iter().map(row_to_role).collect();
+        for role in &mut roles {
+            role.permission_flags = self.role_permission_flags(workspace_id, role.id).await?;
+        }
+        Ok(roles)
+    }
+
+    pub async fn role_permission_flags(
+        &self,
+        workspace_id: Uuid,
+        role_id: Uuid,
+    ) -> anyhow::Result<Vec<String>> {
+        Ok(sqlx::query_scalar(
+            "SELECT flag FROM core.role_permission_flags
+             WHERE workspace_id = $1 AND role_id = $2 ORDER BY flag ASC",
+        )
+        .bind(workspace_id)
+        .bind(role_id)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    pub async fn set_role_permission_flags(
+        &self,
+        workspace_id: Uuid,
+        role_id: Uuid,
+        flags: &[String],
+    ) -> anyhow::Result<()> {
+        self.ensure_roles(workspace_id).await?;
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            "DELETE FROM core.role_permission_flags WHERE workspace_id = $1 AND role_id = $2",
+        )
+        .bind(workspace_id)
+        .bind(role_id)
+        .execute(&mut *tx)
+        .await?;
+        for flag in flags {
+            if !PERMISSION_FLAG_KEYS.contains(&flag.as_str()) {
+                continue;
+            }
+            sqlx::query(
+                "INSERT INTO core.role_permission_flags (workspace_id, role_id, flag)
+                 VALUES ($1, $2, $3) ON CONFLICT (role_id, flag) DO NOTHING",
+            )
+            .bind(workspace_id)
+            .bind(role_id)
+            .bind(flag)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
     }
 
     pub async fn get_role(
@@ -2061,7 +2171,11 @@ impl Db {
         .bind(role_id)
         .fetch_optional(&self.pool)
         .await?;
-        Ok(row.as_ref().map(row_to_role))
+        let Some(mut role) = row.as_ref().map(row_to_role) else {
+            return Ok(None);
+        };
+        role.permission_flags = self.role_permission_flags(workspace_id, role.id).await?;
+        Ok(Some(role))
     }
 
     pub async fn create_role(
@@ -7049,6 +7163,7 @@ fn row_to_role(row: &sqlx::postgres::PgRow) -> RoleRecord {
         can_be_assigned_to_api_keys: row.get("can_be_assigned_to_api_keys"),
         application_id: row.get("application_id"),
         universal_identifier: row.get("universal_identifier"),
+        permission_flags: Vec::new(),
     }
 }
 

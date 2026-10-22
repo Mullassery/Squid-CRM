@@ -6372,6 +6372,31 @@ async fn role_assignment_uses_metadata_roles() {
         .unwrap()
         .to_string();
 
+    let flags = send(
+        &app,
+        json_request(
+            "POST",
+            "/metadata",
+            json!({
+                "query": "mutation($input: UpsertPermissionFlagsInput!) { upsertPermissionFlags(upsertPermissionFlagsInput: $input) { roleId flag } }",
+                "variables": {
+                    "input": {
+                        "roleId": custom_role_id,
+                        "permissionFlagKeys": ["VIEWS", "EXPORT_CSV"]
+                    }
+                }
+            }),
+        )
+        .with_bearer(&token),
+    )
+    .await;
+    assert!(flags.body["errors"].is_null(), "errors: {}", flags.body);
+    let flags = flags.body["data"]["upsertPermissionFlags"]
+        .as_array()
+        .unwrap();
+    assert_eq!(flags.len(), 2);
+    assert!(flags.iter().any(|flag| flag["flag"] == "EXPORT_CSV"));
+
     let renamed = send(
         &app,
         json_request(

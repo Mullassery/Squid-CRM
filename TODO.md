@@ -110,8 +110,10 @@
       `updateWorkspaceMemberRole`, `assignRoleToApiKey`, `getApiKeyRoles`.
 - [x] Custom role CRUD (`createOneRole`/`updateOneRole`/`deleteOneRole`) with
       immutable built-in roles.
-- [ ] Permission-flag assignment/enforcement and metadata-driven dynamic schema
-      generation.
+- [x] Permission-flag storage on roles (`role_permission_flags`) and
+      `upsertPermissionFlags`/`Role.permissionFlags` read API.
+- [ ] Permission-flag enforcement across views/files/data operations and
+      metadata-driven dynamic schema generation.
 - [ ] Custom-object physical tables and dynamic GraphQL/REST schema/relation
       field creation (metadata writes currently persist metadata only).
 - [x] `currentUser`/`currentWorkspace` full frontend boot fragment (ADR 0005;
@@ -123,7 +125,8 @@
 - [x] `ApiKey.role` exposes the upstream `Role` object, resolved from the
       assigned metadata role.
 - [ ] Permission-flag enforcement across views/files/data operations,
-      billing/SSO data and feature flags.
+      billing/SSO data and feature flags (flags are stored and exposed but not
+      enforced).
 - [x] REST target routes, target updates/batches, and nested target record resolution (`TaskTarget.targetCompany` etc.).
 - [x] Scalar ordering parity (`orderBy` + REST `order_by`) for company,
       opportunity, task, note and task/note targets; relation ordering pending.

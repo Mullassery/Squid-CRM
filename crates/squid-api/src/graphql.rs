@@ -273,6 +273,13 @@ pub struct UpdateWebhookInputUpdatesGql {
 }
 
 #[derive(Debug, InputObject)]
+#[graphql(name = "UpsertPermissionFlagsInput")]
+pub struct UpsertPermissionFlagsInputGql {
+    pub role_id: Uuid,
+    pub permission_flag_keys: Vec<String>,
+}
+
+#[derive(Debug, InputObject)]
 pub struct RevokeApiKeyInput {
     pub id: uuid::Uuid,
 }
@@ -5369,6 +5376,32 @@ impl MutationRoot {
             .await
             .map_err(|e| gql_err(AppError::Internal(e)))?
             .ok_or_else(|| gql_err(AppError::NotFound("Webhook not found".to_string())))
+    }
+
+    async fn upsert_permission_flags(
+        &self,
+        ctx: &Context<'_>,
+        #[graphql(name = "upsertPermissionFlagsInput")] input: UpsertPermissionFlagsInputGql,
+    ) -> async_graphql::Result<Vec<current_user::RolePermissionFlagGql>> {
+        let auth = require_admin(ctx)?;
+        state(ctx)
+            .db
+            .set_role_permission_flags(
+                auth.workspace_id,
+                input.role_id,
+                &input.permission_flag_keys,
+            )
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        let role = state(ctx)
+            .db
+            .get_role(auth.workspace_id, input.role_id)
+            .await
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .ok_or_else(|| gql_err(AppError::NotFound("Role not found".to_string())))?;
+        Ok(current_user::RoleGql::from(role)
+            .permission_flags
+            .unwrap_or_default())
     }
 
     async fn create_one_role(

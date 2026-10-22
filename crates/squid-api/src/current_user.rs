@@ -142,6 +142,14 @@ pub struct RowLevelPermissionPredicateGroup {
 }
 
 #[derive(Debug, Clone, SimpleObject)]
+#[graphql(name = "RolePermissionFlag")]
+pub struct RolePermissionFlagGql {
+    pub id: Uuid,
+    pub role_id: Uuid,
+    pub flag: String,
+}
+
+#[derive(Debug, Clone, SimpleObject)]
 #[graphql(name = "Role")]
 pub struct RoleGql {
     pub id: Uuid,
@@ -160,6 +168,7 @@ pub struct RoleGql {
     pub can_be_assigned_to_api_keys: bool,
     pub application_id: Uuid,
     pub universal_identifier: Option<String>,
+    pub permission_flags: Option<Vec<RolePermissionFlagGql>>,
 }
 
 #[derive(Debug, Clone, SimpleObject)]
@@ -369,6 +378,7 @@ pub fn role_gql(workspace_id: Uuid, role: Role) -> RoleGql {
         can_be_assigned_to_api_keys: true,
         application_id: NIL_UUID,
         universal_identifier: Some(workspace_id.to_string()),
+        permission_flags: None,
     }
 }
 
@@ -482,6 +492,16 @@ impl From<RoleRecord> for RoleGql {
             can_be_assigned_to_api_keys: role.can_be_assigned_to_api_keys,
             application_id: role.application_id,
             universal_identifier: role.universal_identifier,
+            permission_flags: Some(
+                role.permission_flags
+                    .into_iter()
+                    .map(|flag| RolePermissionFlagGql {
+                        id: Uuid::new_v5(&role.id, flag.as_bytes()),
+                        role_id: role.id,
+                        flag,
+                    })
+                    .collect(),
+            ),
         }
     }
 }
