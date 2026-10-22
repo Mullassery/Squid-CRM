@@ -155,8 +155,9 @@
       ranked `tsRankCD`/`tsRank`, cursors and include/exclude object filters.
 - [x] Search `ObjectRecordFilterInput` semantics (id/createdAt/updatedAt/
       deletedAt plus and/or/not).
-- [ ] Export/import; local file upload exists for attachments/avatars but no
-      object-storage backend.
+- [x] CSV export for people/companies/opportunities/tasks/notes and CSV import
+      for people.
+- [ ] CSV import for the remaining objects and S3-compatible object storage.
 - [x] Webhook settings CRUD (`webhooks`/`webhook`,
       `createWebhook`/`updateWebhook`/`deleteWebhook`); delivery workers are not
       implemented.

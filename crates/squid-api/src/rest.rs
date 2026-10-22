@@ -424,6 +424,300 @@ pub async fn list_people(
     Ok(Json(body))
 }
 
+fn csv_escape(value: &str) -> String {
+    if value.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        value.to_string()
+    }
+}
+
+fn csv_response(rows: Vec<Vec<String>>) -> AppResult<axum::response::Response> {
+    use axum::response::IntoResponse;
+    let body = rows
+        .into_iter()
+        .map(|row| {
+            row.iter()
+                .map(|value| csv_escape(value))
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    Ok((
+        [
+            (axum::http::header::CONTENT_TYPE, "text/csv; charset=utf-8"),
+            (
+                axum::http::header::CONTENT_DISPOSITION,
+                "attachment; filename=\"export.csv\"",
+            ),
+        ],
+        body,
+    )
+        .into_response())
+}
+
+pub async fn export_people(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> AppResult<axum::response::Response> {
+    let auth = require_capability(&state, &headers, Capability::Read).await?;
+    let page = state
+        .db
+        .list_persons_page(auth.workspace_id, 10_000, 0, None, None, &[], None)
+        .await
+        .map_err(AppError::Internal)?;
+    let mut rows = vec![
+        "id,createdAt,updatedAt,firstName,lastName,primaryEmail,jobTitle,companyId"
+            .split(',')
+            .map(ToString::to_string)
+            .collect::<Vec<_>>(),
+    ];
+    for person in page.persons {
+        rows.push(vec![
+            person.id.to_string(),
+            person.created_at.to_rfc3339(),
+            person.updated_at.to_rfc3339(),
+            person.name.first_name,
+            person.name.last_name,
+            person.emails.primary_email,
+            person.job_title.unwrap_or_default(),
+            person
+                .company_id
+                .map(|id| id.to_string())
+                .unwrap_or_default(),
+        ]);
+    }
+    csv_response(rows)
+}
+
+fn parse_csv_line(line: &str) -> Vec<String> {
+    let mut fields = Vec::new();
+    let mut current = String::new();
+    let mut chars = line.chars().peekable();
+    let mut quoted = false;
+    while let Some(ch) = chars.next() {
+        match ch {
+            '"' if quoted && chars.peek() == Some(&'"') => {
+                current.push('"');
+                chars.next();
+            }
+            '"' => quoted = !quoted,
+            ',' if !quoted => {
+                fields.push(current.clone());
+                current.clear();
+            }
+            other => current.push(other),
+        }
+    }
+    fields.push(current);
+    fields
+}
+
+pub async fn import_people(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> AppResult<Json<serde_json::Value>> {
+    let auth = require_capability(&state, &headers, Capability::Update).await?;
+    let text = String::from_utf8(body.to_vec())
+        .map_err(|_| AppError::BadRequest("CSV must be UTF-8".to_string()))?;
+    let mut lines = text.lines().filter(|line| !line.trim().is_empty());
+    let header = lines
+        .next()
+        .ok_or_else(|| AppError::BadRequest("CSV header is required".to_string()))?;
+    let columns = parse_csv_line(header)
+        .into_iter()
+        .map(|column| column.trim().to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    let index = |name: &str| columns.iter().position(|column| column == name);
+    let first = index("firstname");
+    let last = index("lastname");
+    let email = index("primaryemail").or_else(|| index("email"));
+    let job = index("jobtitle");
+    let company = index("companyid");
+    if first.is_none() || email.is_none() {
+        return Err(AppError::BadRequest(
+            "CSV must include firstName and primaryEmail columns".to_string(),
+        ));
+    }
+    let mut imported = 0i64;
+    for line in lines {
+        let values = parse_csv_line(line);
+        let value = |position: Option<usize>| {
+            position
+                .and_then(|position| values.get(position))
+                .cloned()
+                .unwrap_or_default()
+        };
+        let input = CreatePersonInput {
+            name: squid_core::FullName {
+                first_name: value(first),
+                last_name: value(last),
+            },
+            emails: squid_core::Emails {
+                primary_email: value(email),
+                additional_emails: Vec::new(),
+            },
+            job_title: job
+                .and_then(|position| values.get(position))
+                .filter(|value| !value.is_empty())
+                .cloned(),
+            company_id: company
+                .and_then(|position| values.get(position))
+                .and_then(|value| Uuid::parse_str(value).ok()),
+            ..Default::default()
+        };
+        if input.name.first_name.is_empty() && input.name.last_name.is_empty() {
+            continue;
+        }
+        state
+            .db
+            .create_person(auth.workspace_id, &input)
+            .await
+            .map_err(AppError::Internal)?;
+        imported += 1;
+    }
+    Ok(Json(json!({ "imported": imported })))
+}
+
+pub async fn export_companies(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> AppResult<axum::response::Response> {
+    let auth = require_capability(&state, &headers, Capability::Read).await?;
+    let (companies, _) = state
+        .db
+        .list_companies(auth.workspace_id, 10_000, 0)
+        .await
+        .map_err(AppError::Internal)?;
+    let mut rows = vec![vec![
+        "id".to_string(),
+        "createdAt".to_string(),
+        "updatedAt".to_string(),
+        "name".to_string(),
+        "accountOwnerId".to_string(),
+    ]];
+    for company in companies {
+        rows.push(vec![
+            company.id.to_string(),
+            company.created_at.to_rfc3339(),
+            company.updated_at.to_rfc3339(),
+            company.name.unwrap_or_default(),
+            company
+                .account_owner_id
+                .map(|id| id.to_string())
+                .unwrap_or_default(),
+        ]);
+    }
+    csv_response(rows)
+}
+
+pub async fn export_opportunities(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> AppResult<axum::response::Response> {
+    let auth = require_capability(&state, &headers, Capability::Read).await?;
+    let (opportunities, _) = state
+        .db
+        .list_opportunities(auth.workspace_id, 10_000, 0)
+        .await
+        .map_err(AppError::Internal)?;
+    let mut rows = vec![vec![
+        "id".to_string(),
+        "createdAt".to_string(),
+        "updatedAt".to_string(),
+        "name".to_string(),
+        "stage".to_string(),
+        "closeDate".to_string(),
+        "companyId".to_string(),
+    ]];
+    for opportunity in opportunities {
+        rows.push(vec![
+            opportunity.id.to_string(),
+            opportunity.created_at.to_rfc3339(),
+            opportunity.updated_at.to_rfc3339(),
+            opportunity.name.unwrap_or_default(),
+            opportunity.stage.as_str().to_string(),
+            opportunity
+                .close_date
+                .map(|date| date.to_rfc3339())
+                .unwrap_or_default(),
+            opportunity
+                .company_id
+                .map(|id| id.to_string())
+                .unwrap_or_default(),
+        ]);
+    }
+    csv_response(rows)
+}
+
+pub async fn export_tasks(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> AppResult<axum::response::Response> {
+    let auth = require_capability(&state, &headers, Capability::Read).await?;
+    let (tasks, _) = state
+        .db
+        .list_tasks(auth.workspace_id, 10_000, 0)
+        .await
+        .map_err(AppError::Internal)?;
+    let mut rows = vec![vec![
+        "id".to_string(),
+        "createdAt".to_string(),
+        "updatedAt".to_string(),
+        "title".to_string(),
+        "status".to_string(),
+        "dueAt".to_string(),
+        "assigneeId".to_string(),
+    ]];
+    for task in tasks {
+        rows.push(vec![
+            task.id.to_string(),
+            task.created_at.to_rfc3339(),
+            task.updated_at.to_rfc3339(),
+            task.title.unwrap_or_default(),
+            task.status
+                .map(|status| status.as_str().to_string())
+                .unwrap_or_default(),
+            task.due_at
+                .map(|date| date.to_rfc3339())
+                .unwrap_or_default(),
+            task.assignee_id
+                .map(|id| id.to_string())
+                .unwrap_or_default(),
+        ]);
+    }
+    csv_response(rows)
+}
+
+pub async fn export_notes(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> AppResult<axum::response::Response> {
+    let auth = require_capability(&state, &headers, Capability::Read).await?;
+    let (notes, _) = state
+        .db
+        .list_notes(auth.workspace_id, 10_000, 0)
+        .await
+        .map_err(AppError::Internal)?;
+    let mut rows = vec![vec![
+        "id".to_string(),
+        "createdAt".to_string(),
+        "updatedAt".to_string(),
+        "title".to_string(),
+    ]];
+    for note in notes {
+        rows.push(vec![
+            note.id.to_string(),
+            note.created_at.to_rfc3339(),
+            note.updated_at.to_rfc3339(),
+            note.title.unwrap_or_default(),
+        ]);
+    }
+    csv_response(rows)
+}
+
 pub async fn get_person(
     State(state): State<AppState>,
     headers: HeaderMap,

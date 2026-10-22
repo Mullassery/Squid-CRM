@@ -213,6 +213,8 @@ pub fn app(state: AppState) -> Router {
                 .delete(rest::delete_person),
         )
         .route("/rest/people/{id}/restore", patch(rest::restore_person))
+        .route("/rest/people/export", get(rest::export_people))
+        .route("/rest/people/import", post(rest::import_people))
         .route("/rest/people/groupBy", get(rest::group_by_people))
         .route(
             "/rest/companies",
@@ -225,6 +227,7 @@ pub fn app(state: AppState) -> Router {
                 .delete(rest::delete_company),
         )
         .route("/rest/companies/{id}/restore", patch(rest::restore_company))
+        .route("/rest/companies/export", get(rest::export_companies))
         .route("/rest/companies/groupBy", get(rest::group_by_companies))
         .route(
             "/rest/opportunities",
@@ -241,6 +244,10 @@ pub fn app(state: AppState) -> Router {
             patch(rest::restore_opportunity),
         )
         .route(
+            "/rest/opportunities/export",
+            get(rest::export_opportunities),
+        )
+        .route(
             "/rest/opportunities/groupBy",
             get(rest::group_by_opportunities),
         )
@@ -252,6 +259,7 @@ pub fn app(state: AppState) -> Router {
                 .delete(rest::delete_task),
         )
         .route("/rest/tasks/{id}/restore", patch(rest::restore_task))
+        .route("/rest/tasks/export", get(rest::export_tasks))
         .route("/rest/tasks/groupBy", get(rest::group_by_tasks))
         .route("/rest/notes", get(rest::list_notes).post(rest::create_note))
         .route(
@@ -261,6 +269,7 @@ pub fn app(state: AppState) -> Router {
                 .delete(rest::delete_note),
         )
         .route("/rest/notes/{id}/restore", patch(rest::restore_note))
+        .route("/rest/notes/export", get(rest::export_notes))
         .route("/rest/notes/groupBy", get(rest::group_by_notes))
         .route(
             "/rest/taskTargets",

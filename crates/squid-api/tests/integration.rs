@@ -6505,6 +6505,70 @@ async fn webhook_crud_matches_metadata_contract() {
 }
 
 #[tokio::test]
+async fn rest_export_returns_csv() {
+    let app = test_app().await;
+    let email = unique_email("export");
+    let (token, _workspace) = signup(&app, &email).await;
+    let created = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/people",
+            &token,
+            Some(person_body("Csv", "Export", "csv-export@example.com")),
+        ),
+    )
+    .await;
+    assert_eq!(
+        created.status,
+        StatusCode::CREATED,
+        "body: {}",
+        created.body
+    );
+
+    let request = authorized("GET", "/rest/people/export", &token, None);
+    let response = app.clone().oneshot(request).await.expect("export request");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("text/csv; charset=utf-8")
+    );
+    let bytes = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read csv");
+    let csv = String::from_utf8(bytes.to_vec()).expect("csv utf8");
+    assert!(csv.starts_with("id,createdAt,updatedAt,firstName,lastName"));
+    assert!(csv.contains("Csv,Export,csv-export@example.com"));
+
+    let import_request = Request::builder()
+        .method("POST")
+        .uri("/rest/people/import")
+        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+        .header(header::CONTENT_TYPE, "text/csv")
+        .body(Body::from(
+            "firstName,lastName,primaryEmail,jobTitle\nImported,Person,imported@example.com,Engineer\n",
+        ))
+        .unwrap();
+    let imported = app
+        .clone()
+        .oneshot(import_request)
+        .await
+        .expect("import request");
+    assert_eq!(imported.status(), StatusCode::OK);
+    let imported_body = to_bytes(imported.into_body(), usize::MAX)
+        .await
+        .expect("read import body");
+    let imported_json: Value = serde_json::from_slice(&imported_body).expect("import json");
+    assert_eq!(imported_json["imported"], 1);
+
+    let list = send(&app, authorized("GET", "/rest/people", &token, None)).await;
+    assert_eq!(list.body["totalCount"], 2);
+}
+
+#[tokio::test]
 async fn webhook_delivery_posts_record_events() {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Value>();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
