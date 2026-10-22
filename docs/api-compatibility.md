@@ -376,7 +376,7 @@ Known remaining divergences (do not claim parity):
 | Company filters | full `CompanyFilterInput` with relations | GraphQL `id`/`createdAt`/`updatedAt`/`name`/`accountOwnerId` + logic; REST scalar and dot-path `company.*` filters | nested `accountOwner` relation filters pending |
 | Company ordering | GraphQL `orderBy` + REST `order_by` | scalar fields applied in memory; nested relation ordering ignored | add relation ordering |
 | Opportunity filters | full scalar + relation filters | GraphQL scalar fields plus nested `company`/`pointOfContact`; REST scalar and dot-path filters | nested `owner` filters and relation ordering pending |
-| Opportunity ordering | GraphQL `orderBy` + REST `order_by` | scalar fields applied in memory; nested relation ordering ignored | add relation ordering |
+| Opportunity ordering | GraphQL `orderBy` + REST `order_by` | scalar fields plus nested `company.*`/`pointOfContact.*` ordering | other relation ordering pending |
 | Task/Note targets | full polymorphic relations + REST | GraphQL nested/root queries + CRUD/batches + `totalCount`; REST CRUD + scalar filter/order | relation ordering pending |
 | Task/Note ordering | GraphQL `orderBy` + REST `order_by` | scalar fields applied in memory; nested relation ordering ignored | add relation ordering |
 | Workspace prefill | sample people/companies on activation | none (new workspace has 0 people) | implement prefill |

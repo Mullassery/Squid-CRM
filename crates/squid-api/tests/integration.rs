@@ -3763,6 +3763,47 @@ async fn relation_filters_match_nested_company_and_contact() {
         other_opportunity.body
     );
 
+    let alpha_company = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/companies",
+            &token,
+            Some(json!({ "name": "Alpha Corp" })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        alpha_company.status,
+        StatusCode::CREATED,
+        "body: {}",
+        alpha_company.body
+    );
+    let alpha_company_id = alpha_company.body["data"]["createCompany"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let alpha_opportunity = send(
+        &app,
+        authorized(
+            "POST",
+            "/rest/opportunities",
+            &token,
+            Some(json!({
+                "name": "Alpha Deal",
+                "companyId": alpha_company_id,
+                "stage": "NEW"
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(
+        alpha_opportunity.status,
+        StatusCode::CREATED,
+        "body: {}",
+        alpha_opportunity.body
+    );
+
     let people_rest = send(
         &app,
         authorized(
@@ -3884,6 +3925,57 @@ async fn relation_filters_match_nested_company_and_contact() {
     assert_eq!(
         opportunities_gql.body["data"]["opportunities"]["edges"][0]["node"]["name"],
         "Relation Deal"
+    );
+
+    let ordered_rest = send(
+        &app,
+        authorized(
+            "GET",
+            "/rest/opportunities?order_by=company.name%5BDescNullsLast%5D",
+            &token,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(
+        ordered_rest.status,
+        StatusCode::OK,
+        "body: {}",
+        ordered_rest.body
+    );
+    assert_eq!(
+        ordered_rest.body["data"]["opportunities"][0]["name"],
+        "Relation Deal"
+    );
+    assert_eq!(
+        ordered_rest.body["data"]["opportunities"][1]["name"],
+        "Alpha Deal"
+    );
+
+    let ordered_gql = send(
+        &app,
+        authorized(
+            "POST",
+            "/graphql",
+            &token,
+            Some(json!({
+                "query": "{ opportunities(orderBy: [{ company: { name: DescNullsLast } }]) { edges { node { name } } } }"
+            })),
+        ),
+    )
+    .await;
+    assert!(
+        ordered_gql.body["errors"].is_null(),
+        "errors: {}",
+        ordered_gql.body
+    );
+    assert_eq!(
+        ordered_gql.body["data"]["opportunities"]["edges"][0]["node"]["name"],
+        "Relation Deal"
+    );
+    assert_eq!(
+        ordered_gql.body["data"]["opportunities"]["edges"][1]["node"]["name"],
+        "Alpha Deal"
     );
 }
 

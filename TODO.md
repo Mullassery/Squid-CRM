@@ -126,7 +126,9 @@
       `pointOfContact` for opportunities (GraphQL + REST dot-path).
 - [x] View-based groupBy paging: `offsetForRecords` and default record order from
       the view's sorts when `order_by_for_records` is omitted.
-- [ ] Nested relation ordering and remaining view semantics.
+- [x] Nested relation ordering for opportunities (`company.*`,
+      `pointOfContact.*`) in GraphQL `orderBy` and REST `order_by`.
+- [ ] Nested relation ordering for the remaining objects.
 - [x] GraphQL `search` across person/company/opportunity/task/note with
       ranked `tsRankCD`/`tsRank`, cursors and include/exclude object filters.
 - [ ] Search filter input (`ObjectRecordFilterInput`) semantics, export/import;
@@ -155,8 +157,8 @@
   `accountOwnerId` plus `and`/`or`/`not`; nested `accountOwner` relation filters
   and relation ordering are not implemented.
 - Opportunity filters support nested `company` and `pointOfContact` in GraphQL
-  and REST dot-path syntax; nested `owner` filters and relation ordering are not
-  implemented.
+  and REST dot-path syntax; nested `owner` filters are not implemented. Relation
+  ordering is supported for `company.*` and `pointOfContact.*`.
 - Task/Note target REST filters and ordering cover scalar fields.
 - Task/Note GraphQL and REST filters cover scalar fields
   (id/title/status/dueAt/assigneeId); relation filters and nested ordering are not.

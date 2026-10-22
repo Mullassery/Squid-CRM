@@ -713,18 +713,31 @@ pub enum OrderByDirection {
 }
 
 fn json_order_terms(raw: &[serde_json::Value]) -> Vec<SortTerm> {
+    fn collect(
+        object: &serde_json::Map<String, serde_json::Value>,
+        prefix: &str,
+        terms: &mut Vec<SortTerm>,
+    ) {
+        for (field, value) in object {
+            let path = if prefix.is_empty() {
+                field.clone()
+            } else {
+                format!("{prefix}.{field}")
+            };
+            if let Some(direction) = value.as_str() {
+                if let Some(term) = SortTerm::parse(&path, direction) {
+                    terms.push(term);
+                }
+            } else if let Some(nested) = value.as_object() {
+                collect(nested, &path, terms);
+            }
+        }
+    }
+
     let mut terms = Vec::new();
     for item in raw {
-        let Some(object) = item.as_object() else {
-            continue;
-        };
-        for (field, direction) in object {
-            let Some(direction) = direction.as_str() else {
-                continue;
-            };
-            if let Some(term) = SortTerm::parse(field, direction) {
-                terms.push(term);
-            }
+        if let Some(object) = item.as_object() {
+            collect(object, "", &mut terms);
         }
     }
     terms
@@ -734,8 +747,19 @@ pub(crate) fn sort_companies(items: &mut [Company], terms: &[SortTerm]) {
     sort_records(items, terms, crate::sorting::company_value);
 }
 
-pub(crate) fn sort_opportunities(items: &mut [Opportunity], terms: &[SortTerm]) {
-    sort_records(items, terms, crate::sorting::opportunity_value);
+fn sort_opportunities_related(
+    items: &mut [Opportunity],
+    terms: &[SortTerm],
+    companies: &HashMap<Uuid, Company>,
+    people: &HashMap<Uuid, Person>,
+) {
+    sort_records(items, terms, |opportunity, field| {
+        crate::sorting::opportunity_related_value(opportunity, field, companies, people)
+    });
+}
+
+fn order_uses_prefix(terms: &[SortTerm], prefix: &str) -> bool {
+    terms.iter().any(|term| term.field.starts_with(prefix))
 }
 
 pub(crate) fn sort_tasks(items: &mut [Task], terms: &[SortTerm]) {
@@ -3522,7 +3546,10 @@ impl QueryRoot {
             .await
             .map_err(|e| gql_err(AppError::Internal(e)))?;
         let filter = filter.unwrap_or_default();
-        let companies = if opportunity_needs_companies(&filter) {
+        let companies = if opportunity_needs_companies(&filter)
+            || order_uses_prefix(&order, "company.")
+            || order_uses_prefix(&order, "pointOfContact.")
+        {
             let (companies, _) = state(ctx)
                 .db
                 .list_companies(auth.workspace_id, 10_000, 0)
@@ -3535,21 +3562,22 @@ impl QueryRoot {
         } else {
             HashMap::new()
         };
-        let people = if opportunity_needs_people(&filter) {
-            state(ctx)
-                .db
-                .list_persons_page(auth.workspace_id, 10_000, 0, None, None, &[], None)
-                .await
-                .map_err(|e| gql_err(AppError::Internal(e)))?
-                .persons
-                .into_iter()
-                .map(|person| (person.id, person))
-                .collect()
-        } else {
-            HashMap::new()
-        };
+        let people =
+            if opportunity_needs_people(&filter) || order_uses_prefix(&order, "pointOfContact.") {
+                state(ctx)
+                    .db
+                    .list_persons_page(auth.workspace_id, 10_000, 0, None, None, &[], None)
+                    .await
+                    .map_err(|e| gql_err(AppError::Internal(e)))?
+                    .persons
+                    .into_iter()
+                    .map(|person| (person.id, person))
+                    .collect()
+            } else {
+                HashMap::new()
+            };
         all.retain(|opportunity| opportunity_matches(opportunity, &filter, &companies, &people));
-        sort_opportunities(&mut all, &order);
+        sort_opportunities_related(&mut all, &order, &companies, &people);
 
         let total = all.len() as i64;
         let limit = first

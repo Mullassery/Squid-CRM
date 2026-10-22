@@ -142,6 +142,23 @@ pub fn person_value(person: &Person, field: &str) -> Option<SortValue> {
     }
 }
 
+pub fn opportunity_related_value(
+    opportunity: &Opportunity,
+    field: &str,
+    companies: &std::collections::HashMap<uuid::Uuid, Company>,
+    people: &std::collections::HashMap<uuid::Uuid, Person>,
+) -> Option<SortValue> {
+    if let Some(rest) = field.strip_prefix("company.") {
+        let company = companies.get(&opportunity.company_id?)?;
+        return company_value(company, rest);
+    }
+    if let Some(rest) = field.strip_prefix("pointOfContact.") {
+        let person = people.get(&opportunity.point_of_contact_id?)?;
+        return person_value(person, rest);
+    }
+    opportunity_value(opportunity, field)
+}
+
 pub fn opportunity_value(opportunity: &Opportunity, field: &str) -> Option<SortValue> {
     match field {
         "id" => Some(text(opportunity.id)),

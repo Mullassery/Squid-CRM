@@ -26,8 +26,7 @@ use uuid::Uuid;
 
 use crate::filtering::{self, parse_generic_filter};
 use crate::graphql::{
-    sort_companies, sort_note_targets, sort_notes, sort_opportunities, sort_task_targets,
-    sort_tasks,
+    sort_companies, sort_note_targets, sort_notes, sort_task_targets, sort_tasks,
 };
 use crate::sorting::{
     company_value, note_target_value, note_value, opportunity_value, person_value,
@@ -812,7 +811,20 @@ pub async fn list_opportunities(
             "stage",
             "position",
             "companyId",
+            "company.id",
+            "company.createdAt",
+            "company.updatedAt",
+            "company.name",
+            "company.position",
+            "company.accountOwnerId",
             "pointOfContactId",
+            "pointOfContact.id",
+            "pointOfContact.createdAt",
+            "pointOfContact.updatedAt",
+            "pointOfContact.name.firstName",
+            "pointOfContact.name.lastName",
+            "pointOfContact.emails.primaryEmail",
+            "pointOfContact.jobTitle",
             "ownerId",
             "searchVector",
         ],
@@ -839,35 +851,45 @@ pub async fn list_opportunities(
         .list_opportunities(auth.workspace_id, 10_000, 0)
         .await
         .map_err(AppError::Internal)?;
+    let needs_companies = filter
+        .as_ref()
+        .is_some_and(|filter| filtering::references_prefix(filter, "company."))
+        || order.iter().any(|term| {
+            term.field.starts_with("company.") || term.field.starts_with("pointOfContact.")
+        });
+    let companies: HashMap<Uuid, Company> = if needs_companies {
+        let (companies, _) = state
+            .db
+            .list_companies(auth.workspace_id, 10_000, 0)
+            .await
+            .map_err(AppError::Internal)?;
+        companies
+            .into_iter()
+            .map(|company| (company.id, company))
+            .collect()
+    } else {
+        HashMap::new()
+    };
+    let needs_people = filter
+        .as_ref()
+        .is_some_and(|filter| filtering::references_prefix(filter, "pointOfContact."))
+        || order
+            .iter()
+            .any(|term| term.field.starts_with("pointOfContact."));
+    let people: HashMap<Uuid, squid_core::Person> = if needs_people {
+        state
+            .db
+            .list_persons_page(auth.workspace_id, 10_000, 0, None, None, &[], None)
+            .await
+            .map_err(AppError::Internal)?
+            .persons
+            .into_iter()
+            .map(|person| (person.id, person))
+            .collect()
+    } else {
+        HashMap::new()
+    };
     if let Some(filter) = &filter {
-        let companies: HashMap<Uuid, Company> = if filtering::references_prefix(filter, "company.")
-        {
-            let (companies, _) = state
-                .db
-                .list_companies(auth.workspace_id, 10_000, 0)
-                .await
-                .map_err(AppError::Internal)?;
-            companies
-                .into_iter()
-                .map(|company| (company.id, company))
-                .collect()
-        } else {
-            HashMap::new()
-        };
-        let people: HashMap<Uuid, squid_core::Person> =
-            if filtering::references_prefix(filter, "pointOfContact.") {
-                state
-                    .db
-                    .list_persons_page(auth.workspace_id, 10_000, 0, None, None, &[], None)
-                    .await
-                    .map_err(AppError::Internal)?
-                    .persons
-                    .into_iter()
-                    .map(|person| (person.id, person))
-                    .collect()
-            } else {
-                HashMap::new()
-            };
         opportunities.retain(|opportunity| {
             filtering::matches(filter, &|field| {
                 opportunity_relation_value(opportunity, field, &companies, &people)
@@ -875,7 +897,9 @@ pub async fn list_opportunities(
         });
     }
     let total = opportunities.len() as i64;
-    sort_opportunities(&mut opportunities, &order);
+    crate::sorting::sort_records(&mut opportunities, &order, |opportunity, field| {
+        opportunity_relation_value(opportunity, field, &companies, &people)
+    });
 
     if let Some(after) = starting_after {
         if let Some(index) = opportunities.iter().position(|row| row.id == after) {
