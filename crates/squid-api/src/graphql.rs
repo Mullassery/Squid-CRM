@@ -1407,7 +1407,7 @@ pub struct TaskFilterInput {
     pub not: Option<Box<TaskFilterInput>>,
 }
 
-#[derive(Debug, Clone, SimpleObject)]
+#[derive(Debug, Clone, serde::Serialize, SimpleObject)]
 #[graphql(name = "Task", complex)]
 pub struct TaskGql {
     pub id: Uuid,
@@ -1559,7 +1559,7 @@ pub struct NoteFilterInput {
     pub not: Option<Box<NoteFilterInput>>,
 }
 
-#[derive(Debug, Clone, SimpleObject)]
+#[derive(Debug, Clone, serde::Serialize, SimpleObject)]
 #[graphql(name = "Note", complex)]
 pub struct NoteGql {
     pub id: Uuid,
@@ -6336,11 +6336,19 @@ impl MutationRoot {
             )));
         }
 
-        state
+        let person = state
             .db
             .create_person(auth.workspace_id, &input)
             .await
-            .map_err(|e| gql_err(AppError::Internal(e)))
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        crate::rest::emit_webhooks(
+            state,
+            auth.workspace_id,
+            "person.created",
+            serde_json::to_value(&person).unwrap_or_default(),
+        )
+        .await;
+        Ok(person)
     }
 
     async fn update_person(
@@ -6351,12 +6359,21 @@ impl MutationRoot {
     ) -> async_graphql::Result<Person> {
         let auth = require_data_capability(ctx, DataCapability::Update).await?;
         let input: UpdatePersonInput = data.into();
-        state(ctx)
+        let state = state(ctx);
+        let person = state
             .db
             .update_person(auth.workspace_id, id, &input)
             .await
             .map_err(|e| gql_err(AppError::Internal(e)))?
-            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))
+            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))?;
+        crate::rest::emit_webhooks(
+            state,
+            auth.workspace_id,
+            "person.updated",
+            serde_json::to_value(&person).unwrap_or_default(),
+        )
+        .await;
+        Ok(person)
     }
 
     async fn destroy_person(
@@ -6378,6 +6395,13 @@ impl MutationRoot {
             .destroy_person(auth.workspace_id, id)
             .await
             .map_err(|e| gql_err(AppError::Internal(e)))?;
+        crate::rest::emit_webhooks(
+            state,
+            auth.workspace_id,
+            "person.deleted",
+            serde_json::to_value(&person).unwrap_or_default(),
+        )
+        .await;
 
         Ok(person)
     }
@@ -6388,12 +6412,21 @@ impl MutationRoot {
         id: uuid::Uuid,
     ) -> async_graphql::Result<Person> {
         let auth = require_data_capability(ctx, DataCapability::Update).await?;
-        state(ctx)
+        let state = state(ctx);
+        let person = state
             .db
             .restore_person(auth.workspace_id, id)
             .await
             .map_err(|e| gql_err(AppError::Internal(e)))?
-            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))
+            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))?;
+        crate::rest::emit_webhooks(
+            state,
+            auth.workspace_id,
+            "person.restored",
+            serde_json::to_value(&person).unwrap_or_default(),
+        )
+        .await;
+        Ok(person)
     }
 
     async fn delete_person(
@@ -6415,6 +6448,13 @@ impl MutationRoot {
             .soft_delete_person(auth.workspace_id, id)
             .await
             .map_err(|e| gql_err(AppError::Internal(e)))?;
+        crate::rest::emit_webhooks(
+            state,
+            auth.workspace_id,
+            "person.soft_deleted",
+            serde_json::to_value(&person).unwrap_or_default(),
+        )
+        .await;
 
         Ok(person)
     }
@@ -6428,11 +6468,20 @@ impl MutationRoot {
     ) -> async_graphql::Result<Company> {
         let auth = require_data_capability(ctx, DataCapability::Update).await?;
         let input: CreateCompanyInput = data.into();
-        state(ctx)
+        let state = state(ctx);
+        let company = state
             .db
             .create_company(auth.workspace_id, &input)
             .await
-            .map_err(|e| gql_err(AppError::Internal(e)))
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        crate::rest::emit_webhooks(
+            state,
+            auth.workspace_id,
+            "company.created",
+            serde_json::to_value(&company).unwrap_or_default(),
+        )
+        .await;
+        Ok(company)
     }
 
     async fn update_company(
@@ -6443,12 +6492,21 @@ impl MutationRoot {
     ) -> async_graphql::Result<Company> {
         let auth = require_data_capability(ctx, DataCapability::Update).await?;
         let input: UpdateCompanyInput = data.into();
-        state(ctx)
+        let state = state(ctx);
+        let company = state
             .db
             .update_company(auth.workspace_id, id, &input)
             .await
             .map_err(|e| gql_err(AppError::Internal(e)))?
-            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))
+            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))?;
+        crate::rest::emit_webhooks(
+            state,
+            auth.workspace_id,
+            "company.updated",
+            serde_json::to_value(&company).unwrap_or_default(),
+        )
+        .await;
+        Ok(company)
     }
 
     async fn delete_company(&self, ctx: &Context<'_>, id: Uuid) -> async_graphql::Result<Company> {
@@ -6465,6 +6523,13 @@ impl MutationRoot {
             .soft_delete_company(auth.workspace_id, id)
             .await
             .map_err(|e| gql_err(AppError::Internal(e)))?;
+        crate::rest::emit_webhooks(
+            state,
+            auth.workspace_id,
+            "company.soft_deleted",
+            serde_json::to_value(&company).unwrap_or_default(),
+        )
+        .await;
         Ok(company)
     }
 
@@ -6482,17 +6547,33 @@ impl MutationRoot {
             .destroy_company(auth.workspace_id, id)
             .await
             .map_err(|e| gql_err(AppError::Internal(e)))?;
+        crate::rest::emit_webhooks(
+            state,
+            auth.workspace_id,
+            "company.deleted",
+            serde_json::to_value(&company).unwrap_or_default(),
+        )
+        .await;
         Ok(company)
     }
 
     async fn restore_company(&self, ctx: &Context<'_>, id: Uuid) -> async_graphql::Result<Company> {
         let auth = require_data_capability(ctx, DataCapability::Update).await?;
-        state(ctx)
+        let state = state(ctx);
+        let company = state
             .db
             .restore_company(auth.workspace_id, id)
             .await
             .map_err(|e| gql_err(AppError::Internal(e)))?
-            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))
+            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))?;
+        crate::rest::emit_webhooks(
+            state,
+            auth.workspace_id,
+            "company.restored",
+            serde_json::to_value(&company).unwrap_or_default(),
+        )
+        .await;
+        Ok(company)
     }
 
     async fn create_opportunity(
@@ -6504,11 +6585,20 @@ impl MutationRoot {
     ) -> async_graphql::Result<Opportunity> {
         let auth = require_data_capability(ctx, DataCapability::Update).await?;
         let input: CreateOpportunityInput = data.into();
-        state(ctx)
+        let state = state(ctx);
+        let opportunity = state
             .db
             .create_opportunity(auth.workspace_id, &input)
             .await
-            .map_err(|e| gql_err(AppError::Internal(e)))
+            .map_err(|e| gql_err(AppError::Internal(e)))?;
+        crate::rest::emit_webhooks(
+            state,
+            auth.workspace_id,
+            "opportunity.created",
+            serde_json::to_value(&opportunity).unwrap_or_default(),
+        )
+        .await;
+        Ok(opportunity)
     }
 
     async fn update_opportunity(
@@ -6519,12 +6609,21 @@ impl MutationRoot {
     ) -> async_graphql::Result<Opportunity> {
         let auth = require_data_capability(ctx, DataCapability::Update).await?;
         let input: UpdateOpportunityInput = data.into();
-        state(ctx)
+        let state = state(ctx);
+        let opportunity = state
             .db
             .update_opportunity(auth.workspace_id, id, &input)
             .await
             .map_err(|e| gql_err(AppError::Internal(e)))?
-            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))
+            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))?;
+        crate::rest::emit_webhooks(
+            state,
+            auth.workspace_id,
+            "opportunity.updated",
+            serde_json::to_value(&opportunity).unwrap_or_default(),
+        )
+        .await;
+        Ok(opportunity)
     }
 
     async fn delete_opportunity(
@@ -6545,6 +6644,13 @@ impl MutationRoot {
             .soft_delete_opportunity(auth.workspace_id, id)
             .await
             .map_err(|e| gql_err(AppError::Internal(e)))?;
+        crate::rest::emit_webhooks(
+            state,
+            auth.workspace_id,
+            "opportunity.soft_deleted",
+            serde_json::to_value(&opportunity).unwrap_or_default(),
+        )
+        .await;
         Ok(opportunity)
     }
 
@@ -6566,6 +6672,13 @@ impl MutationRoot {
             .destroy_opportunity(auth.workspace_id, id)
             .await
             .map_err(|e| gql_err(AppError::Internal(e)))?;
+        crate::rest::emit_webhooks(
+            state,
+            auth.workspace_id,
+            "opportunity.deleted",
+            serde_json::to_value(&opportunity).unwrap_or_default(),
+        )
+        .await;
         Ok(opportunity)
     }
 
@@ -6575,12 +6688,21 @@ impl MutationRoot {
         id: Uuid,
     ) -> async_graphql::Result<Opportunity> {
         let auth = require_data_capability(ctx, DataCapability::Update).await?;
-        state(ctx)
+        let state = state(ctx);
+        let opportunity = state
             .db
             .restore_opportunity(auth.workspace_id, id)
             .await
             .map_err(|e| gql_err(AppError::Internal(e)))?
-            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))
+            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))?;
+        crate::rest::emit_webhooks(
+            state,
+            auth.workspace_id,
+            "opportunity.restored",
+            serde_json::to_value(&opportunity).unwrap_or_default(),
+        )
+        .await;
+        Ok(opportunity)
     }
 
     async fn create_task(
@@ -6592,12 +6714,21 @@ impl MutationRoot {
     ) -> async_graphql::Result<TaskGql> {
         let auth = require_data_capability(ctx, DataCapability::Update).await?;
         let input: CreateTaskInput = data.into();
-        state(ctx)
+        let state = state(ctx);
+        let task: TaskGql = state
             .db
             .create_task(auth.workspace_id, &input)
             .await
-            .map_err(|e| gql_err(AppError::Internal(e)))
-            .map(Into::into)
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .into();
+        crate::rest::emit_webhooks(
+            state,
+            auth.workspace_id,
+            "task.created",
+            serde_json::to_value(&task).unwrap_or_default(),
+        )
+        .await;
+        Ok(task)
     }
 
     async fn update_task(
@@ -6608,13 +6739,22 @@ impl MutationRoot {
     ) -> async_graphql::Result<TaskGql> {
         let auth = require_data_capability(ctx, DataCapability::Update).await?;
         let input: UpdateTaskInput = data.into();
-        state(ctx)
+        let state = state(ctx);
+        let task: TaskGql = state
             .db
             .update_task(auth.workspace_id, id, &input)
             .await
             .map_err(|e| gql_err(AppError::Internal(e)))?
             .map(Into::into)
-            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))
+            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))?;
+        crate::rest::emit_webhooks(
+            state,
+            auth.workspace_id,
+            "task.updated",
+            serde_json::to_value(&task).unwrap_or_default(),
+        )
+        .await;
+        Ok(task)
     }
 
     async fn delete_task(&self, ctx: &Context<'_>, id: Uuid) -> async_graphql::Result<TaskGql> {
@@ -6631,6 +6771,13 @@ impl MutationRoot {
             .soft_delete_task(auth.workspace_id, id)
             .await
             .map_err(|e| gql_err(AppError::Internal(e)))?;
+        crate::rest::emit_webhooks(
+            state,
+            auth.workspace_id,
+            "task.soft_deleted",
+            serde_json::to_value(&task).unwrap_or_default(),
+        )
+        .await;
         Ok(task.into())
     }
 
@@ -6648,18 +6795,34 @@ impl MutationRoot {
             .destroy_task(auth.workspace_id, id)
             .await
             .map_err(|e| gql_err(AppError::Internal(e)))?;
+        crate::rest::emit_webhooks(
+            state,
+            auth.workspace_id,
+            "task.deleted",
+            serde_json::to_value(&task).unwrap_or_default(),
+        )
+        .await;
         Ok(task.into())
     }
 
     async fn restore_task(&self, ctx: &Context<'_>, id: Uuid) -> async_graphql::Result<TaskGql> {
         let auth = require_data_capability(ctx, DataCapability::Update).await?;
-        state(ctx)
+        let state = state(ctx);
+        let task: TaskGql = state
             .db
             .restore_task(auth.workspace_id, id)
             .await
             .map_err(|e| gql_err(AppError::Internal(e)))?
             .map(Into::into)
-            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))
+            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))?;
+        crate::rest::emit_webhooks(
+            state,
+            auth.workspace_id,
+            "task.restored",
+            serde_json::to_value(&task).unwrap_or_default(),
+        )
+        .await;
+        Ok(task)
     }
 
     async fn create_note(
@@ -6671,12 +6834,21 @@ impl MutationRoot {
     ) -> async_graphql::Result<NoteGql> {
         let auth = require_data_capability(ctx, DataCapability::Update).await?;
         let input: CreateNoteInput = data.into();
-        state(ctx)
+        let state = state(ctx);
+        let note: NoteGql = state
             .db
             .create_note(auth.workspace_id, &input)
             .await
-            .map_err(|e| gql_err(AppError::Internal(e)))
-            .map(Into::into)
+            .map_err(|e| gql_err(AppError::Internal(e)))?
+            .into();
+        crate::rest::emit_webhooks(
+            state,
+            auth.workspace_id,
+            "note.created",
+            serde_json::to_value(&note).unwrap_or_default(),
+        )
+        .await;
+        Ok(note)
     }
 
     async fn update_note(
@@ -6687,13 +6859,22 @@ impl MutationRoot {
     ) -> async_graphql::Result<NoteGql> {
         let auth = require_data_capability(ctx, DataCapability::Update).await?;
         let input: UpdateNoteInput = data.into();
-        state(ctx)
+        let state = state(ctx);
+        let note: NoteGql = state
             .db
             .update_note(auth.workspace_id, id, &input)
             .await
             .map_err(|e| gql_err(AppError::Internal(e)))?
             .map(Into::into)
-            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))
+            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))?;
+        crate::rest::emit_webhooks(
+            state,
+            auth.workspace_id,
+            "note.updated",
+            serde_json::to_value(&note).unwrap_or_default(),
+        )
+        .await;
+        Ok(note)
     }
 
     async fn delete_note(&self, ctx: &Context<'_>, id: Uuid) -> async_graphql::Result<NoteGql> {
@@ -6710,6 +6891,13 @@ impl MutationRoot {
             .soft_delete_note(auth.workspace_id, id)
             .await
             .map_err(|e| gql_err(AppError::Internal(e)))?;
+        crate::rest::emit_webhooks(
+            state,
+            auth.workspace_id,
+            "note.soft_deleted",
+            serde_json::to_value(&note).unwrap_or_default(),
+        )
+        .await;
         Ok(note.into())
     }
 
@@ -6727,18 +6915,34 @@ impl MutationRoot {
             .destroy_note(auth.workspace_id, id)
             .await
             .map_err(|e| gql_err(AppError::Internal(e)))?;
+        crate::rest::emit_webhooks(
+            state,
+            auth.workspace_id,
+            "note.deleted",
+            serde_json::to_value(&note).unwrap_or_default(),
+        )
+        .await;
         Ok(note.into())
     }
 
     async fn restore_note(&self, ctx: &Context<'_>, id: Uuid) -> async_graphql::Result<NoteGql> {
         let auth = require_data_capability(ctx, DataCapability::Update).await?;
-        state(ctx)
+        let state = state(ctx);
+        let note: NoteGql = state
             .db
             .restore_note(auth.workspace_id, id)
             .await
             .map_err(|e| gql_err(AppError::Internal(e)))?
             .map(Into::into)
-            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))
+            .ok_or_else(|| gql_err(AppError::NotFound("Record not found".to_string())))?;
+        crate::rest::emit_webhooks(
+            state,
+            auth.workspace_id,
+            "note.restored",
+            serde_json::to_value(&note).unwrap_or_default(),
+        )
+        .await;
+        Ok(note)
     }
 
     async fn create_task_target(

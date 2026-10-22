@@ -162,8 +162,9 @@
       implemented.
 - [x] Webhook delivery for person/company/opportunity/task/note REST
       create/update/delete events (fire-and-forget HTTP with the stored secret).
-- [ ] Webhook delivery for GraphQL/target events, jobs/cron, workflows and
-      integrations.
+- [x] Webhook delivery for GraphQL create/update/delete/destroy/restore events
+      on person/company/opportunity/task/note.
+- [ ] Webhook delivery for target events, jobs/cron, workflows and integrations.
 
 ## Phase 6-8
 - [ ] Threat model (`docs/threat-model.md`).

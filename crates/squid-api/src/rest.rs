@@ -2436,7 +2436,7 @@ async fn role_can(
     })
 }
 
-async fn emit_webhooks(
+pub(crate) async fn emit_webhooks(
     state: &AppState,
     workspace_id: Uuid,
     operation: &str,
