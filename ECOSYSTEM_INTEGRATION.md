@@ -36,7 +36,7 @@ Statuses: **VERIFIED** (executable evidence in this repository), **PARTIAL**
 | MessageBirds | outbound record events | Webhooks | PARTIAL | Envelope v1, HMAC signatures, bounded retries, durable delivery log and manual replay are implemented and tested. No shared event-schema registry or ordering guarantee. |
 | ScrapeOwl | none | none | NOT APPLICABLE | No direct data contract; scraping output would arrive through another ecosystem service. |
 | MudFish | none | none | NOT APPLICABLE | No direct data contract; crawling output would arrive through another ecosystem service. |
-| Any counterpart | Python integration | `python/` `squid_crm` client | VERIFIED (client import) | Import/version checked locally. REST/GraphQL contract tests live in the Rust suite. |
+| Any counterpart | Python integration | `python/` `squid_crm` client | VERIFIED | 0.2.0 installed from PyPI; import/version and six client tests cover idempotency, correlation and retry headers. REST/GraphQL contract tests live in the Rust suite. |
 
 ## C. Implemented changes
 
@@ -54,8 +54,9 @@ Statuses: **VERIFIED** (executable evidence in this repository), **PARTIAL**
   backoff and `Retry-After`, a durable `core.webhook_deliveries` log, admin
   delivery listing and manual replay.
 - Added `examples/webhook_receiver.py` as a runnable HMAC-verifying receiver.
-- Added the Python client package under `python/` and published `squid-crm`
-  0.1.0 to PyPI.
+- Added the Python client package under `python/`, including `Idempotency-Key`,
+  `X-Correlation-Id`, `Retry-After` and safe-retry support, and published
+  `squid-crm` 0.2.0 to PyPI.
 - Added CSV export/import and role/data/file permission enforcement in earlier
   increments; see `TODO.md`, `docs/decision-log.md` and
   `docs/migration-matrix.md`.
@@ -99,7 +100,8 @@ Last verified result (2026-10-22):
   `webhook_delivery_posts_record_events` with a live local HTTP receiver.
 - Idempotent replay, conflict, tenant scoping and failed-request retry are
   covered by integration tests.
-- Python package import check: `squid_crm.__version__ == "0.1.0"`.
+- Python package import check from PyPI: `squid_crm.__version__ == "0.2.0"`.
+- Python client tests: 6 passing (`python3 -m unittest discover -s python/tests`).
 
 Runnable webhook example:
 
@@ -135,9 +137,9 @@ SQUID_WEBHOOK_SECRET='the-webhook-secret' \
   counterparts must still be taught to send stable keys, and expired-key
   cleanup/retention is not automated.
 - **Webhook delivery durability**: bounded in-process retries, a durable
-  `core.webhook_deliveries` log, admin delivery listing and manual replay
-  exist; there is no automatic background replay/worker, ordering guarantee or
-  long-term retention policy.
+  `core.webhook_deliveries` log, admin listing/replay and a background retry
+  worker exist; ordering guarantees and a long-term retention policy remain
+  open.
 - **Event schema governance**: envelope v1 exists, but no shared schema registry
   or compatibility tests with MessageBirds.
 - **Consent/PII**: Squid does not emit consent decisions or field-level

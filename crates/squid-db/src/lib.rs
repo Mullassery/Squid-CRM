@@ -2267,6 +2267,25 @@ impl Db {
         Ok(rows.iter().map(row_to_webhook_delivery).collect())
     }
 
+    pub async fn list_replayable_webhook_deliveries(
+        &self,
+        limit: i64,
+    ) -> anyhow::Result<Vec<(Uuid, Uuid)>> {
+        let rows = sqlx::query(
+            "SELECT workspace_id, id FROM core.webhook_deliveries
+             WHERE state = 'failed' AND attempts < 8
+               AND updated_at < now() - interval '1 minute'
+             ORDER BY updated_at ASC LIMIT $1",
+        )
+        .bind(limit.clamp(1, 100))
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .iter()
+            .map(|row| (row.get("workspace_id"), row.get("id")))
+            .collect())
+    }
+
     pub async fn get_webhook_delivery(
         &self,
         workspace_id: Uuid,

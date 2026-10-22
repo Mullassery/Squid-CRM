@@ -165,7 +165,7 @@
 - [x] Webhook delivery for GraphQL create/update/delete/destroy/restore events
       on person/company/opportunity/task/note.
 - [x] Webhook delivery with envelope v1, HMAC signatures, bounded retries,
-      durable delivery log, admin delivery listing and replay.
+      durable delivery log, admin listing/replay and a background retry worker.
 - [ ] Jobs/cron, workflows and integrations.
 
 ## Phase 6-8

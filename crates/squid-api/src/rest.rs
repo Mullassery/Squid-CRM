@@ -2882,7 +2882,7 @@ async fn role_can(
     })
 }
 
-const WEBHOOK_MAX_ATTEMPTS: u32 = 4;
+const WEBHOOK_MAX_ATTEMPTS: i32 = 8;
 const WEBHOOK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 pub(crate) async fn emit_webhooks(
@@ -2965,6 +2965,7 @@ pub(crate) async fn emit_webhooks(
                 &state,
                 &client,
                 delivery_id,
+                0,
                 hook_id,
                 workspace_id,
                 &target_url,
@@ -2983,6 +2984,7 @@ async fn deliver_webhook(
     state: &AppState,
     client: &reqwest::Client,
     delivery_id: Uuid,
+    start_attempt: i32,
     hook_id: Uuid,
     workspace_id: Uuid,
     target_url: &str,
@@ -2991,7 +2993,7 @@ async fn deliver_webhook(
     body: &[u8],
     signature: &str,
 ) {
-    for attempt in 1..=WEBHOOK_MAX_ATTEMPTS {
+    for attempt in (start_attempt + 1)..=WEBHOOK_MAX_ATTEMPTS {
         let response = client
             .post(target_url)
             .header("user-agent", "squid-crm-webhook/1.0")
@@ -3016,7 +3018,7 @@ async fn deliver_webhook(
                         .record_webhook_delivery(
                             workspace_id,
                             delivery_id,
-                            attempt as i32,
+                            attempt,
                             Some(i32::from(status.as_u16())),
                             None,
                             "succeeded",
@@ -3042,7 +3044,7 @@ async fn deliver_webhook(
                         .record_webhook_delivery(
                             workspace_id,
                             delivery_id,
-                            attempt as i32,
+                            attempt,
                             Some(i32::from(status.as_u16())),
                             None,
                             "pending",
@@ -3066,7 +3068,7 @@ async fn deliver_webhook(
                     .record_webhook_delivery(
                         workspace_id,
                         delivery_id,
-                        attempt as i32,
+                        attempt,
                         Some(i32::from(status.as_u16())),
                         Some("non-success HTTP status"),
                         "failed",
@@ -3088,7 +3090,7 @@ async fn deliver_webhook(
                         .record_webhook_delivery(
                             workspace_id,
                             delivery_id,
-                            attempt as i32,
+                            attempt,
                             None,
                             Some(&error.to_string()),
                             "pending",
@@ -3131,11 +3133,12 @@ fn parse_retry_after(value: &str) -> Option<std::time::Duration> {
         .map(|seconds| std::time::Duration::from_secs(seconds.min(30)))
 }
 
-fn webhook_backoff(attempt: u32, retry_after: Option<std::time::Duration>) -> std::time::Duration {
+fn webhook_backoff(attempt: i32, retry_after: Option<std::time::Duration>) -> std::time::Duration {
     if let Some(delay) = retry_after {
         return delay;
     }
-    let millis = 250_u64.saturating_mul(1_u64 << (attempt.saturating_sub(1).min(4)));
+    let exponent = attempt.saturating_sub(1).clamp(0, 4) as u64;
+    let millis = 250_u64.saturating_mul(1_u64 << exponent);
     std::time::Duration::from_millis(millis.min(5_000))
 }
 
@@ -3194,6 +3197,7 @@ pub(crate) async fn replay_webhook_delivery(
             &state,
             &client,
             new_delivery,
+            0,
             hook.id,
             workspace_id,
             &target_url,
@@ -3205,6 +3209,87 @@ pub(crate) async fn replay_webhook_delivery(
         .await;
     });
     Ok(true)
+}
+
+pub(crate) async fn requeue_webhook_delivery(
+    state: &AppState,
+    workspace_id: Uuid,
+    delivery_id: Uuid,
+) -> AppResult<()> {
+    let delivery = state
+        .db
+        .get_webhook_delivery(workspace_id, delivery_id)
+        .await
+        .map_err(AppError::Internal)?
+        .ok_or_else(|| AppError::NotFound("Webhook delivery not found".to_string()))?;
+    let hook = state
+        .db
+        .get_webhook(workspace_id, delivery.webhook_id)
+        .await
+        .map_err(AppError::Internal)?
+        .ok_or_else(|| AppError::NotFound("Webhook not found".to_string()))?;
+    let target_url = delivery
+        .target_url
+        .clone()
+        .unwrap_or_else(|| hook.target_url.clone());
+    let body = delivery
+        .request_body
+        .clone()
+        .ok_or_else(|| AppError::BadRequest("Delivery has no stored body".to_string()))?;
+    let mut mac = Hmac::<Sha256>::new_from_slice(hook.secret.as_bytes())
+        .expect("HMAC accepts any key length");
+    mac.update(&body);
+    let signature = format!("sha256={}", hex::encode(mac.finalize().into_bytes()));
+    let client = reqwest::Client::builder()
+        .timeout(WEBHOOK_TIMEOUT)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|error| AppError::Internal(anyhow::anyhow!(error)))?;
+    let state = state.clone();
+    let event = delivery.event.clone();
+    let event_id = delivery.event_id;
+    let start_attempt = delivery.attempts;
+    tokio::spawn(async move {
+        deliver_webhook(
+            &state,
+            &client,
+            delivery_id,
+            start_attempt,
+            hook.id,
+            workspace_id,
+            &target_url,
+            &event,
+            event_id,
+            &body,
+            &signature,
+        )
+        .await;
+    });
+    Ok(())
+}
+
+pub async fn run_webhook_replay_worker(state: AppState) {
+    let mut ticker = tokio::time::interval(std::time::Duration::from_secs(60));
+    loop {
+        ticker.tick().await;
+        match state.db.list_replayable_webhook_deliveries(20).await {
+            Ok(due) => {
+                for (workspace_id, delivery_id) in due {
+                    if let Err(error) =
+                        requeue_webhook_delivery(&state, workspace_id, delivery_id).await
+                    {
+                        tracing::warn!(
+                            %error,
+                            %workspace_id,
+                            %delivery_id,
+                            "failed to requeue webhook delivery"
+                        );
+                    }
+                }
+            }
+            Err(error) => tracing::warn!(%error, "webhook replay worker query failed"),
+        }
+    }
 }
 
 async fn require_capability(

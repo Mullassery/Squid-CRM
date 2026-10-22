@@ -23,6 +23,7 @@ async fn main() -> anyhow::Result<()> {
 
     let bind_addr = config.bind_addr.clone();
     let state = AppState::new(db, config);
+    tokio::spawn(squid_api::run_webhook_replay_worker(state.clone()));
 
     let listener = tokio::net::TcpListener::bind(&bind_addr)
         .await
