@@ -4316,6 +4316,138 @@ mod tests {
         assert!(parse_order_by(Some("createdAt[BadDirection]")).is_err());
         assert!(parse_order_by(Some("-createdAt")).is_err());
     }
+
+    #[test]
+    fn http_job_url_blocks_localhost_and_private_ranges() {
+        let allowed: Vec<String> = Vec::new();
+
+        assert!(http_job_url_allowed(
+            "https://api.example.com/webhook",
+            &allowed,
+            false
+        ));
+        assert!(!http_job_url_allowed(
+            "http://localhost:3000/hook",
+            &allowed,
+            false
+        ));
+        assert!(!http_job_url_allowed(
+            "http://service.localhost/hook",
+            &allowed,
+            false
+        ));
+        assert!(!http_job_url_allowed(
+            "http://10.0.0.1/hook",
+            &allowed,
+            false
+        ));
+        assert!(!http_job_url_allowed(
+            "http://172.16.0.1/hook",
+            &allowed,
+            false
+        ));
+        assert!(!http_job_url_allowed(
+            "http://192.168.1.1/hook",
+            &allowed,
+            false
+        ));
+        assert!(!http_job_url_allowed(
+            "http://127.0.0.1/hook",
+            &allowed,
+            false
+        ));
+        assert!(!http_job_url_allowed(
+            "http://169.254.169.254/hook",
+            &allowed,
+            false
+        ));
+        assert!(!http_job_url_allowed(
+            "http://0.0.0.0/hook",
+            &allowed,
+            false
+        ));
+        assert!(!http_job_url_allowed("http://[::1]/hook", &allowed, false));
+        assert!(!http_job_url_allowed(
+            "http://[fd00::1]/hook",
+            &allowed,
+            false
+        ));
+        assert!(!http_job_url_allowed(
+            "http://[fe80::1]/hook",
+            &allowed,
+            false
+        ));
+        assert!(!http_job_url_allowed(
+            "gopher://evil.internal/hook",
+            &allowed,
+            false
+        ));
+        assert!(!http_job_url_allowed("file:///etc/passwd", &allowed, false));
+        assert!(!http_job_url_allowed("not a url", &allowed, false));
+        assert!(!http_job_url_allowed("", &allowed, false));
+    }
+
+    #[test]
+    fn http_job_url_allows_explicitly_listed_hosts() {
+        let allowed: Vec<String> = vec!["internal.service".to_string()];
+
+        assert!(http_job_url_allowed(
+            "http://internal.service/hook",
+            &allowed,
+            false
+        ));
+        assert!(http_job_url_allowed(
+            "http://other.service/hook",
+            &allowed,
+            false
+        ));
+        assert!(!http_job_url_allowed(
+            "http://localhost:3000/hook",
+            &allowed,
+            false
+        ));
+    }
+
+    #[test]
+    fn http_job_url_allows_private_when_opted_in() {
+        let allowed: Vec<String> = Vec::new();
+
+        assert!(!http_job_url_allowed(
+            "http://10.0.0.1/hook",
+            &allowed,
+            false
+        ));
+        assert!(http_job_url_allowed("http://10.0.0.1/hook", &allowed, true));
+        assert!(http_job_url_allowed(
+            "http://localhost:3000/hook",
+            &allowed,
+            true
+        ));
+    }
+
+    #[test]
+    fn order_by_rejects_unknown_fields() {
+        assert!(parse_order_by(Some("id[AscNullsFirst]")).is_ok());
+        assert!(parse_order_by(Some("createdAt[DescNullsLast]")).is_ok());
+        assert!(parse_order_by(Some("name.firstName[AscNullsFirst]")).is_ok());
+
+        assert!(parse_order_by(Some("passwordHash[AscNullsFirst]")).is_err());
+        assert!(parse_order_by(Some("nonexistent.field[AscNullsFirst]")).is_err());
+        assert!(parse_order_by(Some("1=1[AscNullsFirst]")).is_err());
+        assert!(parse_order_by(Some("id; DROP TABLE people[AscNullsFirst]")).is_err());
+    }
+
+    #[test]
+    fn order_by_rejects_invalid_directions() {
+        assert!(parse_order_by(Some("id[AscNullsFirst]")).is_ok());
+        assert!(parse_order_by(Some("id[DescNullsLast]")).is_ok());
+        assert!(parse_order_by(Some("id")).is_ok());
+
+        assert!(parse_order_by(Some("id[ASC]")).is_err());
+        assert!(parse_order_by(Some("id[DESC]")).is_err());
+        assert!(parse_order_by(Some("id[invalid]")).is_err());
+        assert!(parse_order_by(Some("id[]")).is_err());
+    }
 }
 
 const GROUP_PERSON_FIELDS: &[&str] = &[

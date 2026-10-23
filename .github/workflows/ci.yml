@@ -53,6 +53,17 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      - name: Install cargo-audit and cargo-deny
+        run: |
+          cargo install cargo-audit --locked
+          cargo install cargo-deny --locked
+
+      - name: Cargo audit (vulnerability scan)
+        run: cargo audit
+
+      - name: Cargo deny (license + vulnerability policy)
+        run: cargo deny check
+
       - name: Tests (unit + integration)
         run: cargo test --workspace
 

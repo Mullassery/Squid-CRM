@@ -348,3 +348,50 @@ impl<'a> FilterParser<'a> {
         }
     }
 }
+
+#[cfg(test)]
+#[allow(dead_code)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn filter_rejects_injected_field_names() {
+        let allowed: &[&str] = &["name", "email", "jobTitle"];
+        assert!(parse_generic_filter("name[eq]:Ada", allowed).is_ok());
+        assert!(parse_generic_filter("email[contains]:example.com", allowed).is_ok());
+
+        assert!(parse_generic_filter("password[eq]:secret", allowed).is_err());
+        assert!(parse_generic_filter("1=1[eq]:x", allowed).is_err());
+        assert!(parse_generic_filter("name; DROP TABLE people[eq]:x", allowed).is_err());
+        assert!(parse_generic_filter("../etc/passwd[eq]:x", allowed).is_err());
+    }
+
+    #[test]
+    fn filter_rejects_malformed_expressions() {
+        let allowed: &[&str] = &["name"];
+        assert!(parse_generic_filter("name[eq]", allowed).is_err());
+        assert!(parse_generic_filter("[eq]:x", allowed).is_err());
+        assert!(parse_generic_filter("name[eq]:", allowed).is_err());
+        assert!(parse_generic_filter("name[eq]:Ada[extra]", allowed).is_err());
+    }
+
+    #[test]
+    fn filter_supports_and_or_not() {
+        let allowed: &[&str] = &["name", "email"];
+        assert!(parse_generic_filter("and(name[eq]:Ada,email[contains]:example)", allowed).is_ok());
+        assert!(parse_generic_filter("or(name[eq]:Ada,name[eq]:Grace)", allowed).is_ok());
+        assert!(parse_generic_filter("not(name[eq]:Ada)", allowed).is_ok());
+        assert!(parse_generic_filter(
+            "and(name[eq]:Ada,or(email[contains]:x,email[contains]:y))",
+            allowed
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn filter_rejects_trailing_garbage() {
+        let allowed: &[&str] = &["name"];
+        assert!(parse_generic_filter("name[eq]:Ada)", allowed).is_err());
+        assert!(parse_generic_filter("", allowed).is_err());
+    }
+}
