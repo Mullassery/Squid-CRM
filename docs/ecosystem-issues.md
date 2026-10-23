@@ -18,7 +18,7 @@ Status labels: **OPEN**, **FIXED IN WORKING TREE**, **BLOCKED**, **UNVERIFIED**,
 | PyTagShield | Consent-aware event validation, pseudonymization, routing | UNVERIFIED / OPEN | GitHub repository had no README and no workflows at audit time. The server binary was previously found to be a no-op (`fn main() {}`), so a runnable HTTP service contract is not evidenced. No Squid-CRM destination adapter. No executable evidence that consent decisions are attached to outbound CRM records. |
 | PyTagManager | GTM/tag diagnosis and structured findings | OPEN | No direct Squid-CRM adapter or agreed findings schema/version. The improved README and `pyproject.toml` description were uncommitted locally at audit time. GitHub Actions showed no recent run for its configured workflows, so CI status was unverified. |
 | ClusterAudienceKit | Segmentation, scoring, streaming audiences | OPEN | No direct Squid-CRM adapter. Audience activation is expected to pass through PyReverseETL, but no Squid payload mapping or custom-object schema contract is defined. |
-| ScrapeOwl | Rust fetching, parsing, schema-validated extraction | NOT APPLICABLE | No direct CRM contract. Scraped output would have to pass through another ecosystem service before reaching Squid. |
+| QuillSift | Rust fetching, parsing, schema-validated extraction | NOT APPLICABLE | No direct CRM contract. Scraped output would have to pass through another ecosystem service before reaching Squid. |
 | MudFish | Rust crawling and browser-rendered web intelligence | NOT APPLICABLE | No direct CRM contract. Crawled output would have to pass through another ecosystem service before reaching Squid. |
 
 ## 2. Squid-CRM issues
@@ -70,7 +70,7 @@ already be fixed on the default branch. Logs were captured under
   not use them.
 - Many repositories have no releases or tags despite being distributed.
 - Vulnerability alerts were disabled or unavailable for `homebrew-formulas`,
-  `Mullassery`, `PyTagShield`, `ScrapeOwl` and `Squid-CRM`.
+  `Mullassery`, `PyTagShield`, `QuillSift` and `Squid-CRM`.
 - `CodeAtlas`, `PyTaskWireCheck` and `SyncFleet` use MIT licenses while the
   other repositories use Apache-2.0; this may be intentional but is a portfolio
   inconsistency.

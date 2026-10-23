@@ -16,7 +16,7 @@ MarTech/CDP ecosystem. It owns:
 It does **not** own tagging, consent adjudication, segmentation/clustering,
 reverse ETL orchestration, event streaming, scraping or crawling. Those remain
 with PyTagManager, PyTagShield, ClusterAudienceKit, PyReverseETL, PyCustomerHub,
-ScrapeOwl and MudFish respectively.
+QuillSift and MudFish respectively.
 
 No sibling repository was modified. No sibling API is assumed beyond the
 documented interfaces reproduced here.
@@ -34,7 +34,7 @@ Statuses: **VERIFIED** (executable evidence in this repository), **PARTIAL**
 | PyTagShield | inbound validated events/records | REST/GraphQL, custom objects | PARTIAL | Record APIs and relation fields exist. Consent enforcement belongs to PyTagShield; Squid does not independently prove consent and must not be treated as a consent authority. |
 | PyTagManager | inbound findings storage | Custom-object REST | PARTIAL | Generic custom objects can store findings, but no agreed findings schema/version is available in this repository. |
 | PyCustomerHub | outbound record events | Webhooks + Python adapter | PARTIAL | Envelope v1, HMAC signatures, retries and replay are tested. `squid_crm.adapters.to_pycustomerhub_event` maps the documented top-level OCDS fields, but the exact PyCustomerHub schema and nested identity contract still need confirmation. |
-| ScrapeOwl | none | none | NOT APPLICABLE | No direct data contract; scraping output would arrive through another ecosystem service. |
+| QuillSift | none | none | NOT APPLICABLE | No direct data contract; scraping output would arrive through another ecosystem service. |
 | MudFish | none | none | NOT APPLICABLE | No direct data contract; crawling output would arrive through another ecosystem service. |
 | Any counterpart | Python integration | `python/` `squid_crm` client | VERIFIED | 0.3.0 installed from PyPI; import/version and twelve client/adapter tests cover idempotency, correlation and retry headers. REST/GraphQL contract tests live in the Rust suite. |
 
