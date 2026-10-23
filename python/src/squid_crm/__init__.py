@@ -12,7 +12,7 @@ from typing import Any, Dict, Optional
 
 from .adapters import person_activation_payload, to_pycustomerhub_event
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 __all__ = ["SquidClient", "SquidError", "person_activation_payload", "to_pycustomerhub_event", "__version__"]
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "squid-crm"
-version = "0.3.0"
+version = "0.3.1"
 description = "Python client for the Squid CRM REST and GraphQL APIs"
 readme = "README.md"
 requires-python = ">=3.9"
