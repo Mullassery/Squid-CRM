@@ -97,11 +97,15 @@ TEST_DATABASE_URL=postgres://$USER@127.0.0.1:5432/squid_test \
 PYTHONPATH=python/src python3 -m unittest discover -s python/tests
 ```
 
-Last verified result (2026-10-22):
+Last verified result (2026-10-23):
 
 - `cargo fmt --check`: passed.
 - clippy with `-D warnings`: passed.
-- tests: **69 passing** (13 API unit, 49 integration, 5 auth, 2 DB).
+- tests: **87 passing** (22 API unit, 54 integration, 4 security, 5 auth, 2 DB).
+- `cargo audit`: passed with a documented ignore for `RUSTSEC-2023-0071`;
+  `rsa` is locked only by SQLx's optional MySQL driver and is not compiled or
+  linked by this PostgreSQL-only build.
+- `cargo deny check`: passed (advisories, licenses, bans, sources).
 - `scripts/smoke.sh`: passed signup, API-key auth, REST create/update/list,
   metadata/frontend contract, unauthenticated 403 and API-key revocation.
 - Webhook envelope/signature behavior is covered by

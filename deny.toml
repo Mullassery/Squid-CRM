@@ -1,16 +1,32 @@
-# cargo-deny configuration for Squid-CRM
-# AGPL-3.0 project; allows AGPL, MIT, Apache-2.0, BSD, ISC, and similar
-# permissive licenses. Restricts proprietary/copyleft-beyond-AGPL licenses.
-
-[version]
-version = 1
-
-[[lint]]
-kind = "licenses"
-license = { allow = { mit = true, apache = true, bsd = true, isc = true, "0bsd" = true, mpl = true, lgpl = true, agpl = true, unicc = true, postgresql = true, zlib = true, multilicense = true } }
-
-[[lint]]
-kind = "vulnerabilities"
-
 [advisories]
-db = { path = "sec-advisories.db", url = "https://github.com/rustsec/advisory-db" }
+db-urls = ["https://github.com/rustsec/advisory-db"]
+
+[licenses]
+allow = [
+    "0BSD",
+    "AGPL-3.0-only",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "LGPL-2.1-only",
+    "LGPL-3.0-only",
+    "MIT",
+    "MPL-2.0",
+    "PostgreSQL",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+confidence-threshold = 0.8
+
+[bans]
+multiple-versions = "warn"
+wildcards = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

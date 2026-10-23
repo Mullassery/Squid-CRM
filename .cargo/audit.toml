@@ -1,0 +1,6 @@
+# rsa is locked only by SQLx's optional MySQL driver. Squid enables PostgreSQL
+# only, so rsa is never compiled or linked. There is no fixed rsa release.
+[advisories]
+ignore = [
+    "RUSTSEC-2023-0071",
+]
