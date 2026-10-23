@@ -6157,7 +6157,10 @@ impl MutationRoot {
         max_attempts: Option<i32>,
     ) -> async_graphql::Result<JobGql> {
         let auth = require_admin(ctx)?;
-        if !matches!(kind.as_str(), "maintenance.prune" | "webhook.replay") {
+        if !matches!(
+            kind.as_str(),
+            "maintenance.prune" | "webhook.replay" | "http.request"
+        ) {
             return Err(gql_err(AppError::BadRequest(format!(
                 "Unknown job kind '{kind}'"
             ))));

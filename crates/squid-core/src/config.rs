@@ -15,6 +15,8 @@ pub struct Config {
     pub max_page_size: i64,
     pub cookie_secure: bool,
     pub s3: Option<S3Config>,
+    pub http_job_allow_private: bool,
+    pub http_job_allowed_hosts: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -54,6 +56,19 @@ impl Config {
                 .map(|v| v == "true" || v == "1")
                 .unwrap_or(false),
             s3: s3_from_env()?,
+            http_job_allow_private: env::var("HTTP_JOB_ALLOW_PRIVATE")
+                .map(|value| value == "true" || value == "1")
+                .unwrap_or(false),
+            http_job_allowed_hosts: env::var("HTTP_JOB_ALLOWED_HOSTS")
+                .map(|value| {
+                    value
+                        .split(',')
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(ToString::to_string)
+                        .collect()
+                })
+                .unwrap_or_default(),
         })
     }
 }

@@ -176,7 +176,8 @@
       delivery-log retention).
 - [x] Durable job queue (`core.jobs`) with claim/retry semantics, worker,
       admin `jobs`/`enqueueJob`/`runJob`, and rescheduled maintenance cron.
-- [ ] Workflows and third-party integrations.
+- [x] Generic `http.request` jobs as an integration primitive.
+- [ ] Workflow definitions and managed third-party connectors.
 
 ## Phase 6-8
 - [ ] Threat model (`docs/threat-model.md`).

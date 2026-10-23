@@ -3293,6 +3293,59 @@ pub(crate) async fn requeue_webhook_delivery(
     Ok(())
 }
 
+pub(crate) fn http_job_url_allowed(
+    url: &str,
+    allowed_hosts: &[String],
+    allow_private: bool,
+) -> bool {
+    let Ok(parsed) = reqwest::Url::parse(url) else {
+        return false;
+    };
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return false;
+    }
+    let Some(host) = parsed.host_str() else {
+        return false;
+    };
+    let host = host.trim_matches(['[', ']']).to_ascii_lowercase();
+    if allowed_hosts
+        .iter()
+        .any(|allowed| allowed.eq_ignore_ascii_case(&host))
+    {
+        return true;
+    }
+    if allow_private {
+        return true;
+    }
+    if host == "localhost" || host.ends_with(".localhost") {
+        return false;
+    }
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        match ip {
+            std::net::IpAddr::V4(ip) => {
+                if ip.is_private()
+                    || ip.is_loopback()
+                    || ip.is_link_local()
+                    || ip.is_unspecified()
+                    || ip.is_broadcast()
+                {
+                    return false;
+                }
+            }
+            std::net::IpAddr::V6(ip) => {
+                if ip.is_loopback()
+                    || ip.is_unspecified()
+                    || ip.is_unique_local()
+                    || ip.is_unicast_link_local()
+                {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
 async fn execute_job(state: &AppState, job: &squid_db::JobRecord) -> AppResult<()> {
     match job.kind.as_str() {
         "maintenance.prune" => {
@@ -3318,6 +3371,58 @@ async fn execute_job(state: &AppState, job: &squid_db::JobRecord) -> AppResult<(
             replay_webhook_delivery(state, workspace_id, id)
                 .await
                 .map(|_| ())
+        }
+        "http.request" => {
+            let url = job
+                .payload
+                .get("url")
+                .and_then(|value| value.as_str())
+                .ok_or_else(|| AppError::BadRequest("http.request requires url".to_string()))?;
+            if !http_job_url_allowed(
+                url,
+                &state.config.http_job_allowed_hosts,
+                state.config.http_job_allow_private,
+            ) {
+                return Err(AppError::BadRequest(
+                    "http.request destination is not allowed".to_string(),
+                ));
+            }
+            let method = job
+                .payload
+                .get("method")
+                .and_then(|value| value.as_str())
+                .unwrap_or("POST")
+                .to_ascii_uppercase();
+            let method = reqwest::Method::from_bytes(method.as_bytes())
+                .map_err(|_| AppError::BadRequest("Invalid HTTP method".to_string()))?;
+            let mut request = reqwest::Client::new()
+                .request(method, url)
+                .timeout(std::time::Duration::from_secs(10));
+            if let Some(headers) = job
+                .payload
+                .get("headers")
+                .and_then(|value| value.as_object())
+            {
+                for (name, value) in headers {
+                    if let Some(value) = value.as_str() {
+                        request = request.header(name, value);
+                    }
+                }
+            }
+            if let Some(body) = job.payload.get("body") {
+                request = request.json(body);
+            }
+            let response = request
+                .send()
+                .await
+                .map_err(|error| AppError::Internal(anyhow::anyhow!(error)))?;
+            if !response.status().is_success() {
+                return Err(AppError::Internal(anyhow::anyhow!(
+                    "http.request returned {}",
+                    response.status()
+                )));
+            }
+            Ok(())
         }
         other => Err(AppError::BadRequest(format!("Unknown job kind '{other}'"))),
     }

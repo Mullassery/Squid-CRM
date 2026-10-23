@@ -42,6 +42,8 @@ async fn test_app_with_s3(s3: Option<S3Config>) -> Router {
         max_page_size: 100,
         cookie_secure: false,
         s3,
+        http_job_allow_private: true,
+        http_job_allowed_hosts: Vec::new(),
     };
 
     app(AppState::new(db, config))
@@ -7195,6 +7197,74 @@ async fn s3_storage_round_trip_uses_mock_endpoint() {
             .to_vec(),
         vec![1u8, 2, 3]
     );
+}
+
+#[tokio::test]
+async fn http_request_job_calls_destination() {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(HeaderMap, Value)>();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let receiver = Router::new().route(
+        "/hook",
+        axum::routing::post(
+            move |headers: HeaderMap, axum::Json(body): axum::Json<Value>| {
+                let tx = tx.clone();
+                async move {
+                    tx.send((headers, body)).ok();
+                    StatusCode::OK
+                }
+            },
+        ),
+    );
+    tokio::spawn(async move {
+        axum::serve(listener, receiver).await.ok();
+    });
+
+    let app = test_app().await;
+    let (token, _) = signup(&app, &unique_email("http-job")).await;
+    let queued = send(
+        &app,
+        authorized(
+            "POST",
+            "/graphql",
+            &token,
+            Some(json!({
+                "query": "mutation($payload: JSON!) { enqueueJob(kind: \"http.request\", payload: $payload) { id } }",
+                "variables": {
+                    "payload": {
+                        "url": format!("http://{address}/hook"),
+                        "method": "POST",
+                        "headers": { "x-test": "yes" },
+                        "body": { "hello": "world" }
+                    }
+                }
+            })),
+        ),
+    )
+    .await;
+    assert!(queued.body["errors"].is_null(), "errors: {}", queued.body);
+    let job_id = queued.body["data"]["enqueueJob"]["id"].as_str().unwrap();
+    let run = send(
+        &app,
+        authorized(
+            "POST",
+            "/graphql",
+            &token,
+            Some(json!({
+                "query": "mutation($id: UUID!) { runJob(id: $id) { state } }",
+                "variables": { "id": job_id }
+            })),
+        ),
+    )
+    .await;
+    assert!(run.body["errors"].is_null(), "errors: {}", run.body);
+    assert_eq!(run.body["data"]["runJob"]["state"], "succeeded");
+    let (headers, body) = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+        .await
+        .expect("http job timed out")
+        .expect("http job payload");
+    assert_eq!(headers["x-test"], "yes");
+    assert_eq!(body["hello"], "world");
 }
 
 #[tokio::test]
