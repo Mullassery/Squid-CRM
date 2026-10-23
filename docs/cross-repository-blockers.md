@@ -66,7 +66,7 @@ Reference pin: `twentyhq/twenty@08a0e5f1ee2e7db7c1e6ef3aeec9bcef731f4e98`
 
 ### 2.2 Evidence
 
-- **Squid:** Idempotent REST creates are integration-tested (`idempotent_same_key_different_body_conflicts`, `idempotency_key_is_workspace_scoped`). Custom-object batch upsert (`/rest/{object}/upsert`) is integration-tested (D-060). Python client `squid_crm` 0.2.1 on PyPI supports idempotency, correlation, and retry headers (12 tests passing).
+- **Squid:** Idempotent REST creates are integration-tested (`idempotent_same_key_different_body_conflicts`, `idempotency_key_is_workspace_scoped`). Custom-object batch upsert (`/rest/{object}/upsert`) is integration-tested (D-060). Python client `squid_crm` 0.3.0 on PyPI supports idempotency, correlation, and retry headers (12 tests passing).
 - **PyReverseETL:** Real Rust sync engine with Python bindings and CLI. PostgreSQL/MySQL/S3 as source/destination. Webhook destination with Bearer/API Key/Basic auth and JSON payload construction. CRM adapters for Salesforce/HubSpot/Marketo are **mock-verified only** (not live-account verified). Python connector plugins do **not** run in the Rust core path — they run through `run_with_connector`, which does not write the Rust lineage graph. Encryption compliance action is reported as unresolved (`README:72-73`).
 
 ### 2.3 What must be agreed

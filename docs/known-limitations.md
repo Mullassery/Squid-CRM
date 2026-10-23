@@ -85,12 +85,12 @@ Reference pin: `twentyhq/twenty@08a0e5f1ee2e7db7c1e6ef3aeec9bcef731f4e98`
 | No live counterpart contracts | PyCustomerHub, PyReverseETL, PyTagShield, ClusterAudienceKit schemas not confirmed live |
 | Webhook envelope v1 | Stable, but no shared JSON Schema or compatibility tests with ecosystem consumers |
 | Idempotency key adoption | Counterparts must be taught to send stable idempotency keys |
-| Python client 0.3.0 | Prepared but not yet published to PyPI (0.2.1 is published) |
+| Python client 0.3.0 | Published to PyPI |
 
 ## 7. Release gates (not yet satisfied)
 
 - [ ] Threat model reviewed (`docs/threat-model.md`)
-- [ ] `cargo audit` + `cargo deny` in CI (`.github/workflows/ci.yml`)
+- [x] `cargo audit` + `cargo deny` in CI (`.github/workflows/ci.yml`)
 - [ ] Security test results recorded in `docs/decision-log.md`
 - [ ] Legal review of AGPL derivative-work status (outside IP counsel)
 - [ ] Branch protection and Dependabot alerts enabled on GitHub

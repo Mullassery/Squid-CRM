@@ -36,7 +36,7 @@ Statuses: **VERIFIED** (executable evidence in this repository), **PARTIAL**
 | PyCustomerHub | outbound record events | Webhooks + Python adapter | PARTIAL | Envelope v1, HMAC signatures, retries and replay are tested. `squid_crm.adapters.to_pycustomerhub_event` maps the documented top-level OCDS fields, but the exact PyCustomerHub schema and nested identity contract still need confirmation. |
 | ScrapeOwl | none | none | NOT APPLICABLE | No direct data contract; scraping output would arrive through another ecosystem service. |
 | MudFish | none | none | NOT APPLICABLE | No direct data contract; crawling output would arrive through another ecosystem service. |
-| Any counterpart | Python integration | `python/` `squid_crm` client | VERIFIED | 0.2.1 installed from PyPI; import/version and twelve client/adapter tests cover idempotency, correlation and retry headers. REST/GraphQL contract tests live in the Rust suite. Source is prepared as 0.3.0 but is not published yet. |
+| Any counterpart | Python integration | `python/` `squid_crm` client | VERIFIED | 0.3.0 installed from PyPI; import/version and twelve client/adapter tests cover idempotency, correlation and retry headers. REST/GraphQL contract tests live in the Rust suite. |
 
 ## C. Implemented changes
 
@@ -56,7 +56,7 @@ Statuses: **VERIFIED** (executable evidence in this repository), **PARTIAL**
 - Added `examples/webhook_receiver.py` as a runnable HMAC-verifying receiver.
 - Added the Python client package under `python/`, including `Idempotency-Key`,
   `X-Correlation-Id`, `Retry-After` and safe-retry support, and published
-  `squid-crm` 0.2.1 to PyPI; `0.3.0` is prepared but not published.
+  `squid-crm` 0.3.0 to PyPI.
 - Added replay-safe REST POSTs via `Idempotency-Key` with request-body hashing,
   conflict detection and stored responses; added `X-Correlation-Id` propagation.
 - Python client retries use the same idempotency key and correlation ID.
@@ -112,7 +112,7 @@ Last verified result (2026-10-23):
   `webhook_delivery_posts_record_events` with a live local HTTP receiver.
 - Idempotent replay, conflict, tenant scoping and failed-request retry are
   covered by integration tests.
-- Python package import check from PyPI: `squid_crm.__version__ == "0.2.1"`.
+- Python package import check from PyPI: `squid_crm.__version__ == "0.3.0"`.
 - Python client/adapter tests: 12 passing (`python3 -m unittest discover -s python/tests`).
 
 Runnable reverse-ETL example:
