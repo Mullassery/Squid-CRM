@@ -11,7 +11,9 @@ Reference pin: `twentyhq/twenty@08a0e5f1ee2e7db7c1e6ef3aeec9bcef731f4e98`
 
 ## 1. PyCustomerHub + Squid — shared event-schema contract
 
-**Status:** BLOCKED (`docs/ecosystem-issues.md:32`)
+**Status:** CODE-SIDE RESOLVED, LIVE TEST PENDING (`docs/ecosystem-issues.md:32`)
+
+**Working-tree update:** PyCustomerHub now exposes signed `POST /v1/squid` ingestion, maps Squid envelope v1 to OCDS, registers `squid.*` schemas, and enforces edge write-key auth. Live cross-service verification is still pending.
 
 ### 1.1 The two sides
 
@@ -51,7 +53,9 @@ Reference pin: `twentyhq/twenty@08a0e5f1ee2e7db7c1e6ef3aeec9bcef731f4e98`
 
 ## 2. PyReverseETL + Squid — activation payload + idempotency header
 
-**Status:** BLOCKED (`docs/ecosystem-issues.md:33`)
+**Status:** CODE-SIDE RESOLVED, LIVE TEST PENDING (`docs/ecosystem-issues.md:33`)
+
+**Working-tree update:** PyReverseETL now has a native Squid destination adapter with stable `Idempotency-Key`, `X-Correlation-Id`, native person/company payloads, and retry reuse. Live-account verification is still pending.
 
 ### 2.1 The two sides
 
@@ -85,7 +89,9 @@ Reference pin: `twentyhq/twenty@08a0e5f1ee2e7db7c1e6ef3aeec9bcef731f4e98`
 
 ## 3. PyTagShield + Squid — consent decision contract
 
-**Status:** UNVERIFIED / OPEN (`docs/ecosystem-issues.md:18`)
+**Status:** CODE-SIDE RESOLVED, LIVE TEST PENDING (`docs/ecosystem-issues.md:18`)
+
+**Working-tree update:** PyTagShield now has a runnable HTTP server and an event-only consent contract (`pytagshield.consent.v1`): granted purposes, full decisions, and provenance. Live Squid verification is still pending.
 
 ### 3.1 The two sides
 
@@ -118,7 +124,9 @@ Reference pin: `twentyhq/twenty@08a0e5f1ee2e7db7c1e6ef3aeec9bcef731f4e98`
 
 ## 4. ClusterAudienceKit / PyTagManager + Squid — custom-object schemas
 
-**Status:** OPEN (`docs/ecosystem-issues.md:20`, `19`)
+**Status:** PARTIAL — counterpart schemas defined, Squid acceptance/live test pending (`docs/ecosystem-issues.md:20`, `19`)
+
+**Working-tree update:** PyTagManager has a versioned `tagManagerFinding` schema and write plan. ClusterAudienceKit now defines `audienceSegments` / `audienceSegmentMemberships` schemas and a batched lookup/upsert plan. Squid metadata acceptance and live writes remain.
 
 ### 4.1 The two sides
 
@@ -171,4 +179,4 @@ ClusterAudienceKit / PyTagManager (custom-object schemas) ──► Squid custom
 3. **PyReverseETL** adds `Idempotency-Key` header and documents payload shape — this gates warehouse→CRM activation.
 4. **ClusterAudienceKit / PyTagManager** define custom-object schemas — this gates audience/finding writes to Squid custom objects.
 
-Until all four are resolved, Squid-CRM's webhook outbound and custom-object ingestion remain partially integrated: the mechanisms exist (envelope v1, HMAC, retries, durable log, custom-object CRUD, batch upsert), but the counterpart contracts are not mutually verified.
+Three blockers are now resolved at the code level (live verification pending). Custom-object schemas are defined on both counterpart sides; Squid metadata acceptance and live create/update/retry/conflict tests remain. Squid-CRM's mechanisms (envelope v1, HMAC, retries, durable log, custom-object CRUD, batch upsert) are unchanged.
