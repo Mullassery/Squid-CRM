@@ -43,7 +43,7 @@ Upstream keeps metadata in the shared `core` schema (`core."objectMetadata"`,
 - Adding a standard object (companies, opportunities, …) means adding its seed
   data and record repository; no schema migration is needed for metadata.
 - Metadata writes (`createOneObject`, `updateOneField`, …), views, roles and
-  `minimalMetadata` remain unimplemented and are listed in `TODO.md`.
+  `minimalMetadata` remain unimplemented and are listed in `../internal/TODO.md`.
 
 ## Verification
 

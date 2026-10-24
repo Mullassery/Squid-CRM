@@ -65,7 +65,7 @@ Statuses: **VERIFIED** (executable evidence in this repository), **PARTIAL**
 - Added a reverse-ETL person payload adapter with an explicit field allowlist
   and a runnable activation example.
 - Added CSV export/import and role/data/file permission enforcement in earlier
-  increments; see `TODO.md`, `docs/decision-log.md` and
+  increments; see `docs/internal/TODO.md`, `docs/decision-log.md` and
   `docs/migration-matrix.md`.
 
 ## D. Contract and version assumptions

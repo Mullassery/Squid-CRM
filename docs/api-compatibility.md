@@ -199,7 +199,7 @@ and view field/filter/sort/group create/update/delete/destroy plus the batch
 create/update mutations and view field/filter group writes are implemented;
 nested relation filters for people (`company`) and opportunities (`company`,
 `pointOfContact`), roles and `minimalMetadata` remain partially unimplemented
-(see `TODO.md`).
+(see `internal/TODO.md`).
 
 The frontend boot document (`GetCurrentUser` / `UserQueryFragment`) is served:
 identity, workspace members, current workspace and workspace URLs are live.

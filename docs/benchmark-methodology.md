@@ -10,7 +10,7 @@ Reference pin: `twentyhq/twenty@08a0e5f1ee2e7db7c1e6ef3aeec9bcef731f4e98`
 ## 1. Principle
 
 > No baseline performance numbers exist yet; no performance claims are made.
-> (TODO.md known limitation.)
+> (internal/TODO.md known limitation.)
 
 Benchmarks must be measured on the reference (Twenty Node/NestJS) and on Squid-CRM
 (Rust) identically: same dataset, same hardware, same queries, same database

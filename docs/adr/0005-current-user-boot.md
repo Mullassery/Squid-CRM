@@ -36,7 +36,7 @@ permission model yet.
   restricted/empty state, not with fabricated entitlements.
 - `ApiKey.role` still serialises the internal role enum (GraphQL name
   `WorkspaceRole`); aligning it with the upstream `Role` object is tracked in
-  `TODO.md`.
+  `../internal/TODO.md`.
 
 ## Verification
 

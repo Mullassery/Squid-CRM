@@ -9,7 +9,7 @@ Reference pin: `twentyhq/twenty@08a0e5f1ee2e7db7c1e6ef3aeec9bcef731f4e98` (`TWEN
 ## Phase 1 — Inventory & licence review ✅ (delivered)
 
 **Scope.** Read-only audit of architecture, licence, features, API surface, data model, frontend coupling, tests, CI, deployment.
-**Deliverables.** `01-repository-audit.md`, `02-phase-plan.md`, `decision-log.md`, `TODO.md`.
+**Deliverables.** `01-repository-audit.md`, `02-phase-plan.md`, `decision-log.md`, `../internal/TODO.md`.
 **Acceptance.** Every inventory claim cites a file path or command output; licence obligations enumerated; open decisions listed.
 **Risks.** Mis-stating a feature as present. Mitigation: evidence column in inventory.
 **Dependencies.** Read access to upstream.

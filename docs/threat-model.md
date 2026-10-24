@@ -1,7 +1,7 @@
 # Threat Model — Squid-CRM
 
 Status: Phase 6 deliverable. Authoritative per-area implementation status lives in
-`docs/migration-matrix.md` and `TODO.md`; this document records threats, affected
+`docs/migration-matrix.md` and `internal/TODO.md`; this document records threats, affected
 assets, controls, and residual risk.
 
 Reference pin: `twentyhq/twenty@08a0e5f1ee2e7db7c1e6ef3aeec9bcef731f4e98`

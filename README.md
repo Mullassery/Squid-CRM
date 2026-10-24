@@ -212,7 +212,7 @@ objects, search, files, webhooks). Still open:
 - [ ] Threat model, fuzz/property tests, benchmarks, SBOM and release docs
 
 The authoritative per-area status is [`docs/migration-matrix.md`](./docs/migration-matrix.md);
-the working checklist is [`TODO.md`](./TODO.md).
+the working checklist is [`docs/internal/TODO.md`](docs/internal/TODO.md).
 
 ## Contributing
 
