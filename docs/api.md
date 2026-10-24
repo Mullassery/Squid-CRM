@@ -14,6 +14,7 @@ API. All endpoints are served by `squid-server` (Axum).
 | `/files` | Signed upload and download URLs |
 | `/client-config` | Public runtime configuration for the web client |
 | `/healthz` | Liveness probe (`ok`) |
+| `/openapi.json` | OpenAPI 3.1 discovery document for the supported HTTP surface |
 
 The web client proxies `/api/*` to this server. In direct deployments, call the
 prefixes above from the browser origin allowed by `FRONTEND_URL`.

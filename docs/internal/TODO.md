@@ -200,7 +200,7 @@
 - Task/Note target REST filters and ordering cover scalar fields.
 - Task/Note GraphQL and REST filters cover scalar fields
   (id/title/status/dueAt/assigneeId); relation filters and nested ordering are not.
-- No OpenAPI document emitted yet.
+- ~~No OpenAPI document emitted yet.~~ **Done:** `/openapi.json` emits an OpenAPI 3.1 skeleton covering the REST resources, auth, GraphQL, files, and health routes. Field-level schemas are still generic.
 - Workspace activation lifecycle (`PENDING_CREATION` / `activateWorkspace`) and
   `signUpInNewWorkspace` are not implemented; `/auth/signup` activates directly.
 - No OAuth, 2FA or app-token flows. Built-in roles are metadata-backed and can

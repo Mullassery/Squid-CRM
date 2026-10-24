@@ -6,6 +6,7 @@ pub mod current_user;
 pub mod filtering;
 pub mod graphql;
 pub mod group_by;
+pub mod openapi;
 pub mod rate_limit;
 pub mod rest;
 pub mod s3;
@@ -216,6 +217,7 @@ pub fn app(state: AppState) -> Router {
 
     Router::new()
         .route("/healthz", get(rest::healthz))
+        .route("/openapi.json", get(openapi::spec))
         .route("/client-config", get(rest::client_config))
         .route(
             "/rest/people",

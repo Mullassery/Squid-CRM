@@ -8,7 +8,7 @@ The working checklist is `docs/internal/TODO.md`.
 | Area | Detail | Tracking |
 |------|--------|----------|
 | Generated GraphQL types for custom objects | Generic JSON GraphQL CRUD (`customObjectRecords`) exists, but no metadata-generated typed GraphQL schema/routes. |
-| OpenAPI document emission | No OpenAPI document is emitted by the Rust server. |
+| OpenAPI depth | `/openapi.json` emits an OpenAPI 3.1 skeleton for the supported routes; bodies are generic objects, not full field-level schemas. |
 | Workflow engine | No workflow definitions, triggers, actions, or runs. | Not started |
 | Background jobs / cron (Redis/BullMQ parity) | Durable `core.jobs` queue exists with `http.request` primitive; no Redis-backed distributed queue or cron scheduler. | Not started |
 | OAuth / Google / Microsoft / SAML / OIDC | SSO/SAML/OIDC are `@license Enterprise` and excluded. OAuth strategies not implemented. | Excluded (licence) / not started |

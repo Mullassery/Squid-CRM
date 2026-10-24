@@ -191,6 +191,8 @@ and the ADRs in [`docs/adr/`](./docs/adr).
   `/metadata` only.
 - Proxy: the web client forwards `/api/*` to `BACKEND_URL`, so browser requests
   and cookies stay same-origin.
+- Discovery: `GET /openapi.json` returns an OpenAPI 3.1 document for the
+  supported HTTP surface (generic request/response bodies).
 
 See [`docs/api.md`](./docs/api.md) for request/response shapes and the full
 operation list.
