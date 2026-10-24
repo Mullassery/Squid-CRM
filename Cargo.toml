@@ -27,7 +27,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v4", "v5", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls-ring-native-roots", "postgres", "uuid", "chrono", "migrate"] }
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-rustls-ring-native-roots", "postgres", "uuid", "chrono", "migrate"] }
 axum = "0.8"
 axum-extra = { version = "0.10", features = ["cookie"] }
 tower = "0.5"
