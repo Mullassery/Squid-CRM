@@ -34,7 +34,7 @@ tower = "0.5"
 tower-http = { version = "0.6", features = ["trace", "cors", "limit"] }
 async-graphql = { version = "7", features = ["uuid", "chrono"] }
 async-graphql-axum = "7"
-jsonwebtoken = "9"
+jsonwebtoken = "11"
 argon2 = "0.5"
 password-hash = { version = "0.5", features = ["rand_core"] }
 rand = "0.8"
