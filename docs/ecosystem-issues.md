@@ -31,10 +31,8 @@ Status labels: **OPEN**, **FIXED IN WORKING TREE**, **BLOCKED**, **UNVERIFIED**,
 | Webhook failures are not observable and there is no dead-letter queue. | PARTIAL | Attempts, last status/error, terminal state and replayable bodies are stored in `core.webhook_deliveries`; admin listing/manual replay and a background retry worker exist; ordering and retention policy remain open. |
 | No shared event-schema contract with PyCustomerHub. | CODE-SIDE RESOLVED | PyCustomerHub now accepts signed Squid envelope v1; live test pending. |
 | No PyReverseETL Squid adapter or mutually verified payload contract. | CODE-SIDE RESOLVED | PyReverseETL now sends native Squid payloads with `Idempotency-Key`; live test pending. |
-| README and About text describe Twenty API compatibility. | OPEN | Branding removal must preserve AGPL `NOTICE`/`LICENSE` attribution and generated fixture provenance. |
 | No branch protection and vulnerability alerts disabled on GitHub. | OPEN | Repository settings, not code. |
-| REST route map reports 493 of 535 captured core routes missing. | OPEN | `docs/rest-route-map.md`; this is the upstream compatibility surface, not the ecosystem slice. |
-| Custom objects have REST CRUD but no generated GraphQL types. | OPEN | Documented limitation in `docs/api-compatibility.md`. |
+| Custom objects have REST CRUD but no generated GraphQL types. | OPEN | Documented limitation in `docs/api.md`. |
 | Files are stored in PostgreSQL; S3 storage is absent. | OPEN | Documented limitation. |
 | Jobs/cron/workflows/integrations are not implemented. | OPEN | Documented limitation. |
 | Working-tree changes from prior work were uncommitted. | OPEN | Envelope, client, examples, tests and docs were modified locally; no commit or push was authorized. |

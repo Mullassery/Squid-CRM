@@ -122,7 +122,7 @@ pub struct LoginTokenPayload {
     pub login_token: AuthToken,
 }
 
-/// Upstream exposes connection cursors as a dedicated `Cursor` scalar.
+/// Squid exposes connection cursors as a dedicated `Cursor` scalar.
 #[derive(Debug, Clone)]
 pub struct Cursor(pub String);
 

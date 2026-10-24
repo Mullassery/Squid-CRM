@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 TEST_DATABASE_URL ?= postgres://postgres:postgres@127.0.0.1:5432/squid_test
 
-.PHONY: help build check fmt clippy test test-integration db-up db-down run smoke
+.PHONY: help build check fmt clippy test test-integration db-up db-down run smoke web-install web-dev web-check
 
 help:
 	@echo "build            cargo build --workspace"
@@ -13,6 +13,9 @@ help:
 	@echo "db-up / db-down  docker compose up/down postgres + redis"
 	@echo "run              run the server locally (needs .env)"
 	@echo "smoke            boot server and exercise auth + people via curl"
+	@echo "web-install      install web client dependencies"
+	@echo "web-dev          run the web client on http://localhost:3001"
+	@echo "web-check        type-check, lint and build the web client"
 
 build:
 	cargo build --workspace
@@ -43,3 +46,12 @@ run:
 
 smoke:
 	./scripts/smoke.sh
+
+web-install:
+	cd apps/web && npm install
+
+web-dev:
+	cd apps/web && npm run dev
+
+web-check:
+	cd apps/web && npm run check

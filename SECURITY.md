@@ -14,7 +14,7 @@ for a fix before disclosure.
 | Tokens | HS256 JWT with `typ`, `sid`, `jti` for login/access; opaque rotating refresh tokens | `login_token_cannot_be_used_as_access_token`, `refresh_tokens_rotate_and_signout_revokes_the_session` |
 | Sessions | 32-byte opaque token, SHA-256 at rest, expiry checked; signout deletes the session and revokes refresh/access tokens | `session_tokens_are_random_and_hashed`, `refresh_tokens_rotate_and_signout_revokes_the_session` |
 | API keys | random `api_*` token, SHA-256 at rest, expiry + revocation checked on every request | `api_key_lifecycle_authenticates_data_api` |
-| Cookies | `twenty-session`, HttpOnly, SameSite=Lax, optional Secure | `crates/squid-api/src/lib.rs` |
+| Cookies | `squid-session`, HttpOnly, SameSite=Lax, optional Secure | `crates/squid-auth/src/lib.rs` |
 | Data API auth | API key or session cookie only; user access tokens rejected | `graphql_login_flow_and_people_query` |
 | CSRF | Origin check on unsafe cookie-authenticated requests; bearer/API-key exempt | `cookie_requests_reject_foreign_origins` |
 | Auth throttling | 10 attempts / 15 minutes per account (in process) | `blocks_after_the_burst_limit_and_can_be_cleared` |

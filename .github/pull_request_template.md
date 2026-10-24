@@ -9,10 +9,11 @@
 - [ ] `cargo fmt --all -- --check`
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings`
 - [ ] `cargo test --workspace`
+- [ ] `cd apps/web && npm run check`
 - [ ] `docker compose up` smoke check, if migrations or routes changed
 
 ## Checklist
 
-- [ ] Compatibility fixtures updated for any API contract change
+- [ ] API docs and clients updated for any contract change
 - [ ] No secrets, tokens, or tenant data committed
 - [ ] README/docs updated if coverage or limitations changed

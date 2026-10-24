@@ -197,8 +197,8 @@ pub struct DeletePersonParams {
     pub soft_delete: bool,
 }
 
-/// Runtime configuration consumed by the frontend at boot. Mirrors the
-/// captured v2.49.0 shape; unimplemented integrations are reported as disabled.
+/// Public runtime configuration consumed by the Squid web client at boot.
+/// Integrations that are not implemented report themselves as disabled.
 pub async fn client_config(State(state): State<AppState>) -> Json<serde_json::Value> {
     let front_domain = state
         .config
@@ -215,7 +215,7 @@ pub async fn client_config(State(state): State<AppState>) -> Json<serde_json::Va
         .to_string();
 
     Json(json!({
-        "appVersion": "v2.49.0",
+        "appVersion": "0.1.0",
         "billing": {
             "isBillingEnabled": false,
             "trialPeriods": [
@@ -241,7 +241,7 @@ pub async fn client_config(State(state): State<AppState>) -> Json<serde_json::Va
         "serverUrl": "",
         "publicFunctionDomain": null,
         "support": { "supportDriver": "NONE" },
-        "sentry": { "release": "v2.49.0", "tracesSampleRate": 0.1 },
+        "sentry": { "release": "0.1.0", "tracesSampleRate": 0.0 },
         "captcha": {},
         "api": { "mutationMaximumAffectedRecords": 100 },
         "onboarding": null,
@@ -257,7 +257,7 @@ pub async fn client_config(State(state): State<AppState>) -> Json<serde_json::Va
         "isConfigVariablesInDbEnabled": true,
         "isImapSmtpCaldavEnabled": true,
         "isEmailingDomainInDemoMode": true,
-        "allowRequestsToTwentyIcons": true,
+        "allowRequestsToSquidIcons": true,
         "isBookCallOnboardingStepEnabled": false,
         "isCompanyEnrichmentEnabled": false,
         "isCloudflareIntegrationEnabled": false,
@@ -2761,7 +2761,7 @@ fn validate_person(input: &CreatePersonInput) -> AppResult<()> {
     Ok(())
 }
 
-/// Encode a cursor exactly like upstream: base64 of `{"id":"<uuid>"}` (no pad).
+/// Encode a cursor exactly as Squid defines: base64 of `{"id":"<uuid>"}` (no pad).
 pub(crate) fn encode_cursor(id: Uuid) -> String {
     base64::engine::general_purpose::STANDARD_NO_PAD.encode(format!("{{\"id\":\"{id}\"}}"))
 }
@@ -4260,7 +4260,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cursor_round_trips_and_matches_upstream_encoding() {
+    fn cursor_round_trips_and_matches_canonical_encoding() {
         let id = Uuid::parse_str("6c774d80-730f-4e23-b707-39053977cbff").unwrap();
         let cursor = encode_cursor(id);
         assert_eq!(

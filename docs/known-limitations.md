@@ -1,44 +1,40 @@
 # Known Limitations — Squid-CRM
 
 Tracks known gaps, intentional exclusions, and caveats for the current release.
-Authoritative per-area implementation status lives in `docs/migration-matrix.md`;
-the working checklist is `internal/TODO.md`.
-
-Reference pin: `twentyhq/twenty@08a0e5f1ee2e7db7c1e6ef3aeec9bcef731f4e98`
-(server `2.50.0`).
+The working checklist is `docs/internal/TODO.md`.
 
 ## 1. Not implemented (open work)
 
 | Area | Detail | Tracking |
 |------|--------|----------|
-| Generated GraphQL types for custom objects | Generic JSON GraphQL CRUD (`customObjectRecords`) exists, but no metadata-generated typed GraphQL schema/routes. | internal/TODO.md Phase 5 follow-up; migration matrix row "Dynamic GraphQL schema" |
-| OpenAPI document emission | No OpenAPI document is emitted by the Rust server. | internal/TODO.md Phase 6-8; migration matrix row "REST + OpenAPI" |
-| Workflow engine | No workflow definitions, triggers, actions, or runs. | Migration matrix row "Workflows" — not started |
-| Background jobs / cron (Redis/BullMQ parity) | Durable `core.jobs` queue exists with `http.request` primitive; no Redis-backed distributed queue or cron scheduler. | Migration matrix row "Background jobs / cron" — not started |
-| OAuth / Google / Microsoft / SAML / OIDC | SSO/SAML/OIDC are `@license Enterprise` and excluded. OAuth strategies not implemented. | Migration matrix rows — excluded (licence) / not started |
-| 2FA / captcha | Not implemented. | Migration matrix rows — not started |
-| App tokens | Not implemented. | Migration matrix row "Auth: sessions, JWT, API keys" — partial |
-| Row-level permission predicates | Not implemented. | Migration matrix row — not started |
-| MCP endpoint | Deferred. | Migration matrix row — deferred |
-| Route triggers | Deferred. | Migration matrix row — deferred |
-| Apps / extension platform | Deferred (SDK is MIT). | Migration matrix row — deferred |
-| AI providers / agents | Deferred. | Migration matrix row — deferred |
-| Timeline activities | Not implemented. | Migration matrix row — not started |
-| Email integrations (Gmail/Graph/IMAP/SMTP) | Not implemented. | Migration matrix row — not started |
-| Calendar integrations | Not implemented. | Migration matrix row — not started |
-| Connected accounts | Not implemented. | Migration matrix row — not started |
-| Dashboards | Not implemented. | Migration matrix row — not started |
-| Audit / event logs | Not implemented. Webhook delivery log exists; no general event-logs module. | Migration matrix row — not started |
-| Billing | `@license Enterprise` — excluded. | Migration matrix row — excluded (licence) |
-| Admin panel | Largely `@license Enterprise` — excluded. | Migration matrix row — excluded (licence) |
-| Workspace invitations | Not implemented. | Migration matrix row "Workspace & members" — partial |
-| Workspace activation lifecycle | `PENDING_CREATION` / `activateWorkspace` / `signUpInNewWorkspace` not implemented; signup activates directly. | internal/TODO.md known limitations |
-| File storage S3 (live provider) | Local PostgreSQL storage with signed URLs; S3-compatible path-style client implemented but not verified against a live provider. | internal/TODO.md known limitations; migration matrix row "File storage S3/local" — partial |
-| Webhook delivery ordering + long-term retention | Durable `core.webhook_deliveries` log + bounded retries + background retry worker exist; ordering guarantees and retention policy open. | internal/TODO.md known limitations; migration matrix row "Webhooks" — partial |
-| Distributed rate limiting | Auth throttling is in-process only (10 attempts / 15 min per account). Multi-replica deployments need edge/Redis limiting. | internal/TODO.md known limitations |
-| REST route coverage | 42 of 535 captured core routes implemented. | docs/rest-route-map.md; migration matrix row — partial |
-| Relation filters / ordering (remaining objects) | Implemented for person/company/opportunity; pending for some nested relations and targets. | internal/TODO.md known limitations |
-| Cursor pagination for all objects | Implemented for person; partial for other slices. | internal/TODO.md known limitations |
+| Generated GraphQL types for custom objects | Generic JSON GraphQL CRUD (`customObjectRecords`) exists, but no metadata-generated typed GraphQL schema/routes. |
+| OpenAPI document emission | No OpenAPI document is emitted by the Rust server. |
+| Workflow engine | No workflow definitions, triggers, actions, or runs. | Not started |
+| Background jobs / cron (Redis/BullMQ parity) | Durable `core.jobs` queue exists with `http.request` primitive; no Redis-backed distributed queue or cron scheduler. | Not started |
+| OAuth / Google / Microsoft / SAML / OIDC | SSO/SAML/OIDC are `@license Enterprise` and excluded. OAuth strategies not implemented. | Excluded (licence) / not started |
+| 2FA / captcha | Not implemented. | Not started |
+| App tokens | Not implemented. | Partial |
+| Row-level permission predicates | Not implemented. | Not started |
+| MCP endpoint | Deferred. | Deferred |
+| Route triggers | Deferred. | Deferred |
+| Apps / extension platform | Deferred (SDK is MIT). | Deferred |
+| AI providers / agents | Deferred. | Deferred |
+| Timeline activities | Not implemented. | Not started |
+| Email integrations (Gmail/Graph/IMAP/SMTP) | Not implemented. | Not started |
+| Calendar integrations | Not implemented. | Not started |
+| Connected accounts | Not implemented. | Not started |
+| Dashboards | Not implemented. | Not started |
+| Audit / event logs | Not implemented. Webhook delivery log exists; no general event-logs module. | Not started |
+| Billing | `@license Enterprise` — excluded. | Excluded (licence) |
+| Admin panel | Largely `@license Enterprise` — excluded. | Excluded (licence) |
+| Workspace invitations | Not implemented. | Partial |
+| Workspace activation lifecycle | `PENDING_CREATION` / `activateWorkspace` / `signUpInNewWorkspace` not implemented; signup activates directly. | Known limitation |
+| File storage S3 (live provider) | Local PostgreSQL storage with signed URLs; S3-compatible path-style client implemented but not verified against a live provider. | Known limitation |
+| Webhook delivery ordering + long-term retention | Durable `core.webhook_deliveries` log + bounded retries + background retry worker exist; ordering guarantees and retention policy open. | Known limitation |
+| Distributed rate limiting | Auth throttling is in-process only (10 attempts / 15 min per account). Multi-replica deployments need edge/Redis limiting. | Known limitation |
+| REST and GraphQL coverage | Route and operation coverage is partial; see `docs/api.md` for the supported surface. | Partial |
+| Relation filters / ordering (remaining objects) | Implemented for person/company/opportunity; pending for some nested relations and targets. | Known limitation |
+| Cursor pagination for all objects | Implemented for person; partial for other slices. | Known limitation |
 
 ## 2. Intentional exclusions (licence)
 
@@ -48,7 +44,7 @@ Reference pin: `twentyhq/twenty@08a0e5f1ee2e7db7c1e6ef3aeec9bcef731f4e98`
 | Billing | `@license Enterprise` upstream files (D-006) |
 | Admin panel | Largely `@license Enterprise` upstream files (D-006) |
 
-## 3. Semantic divergence from upstream Twenty (deliberate)
+## 3. Deliberate design decisions
 
 | Divergence | Detail | Decision |
 |------------|--------|----------|
@@ -75,7 +71,7 @@ Reference pin: `twentyhq/twenty@08a0e5f1ee2e7db7c1e6ef3aeec9bcef731f4e98`
 | Auth throttling is per-process | Multi-replica deployments need shared limiter at edge or in Redis | Open (internal/TODO.md Phase 6) |
 | No CSRF token | Relies on SameSite=Lax + Origin check; review for older browsers/proxies | Open |
 | `http.request` SSRF allowlisting | Blocks localhost/private IPs by default; public domains allowed unless allowlisted | Implemented (D-061) |
-| No general audit log | Webhook delivery log exists; no `event-logs` module | Open (migration matrix) |
+| No general audit log | Webhook delivery log exists; no `event-logs` module | Open |
 | Webhook delivery ordering | Durable log + retries exist; ordering guarantees open | Open |
 
 ## 6. Ecosystem integration caveats

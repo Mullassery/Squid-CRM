@@ -4,17 +4,13 @@ Status: Phase 7 deliverable (benchmarks). No benchmark numbers are published yet
 this document defines the methodology so that any future numbers are reproducible
 and not fabricated.
 
-Reference pin: `twentyhq/twenty@08a0e5f1ee2e7db7c1e6ef3aeec9bcef731f4e98`
-(server `2.50.0`).
-
 ## 1. Principle
 
 > No baseline performance numbers exist yet; no performance claims are made.
 > (internal/TODO.md known limitation.)
 
-Benchmarks must be measured on the reference (Twenty Node/NestJS) and on Squid-CRM
-(Rust) identically: same dataset, same hardware, same queries, same database
-state. Results are reported only where actually measured.
+Benchmarks must be measured on Squid-CRM with the same dataset, hardware, queries and database
+state across runs. Results are reported only where actually measured.
 
 ## 2. Benchmark environment
 
@@ -60,8 +56,8 @@ For each endpoint (REST `/rest/...`, GraphQL `/graphql`):
 
 ## 5. Procedure
 
-1. Deploy the reference Twenty stack (v2.49.0 Docker image) against a fresh PostgreSQL 16.
-2. Seed an identical dataset into both reference and Squid-CRM databases.
+1. Deploy Squid-CRM against a fresh PostgreSQL 16.
+2. Seed the benchmark dataset into the Squid-CRM database.
 3. Run warm-up requests against each backend.
 4. Run the benchmark suite (fixed concurrency, fixed duration, e.g. 60 seconds).
 5. Record raw results (latency histograms, RPS, RSS, CPU, DB query counts).
@@ -80,8 +76,8 @@ with:
 
 ## 7. Comparison rules
 
-- A comparison between reference and Squid-CRM is stated **only** when both
-  backends have been benchmarked under identical conditions.
+- Comparisons between Squid-CRM revisions are stated **only** when both
+  revisions have been benchmarked under identical conditions.
 - No relative performance claim (e.g. "X% faster") is made without raw data
   for both sides.
 - Squid-CRM-only numbers (e.g. "p95 latency of endpoint Y") may be published

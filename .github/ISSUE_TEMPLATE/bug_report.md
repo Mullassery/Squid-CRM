@@ -36,7 +36,7 @@ assignees: ''
 - Rust version:
 - PostgreSQL version:
 - Deployment (docker compose / local binary / other):
-- Twenty client version (if compatibility-related):
+- Browser and deployment environment:
 
 ## Anything else
 

@@ -1,11 +1,7 @@
 # Threat Model — Squid-CRM
 
-Status: Phase 6 deliverable. Authoritative per-area implementation status lives in
-`docs/migration-matrix.md` and `internal/TODO.md`; this document records threats, affected
-assets, controls, and residual risk.
-
-Reference pin: `twentyhq/twenty@08a0e5f1ee2e7db7c1e6ef3aeec9bcef731f4e98`
-(server `2.50.0`).
+Status: Phase 6 deliverable. The working checklist is `docs/internal/TODO.md`; this document records threats,
+affected assets, controls, and residual risk.
 
 ## 1. Scope
 
@@ -33,8 +29,8 @@ Out of scope (excluded by licence or deferred):
 - S3-compatible storage against a live provider (local PostgreSQL fallback only;
   `http.request` SSRF allowlisting is partial).
 
-Trust boundary: the Rust API server is the trust boundary. Clients (Twenty
-frontend, Python client, webhook consumers, job enqueuers) are untrusted
+Trust boundary: the Rust API server is the trust boundary. Clients (the Squid web
+client, Python client, webhook consumers, job enqueuers) are untrusted
 callers authenticated via session cookie, API key, or (for webhook delivery)
 HMAC signature.
 
@@ -96,11 +92,10 @@ HMAC signature.
 | No field/object permission enforcement beyond built-in roles | 6 | Permission-flag enforcement for billing/SSO data and feature flags remains open |
 | No SSRF guard for outbound integrations beyond `http.request` | 6 | `secure-http-client` parity not implemented; `http.request` allowlisting is the current substrate |
 | File storage: PostgreSQL bytes only; S3 live-provider unverified | 6/7 | S3-compatible path-style client implemented; live verification environment-specific |
-| No general audit log | 6 | Webhook delivery log exists; general `event-logs` module not started (migration matrix) |
+| No general audit log | 6 | Webhook delivery log exists; general `event-logs` module not started |
 | No dependency scanning in CI | 6 | Add `cargo audit` + `cargo deny` to CI workflow |
 | Webhook delivery ordering + long-term retention policy | 6 | Durable log + bounded retries + background worker exist; ordering and retention open |
 | No branch protection / vulnerability alerts on GitHub | Repo settings | Enable branch protection and Dependabot alerts on `Mullassery/Squid-CRM` |
-| REST route coverage: 493 of 535 core routes missing | 5/6 | Continue route parity per `docs/rest-route-map.md` |
 | Custom objects: no generated GraphQL types | 5 | Generic JSON GraphQL CRUD done; typed schema generation deferred |
 
 ## 6. Security testing requirements (Phase 6)

@@ -1,7 +1,0 @@
-{
-  "statusCode": 403,
-  "messages": [
-    "Missing authentication token"
-  ],
-  "error": "FORBIDDEN_EXCEPTION"
-}

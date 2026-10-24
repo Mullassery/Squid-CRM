@@ -2,15 +2,16 @@
 
 ## Read first
 
-- `docs/audit/01-repository-audit.md` — what the reference does.
-- `docs/decision-log.md` — decisions, including the licence strategy (D-001).
-- `FIREWALL.md` — the reference is a **specification only**; do not copy code.
+- `docs/api.md` — REST and GraphQL surface.
+- `docs/frontend.md` — web client structure and conventions.
+- `docs/decision-log.md` — architectural decisions.
+- `docs/adr/` — architecture decision records.
 
 ## Prerequisites
 
 - Rust (stable; workspace `rust-version = 1.85`).
 - PostgreSQL 16 (Docker or local).
-- Node 24.16 only if you are running the existing frontend.
+- Node.js 20+ and npm 10+ for `apps/web`.
 
 ## Local setup
 
@@ -43,25 +44,38 @@ APP_SECRET=$(openssl rand -hex 32) \
 cargo run -p squid-server
 ```
 
+Run the web client:
+
+```bash
+cd apps/web
+npm install
+npm run dev
+```
+
+The dev server listens on <http://localhost:3001> and proxies `/api/*` to
+`http://localhost:3000` (`BACKEND_URL` overrides the target).
+
 ## Checks required before a PR
 
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 TEST_DATABASE_URL=... cargo test --workspace
+cd apps/web && npm run check
 ```
 
 ## Conventions
 
-- No copying from `reference/twenty` (see `FIREWALL.md`).
-- Keep the REST/GraphQL contract in `docs/api-compatibility.md` current.
+- Keep the API contract in `docs/api.md` and the frontend guide in
+  `docs/frontend.md` current.
 - Any new workspace-scoped query must take `workspace_id` and use the validated
   schema helper.
+- Frontend code is strict TypeScript. Prefer explicit types at API boundaries and
+  keep server state in the shared `src/lib` clients.
 - Do not disable or skip tests. If a test cannot run, report it explicitly.
 - Add an ADR for any architectural change.
 
-## Phase discipline
+## Pull requests
 
-Work advances phase by phase (`docs/audit/02-phase-plan.md`). State scope,
-acceptance criteria, risks and rollback in the PR description. Do not claim
-parity or performance without reproducible evidence.
+State scope, acceptance criteria, risks and rollback in the PR description. Do
+not claim performance without reproducible evidence.

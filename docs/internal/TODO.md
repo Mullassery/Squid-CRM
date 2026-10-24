@@ -12,16 +12,11 @@
 - [x] 57 tests passing (13 API unit, 37 integration, 5 auth, 2 DB); clippy clean; live smoke test.
 - [x] Dockerfile, docker-compose, CI workflow, Makefile, smoke script.
 
-## Phase 2 (contracts)
-- [x] Boot upstream via Docker (`twentycrm/twenty:v2.49.0`) and capture SDL,
-      OpenAPI and REST/GraphQL examples into `contracts/v2.49.0/`.
-- [x] Diff captured contracts against `docs/api-compatibility.md` (divergence
-      table §8).
-- [x] Build the pinned source (`--target twenty-server`), capture v2.50.0 SDL,
-      OpenAPI and examples into `contracts/v2.50.0/`, and diff against v2.49.0.
-- [x] Map every frontend operation in `twenty-front/src/generated/graphql.ts`
-      and `generated-metadata/graphql.ts` (`docs/frontend-operation-map.md`).
-- [x] Map every captured REST/OpenAPI route (`docs/rest-route-map.md`).
+## Frontend
+- [x] Next.js + TypeScript app under `apps/web` with shared API client, auth,
+      object CRUD, search, and settings surfaces.
+- [x] Web app proxies `/api` to the Rust server and uses the Squid session cookie.
+- [x] Production build wired into CI.
 
 ## Phase 4 follow-ups (contract alignment — from captured fixtures)
 - [x] REST create returns `data.createPerson`; delete returns
@@ -227,4 +222,4 @@
   open.
 - Enterprise features excluded (licence).
 - No baseline performance numbers captured; no performance claims made.
-- `reference/twenty` is git-ignored; recreate with `scripts/clone-reference.sh`.
+- No external reference clone is required to build or run the project.

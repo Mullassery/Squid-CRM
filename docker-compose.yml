@@ -52,19 +52,19 @@ services:
       retries: 10
     restart: unless-stopped
 
-  # The existing React frontend is kept independent. Point it at this server:
-  #   REACT_APP_SERVER_BASE_URL=http://localhost:3000
-  # and run it from the frontend package (see reference/twenty/.nvmrc: Node 24.16).
-  # frontend:
-  #   image: node:24-bookworm
-  #   working_dir: /app
-  #   command: yarn start
-  #   volumes:
-  #     - ./frontend:/app
-  #   environment:
-  #     REACT_APP_SERVER_BASE_URL: http://localhost:3000
-  #   ports:
-  #     - "3001:3001"
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+    environment:
+      BACKEND_URL: http://server:3000
+      PORT: 3000
+    ports:
+      - "${WEB_PORT:-3001}:3000"
+    depends_on:
+      server:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   squid-db:

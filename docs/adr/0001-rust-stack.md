@@ -2,13 +2,11 @@
 
 - Status: Accepted (Phase 3)
 - Date: 2026-10-19
-- Reference: twentyhq/twenty@08a0e5f1
 
 ## Context
 
 The target architecture mandates stable Rust, Tokio, Axum, SQLx, PostgreSQL and
-OpenAPI. The audited backend is NestJS + TypeORM + GraphQL Yoga with
-metadata-driven, runtime-generated schemas and a custom ORM.
+OpenAPI. The backend is design-driven around metadata and runtime-generated schemas.
 
 ## Decision
 

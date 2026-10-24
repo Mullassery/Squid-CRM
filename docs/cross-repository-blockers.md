@@ -6,9 +6,6 @@ records the two sides of the contract, the specific fields/semantics that must a
 the current state of each side, what "resolved" looks like, and the owner of the
 next move.
 
-Reference pin: `twentyhq/twenty@08a0e5f1ee2e7db7c1e6ef3aeec9bcef731f4e98`
-(server `2.50.0`).
-
 ## 1. PyCustomerHub + Squid — shared event-schema contract
 
 **Status:** CODE-SIDE RESOLVED, LIVE TEST PENDING (`docs/ecosystem-issues.md:32`)

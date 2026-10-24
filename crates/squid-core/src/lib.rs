@@ -1,6 +1,6 @@
 //! Shared configuration, domain models and error contract for Squid-CRM.
 //!
-//! The error envelope mirrors the audited upstream REST contract:
+//! The error envelope mirrors the Squid REST contract:
 //! `{ "statusCode": u16, "error": String, "messages": [String], "code": Option<String> }`.
 
 pub use async_graphql::MaybeUndefined;
@@ -32,7 +32,7 @@ pub use target::*;
 pub use task::*;
 pub use view::*;
 
-/// A workspace member's role. Upstream models this as a role entity with
+/// A workspace member's role. The model represents a role entity with
 /// permission flags; the slice keeps the built-in roles as an enum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, async_graphql::Enum)]
 #[graphql(name = "WorkspaceRole")]
@@ -124,7 +124,7 @@ pub struct WebhookRecord {
     pub deleted_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
-/// Composite `FullNameMetadata` shape used by upstream for `person.name`.
+/// Composite `FullNameMetadata` shape used by Squid for `person.name`.
 #[derive(
     Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, async_graphql::SimpleObject,
 )]
@@ -135,7 +135,7 @@ pub struct FullName {
     pub last_name: String,
 }
 
-/// Composite `EmailsMetadata` shape used by upstream for `person.emails`.
+/// Composite `EmailsMetadata` shape used by Squid for `person.emails`.
 #[derive(
     Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, async_graphql::SimpleObject,
 )]
@@ -224,7 +224,7 @@ impl Default for Actor {
     }
 }
 
-/// A stored file reference, matching the upstream `FileObject` shape.
+/// A stored file reference, matching the Squid `FileObject` shape.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, async_graphql::SimpleObject)]
 pub struct FileObject {
     #[serde(rename = "fileId")]
@@ -235,7 +235,7 @@ pub struct FileObject {
     pub url: String,
 }
 
-/// Input reference to an uploaded file (`FileItemInput` upstream).
+/// Input reference to an uploaded file (`FileItemInput`).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, async_graphql::InputObject)]
 pub struct FileItemInput {
     #[serde(rename = "fileId")]

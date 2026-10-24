@@ -1379,7 +1379,7 @@ impl Db {
                 query = bind_filter(query, &filter.binds);
             }
             let rows = query.bind(limit).bind(offset).fetch_all(&self.pool).await?;
-            // Upstream leaves hasPreviousPage false for pure offset paging.
+            // Squid leaves hasPreviousPage false for pure offset paging.
             has_previous_page = false;
             has_next_page = offset + (rows.len() as i64) < total;
             rows
@@ -1746,7 +1746,7 @@ impl Db {
         Ok(row.as_ref().map(row_to_person))
     }
 
-    /// Permanently remove a person (upstream `soft_delete=false`).
+    /// Permanently remove a person (`soft_delete=false`).
     pub async fn destroy_person(
         &self,
         workspace_id: Uuid,
@@ -1780,7 +1780,7 @@ impl Db {
         Ok(row.as_ref().map(row_to_person))
     }
 
-    /// Soft-delete, matching upstream's recoverable deletion semantics.
+    /// Soft-delete with recoverable deletion semantics.
     pub async fn soft_delete_person(
         &self,
         workspace_id: Uuid,
@@ -8297,7 +8297,7 @@ const PERSON_SELECT: &str = "id, created_at, updated_at, deleted_at, name_first,
      phones::text AS phones, avatar_url, avatar_file::text AS avatar_file, position, \
      created_by::text AS created_by, updated_by::text AS updated_by, search_vector, company_id";
 
-/// A page of people with the connection flags upstream exposes.
+/// A page of people with the connection flags Squid exposes.
 #[derive(Debug, Clone)]
 pub struct PersonPage {
     pub persons: Vec<Person>,

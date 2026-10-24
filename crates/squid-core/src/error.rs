@@ -53,7 +53,7 @@ impl AppError {
         }
     }
 
-    /// Optional `code` member on REST errors. The captured upstream bodies omit
+    /// Optional `code` member on REST errors. The Squid error bodies omit
     /// it for 400/403/404; authentication failures may include one.
     pub fn error_code(&self) -> Option<&'static str> {
         match self {

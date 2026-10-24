@@ -1,12 +1,12 @@
 # Architecture Overview
 
-## Runtime topology (Phase 4)
+## Runtime topology
 
 ```mermaid
 flowchart LR
-  Browser[React / TypeScript frontend] -->|HTTPS, cookie + bearer| API
+  Browser[Next.js web client in apps/web] -->|/api proxy, cookie or API key| API
   subgraph Rust["squid-server (Axum + Tokio)"]
-    API[/"/graphql /rest /auth /healthz"/]
+    API[/"/graphql /metadata /rest /auth /files /healthz"/]
     AUTH[squid-auth]
     CORE[squid-core]
     DBLAYER[squid-db]
@@ -94,10 +94,10 @@ erDiagram
 ```
 
 Each workspace additionally owns a schema containing object tables (`person` in
-the current slice), mirroring upstream. Workspace-scoped object/field metadata
+the current slice). Workspace-scoped object/field metadata
 lives in `core.object_metadata` / `core.field_metadata` and is seeded lazily:
 the standard `person` object plus its 16 fields, and one default table view with
-five view fields. See ADR 0004. The frontend boot query (`currentUser`) is
+five view fields. See ADR 0004. The web client boot query (`currentUser`) is
 served from the same core rows with static defaults for unimplemented
 enterprise surfaces (ADR 0005).
 

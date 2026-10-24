@@ -1,9 +1,9 @@
 //! Workspace object/field metadata models.
 //!
-//! Phase 5 slice: the shapes mirror the subset of the upstream metadata schema
-//! consumed by `twenty-front`'s `ObjectMetadataFields` fragment. Relation,
-//! index and search-field metadata are modelled but standard objects currently
-//! expose empty lists.
+//! Phase 5 slice: the shapes mirror the Squid metadata schema
+//! consumed by the Squid web client (`apps/web`). Relation, index and
+//! search-field metadata are modelled; standard objects currently expose empty
+//! lists.
 
 use async_graphql::{ComplexObject, Enum, InputObject, Json, SimpleObject};
 use serde::{Deserialize, Serialize};

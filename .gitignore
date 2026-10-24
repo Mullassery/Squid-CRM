@@ -8,7 +8,10 @@ Cargo.lock.orig
 
 # Node / frontend
 node_modules/
+.next/
 dist/
+.turbo/
+*.tsbuildinfo
 .yarn/cache/
 .yarn/install-state.gz
 

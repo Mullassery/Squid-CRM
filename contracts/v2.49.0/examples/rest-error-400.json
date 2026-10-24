@@ -1,7 +1,0 @@
-{
-  "statusCode": 400,
-  "error": "BadRequestException",
-  "messages": [
-    "Invalid string value 'not-an-email' for email field \"emails.primaryEmail\""
-  ]
-}

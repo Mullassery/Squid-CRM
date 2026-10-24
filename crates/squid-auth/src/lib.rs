@@ -16,7 +16,7 @@ use sha2::{Digest, Sha256};
 use squid_core::{AppError, AppResult, Role};
 use uuid::Uuid;
 
-pub const SESSION_COOKIE_NAME: &str = "twenty-session";
+pub const SESSION_COOKIE_NAME: &str = "squid-session";
 const TOKEN_ISSUER: &str = "squid-crm";
 
 #[derive(Clone)]

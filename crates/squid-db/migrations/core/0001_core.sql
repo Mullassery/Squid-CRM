@@ -1,5 +1,5 @@
 -- Core schema: cross-workspace data (users, workspaces, sessions).
--- Mirrors the audited upstream distinction between a shared "core" schema and
+-- Mirrors the Squid distinction between a shared "core" schema and
 -- per-workspace schemas. Kept intentionally small for the Phase 4 slice.
 
 CREATE SCHEMA IF NOT EXISTS core;

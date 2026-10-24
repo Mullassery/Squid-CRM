@@ -263,7 +263,7 @@ async fn signup_signin_and_person_crud_over_rest() {
         "Ada"
     );
 
-    // List: exact upstream envelope
+    // List: exact Squid envelope
     let listed = send(
         &app,
         authorized("GET", "/rest/people?limit=10", &token, None),
@@ -568,7 +568,7 @@ async fn cookie_requests_reject_foreign_origins() {
 }
 
 #[tokio::test]
-async fn rest_fields_and_depth_match_upstream_validation() {
+async fn rest_fields_and_depth_match_validation() {
     let app = test_app().await;
     let email = unique_email("shape");
     let (token, _workspace) = signup(&app, &email).await;
@@ -1374,7 +1374,7 @@ async fn client_config_matches_frontend_boot_contract() {
     let app = test_app().await;
     let response = send(&app, json_request("GET", "/client-config", json!({}))).await;
     assert_eq!(response.status, StatusCode::OK, "body: {}", response.body);
-    assert_eq!(response.body["appVersion"], "v2.49.0");
+    assert_eq!(response.body["appVersion"], "0.1.0");
     assert_eq!(response.body["authProviders"]["password"], true);
     assert_eq!(response.body["isCookieSessionEnabled"], true);
     assert_eq!(response.body["frontDomain"], "localhost");
@@ -1442,7 +1442,7 @@ async fn soft_delete_and_restore_round_trip() {
     .await;
     assert_eq!(back.status, StatusCode::OK);
 
-    // Default DELETE is a hard delete (upstream `soft_delete=false`).
+    // Default DELETE is a hard delete (`soft_delete=false`).
     let hard = send(
         &app,
         authorized("DELETE", &format!("/rest/people/{person_id}"), &token, None),

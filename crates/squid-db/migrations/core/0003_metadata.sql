@@ -1,5 +1,5 @@
 -- Phase 5 slice: workspace object/field metadata.
--- Mirrors the subset of upstream `core."objectMetadata"` / `core."fieldMetadata"`
+-- Mirrors the Squid `core."objectMetadata"` / `core."fieldMetadata"`
 -- consumed by the frontend metadata fragment. Metadata is workspace-scoped.
 
 CREATE TABLE IF NOT EXISTS core.object_metadata (

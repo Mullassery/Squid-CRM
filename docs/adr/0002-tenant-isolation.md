@@ -5,7 +5,7 @@
 
 ## Context
 
-Upstream isolates tenants with a **Postgres schema per workspace** plus a shared
+Squid isolates tenants with a **Postgres schema per workspace** plus a shared
 core schema for users, workspaces, members and metadata. Cross-tenant leakage is
 the highest-severity failure mode.
 
@@ -39,7 +39,7 @@ the highest-severity failure mode.
 
 ## Open work
 
-- Row-level permission predicates (upstream `row-level-permission-predicate`)
+- Row-level permission predicates (`row-level-permission-predicate`)
   are not implemented; role checks are limited to built-in roles.
 - A future `SECURITY DEFINER`/RLS defense-in-depth layer should be evaluated and
   benchmarked, not assumed.

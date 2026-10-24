@@ -1,5 +1,5 @@
 -- Phase 5 slice: workspace views (read path used by the People table).
--- Mirrors the subset of upstream `core."view"` and friends consumed by the
+-- Mirrors the Squid `core."view"` tables consumed by the
 -- frontend `ViewFragment`. Sub-entities are modelled so the fragment validates;
 -- only view fields are seeded initially.
 

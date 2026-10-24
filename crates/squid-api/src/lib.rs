@@ -1,5 +1,5 @@
 //! HTTP surface for Squid-CRM: REST (`/rest`), GraphQL (`/graphql`), auth
-//! (`/auth`) and health (`/healthz`), matching the audited upstream prefixes.
+//! (`/auth`) and health (`/healthz`), the Squid API prefixes.
 
 pub mod auth;
 pub mod current_user;
@@ -174,7 +174,7 @@ impl AppState {
     }
 }
 
-/// Token pair shape consumed by the existing frontend (`AuthTokenPairFragment`).
+/// Token pair shape consumed by the web client and API clients.
 #[derive(Debug, Clone, Serialize, Deserialize, async_graphql::SimpleObject)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthTokenPair {
@@ -575,7 +575,7 @@ async fn csrf_guard(State(state): State<AppState>, request: Request, next: Next)
 /// Resolve the caller from `Authorization: Bearer` or the session cookie.
 /// Returns `None` when no valid credential is present. Access tokens are only
 /// accepted where `allow_user_access` is true (the `/metadata` API); data APIs
-/// require an API key or the session cookie, matching upstream.
+/// require an API key or the session cookie.
 pub async fn resolve_auth_with_policy(
     state: &AppState,
     headers: &HeaderMap,
@@ -717,7 +717,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(
             axum::http::header::COOKIE,
-            HeaderValue::from_static("a=1; twenty-session=abc123; b=2"),
+            HeaderValue::from_static("a=1; squid-session=abc123; b=2"),
         );
         assert_eq!(
             extract_cookie(&headers, SESSION_COOKIE_NAME),
