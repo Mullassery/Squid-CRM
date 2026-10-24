@@ -60,7 +60,8 @@ npm run dev
 ```
 
 Open <http://localhost:3001>, create a workspace, and start adding records. The
-web app proxies `/api/*` to `http://localhost:3000` by default.
+web app serves the UI and proxies `/api/*` to the Rust server at
+`BACKEND_URL` (default `http://localhost:3000`).
 
 Or run the whole stack in containers:
 
@@ -68,6 +69,11 @@ Or run the whole stack in containers:
 cp .env.example .env            # set APP_SECRET to 32+ random characters
 docker compose up --build
 ```
+
+Then open:
+
+- Web client: <http://localhost:3001>
+- API health: <http://localhost:3000/healthz>
 
 ### Tests
 
@@ -83,6 +89,7 @@ TEST_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/squid_test \
 
 # Frontend type-check, lint and production build
 cd apps/web
+npm install
 npm run check
 ```
 
@@ -99,7 +106,7 @@ cd apps/web && npm run check
 | Area | Implemented |
 | --- | --- |
 | **Auth** | Signup/signin/signout, Argon2id, HS256 access + login JWTs, opaque rotating refresh tokens, hashed session cookies, bearer auth, API-key lifecycle |
-| **Web client** | Dashboard, global search, list/detail/create/edit/delete/restore flows, import/export, settings, roles, API keys, webhooks, metadata and views |
+| **Web client** | Dashboard, global search, standard and custom record CRUD, archive/restore, CSV import/export, files, plus settings for members, roles, API keys, webhooks, data model, views and jobs |
 | **Data API** | `/graphql` and `/rest` accept API keys or the `squid-session` cookie |
 | **Tenancy** | Schema per workspace, validated schema identifiers, membership re-check on every request |
 | **Objects** | People, companies, opportunities, tasks, notes, task/note targets and workspace members with CRUD, batch, soft-delete/restore, merge and null-clearing updates |
@@ -108,12 +115,30 @@ cd apps/web && npm run check
 | **Custom objects** | Physical tables and scalar/relation columns created from metadata; generic REST and JSON GraphQL CRUD |
 | **Roles** | Metadata-backed built-in and custom roles, member/API-key assignment, permission flags, capability enforcement on REST/GraphQL, admin guards |
 | **Search** | PostgreSQL ranked full-text search across person, company, opportunity, task and note |
-| **Files** | PostgreSQL-backed storage, HMAC-signed upload/download URLs, `UPLOAD_FILE` / `DOWNLOAD_FILE` checks |
-| **Webhooks** | CRUD with admin guards; person REST create/update/delete events delivered with bounded retries |
-| **Ops** | `/healthz`, structured tracing, Dockerfile, Compose stack, CI against real PostgreSQL |
+| **Files** | PostgreSQL-backed storage with optional path-style S3, HMAC-signed upload/download URLs, `UPLOAD_FILE` / `DOWNLOAD_FILE` checks |
+| **Webhooks** | CRUD with admin guards, core-object REST/GraphQL event delivery, bounded retries, durable delivery log and replay |
+| **Jobs** | Durable `core.jobs` queue with admin enqueue/run, maintenance, webhook replay and `http.request` primitives |
+| **Ops** | `/healthz`, structured tracing, Dockerfile, Compose stack, Rust and frontend CI |
 
 The API is documented in [`docs/api.md`](./docs/api.md). The web app is documented
 in [`docs/frontend.md`](./docs/frontend.md).
+
+## Web client
+
+`apps/web` is a Next.js App Router application with strict TypeScript and no UI
+framework dependency. The main surfaces are:
+
+| Area | Routes |
+| --- | --- |
+| Dashboard & search | `/dashboard`, `/search` |
+| Standard records | `/objects/{people,companies,opportunities,tasks,notes,taskTargets,noteTargets}` |
+| Custom records | `/custom/[object]` |
+| Files | `/files` |
+| Settings | `/settings`, members, roles, API keys, webhooks, data model, views, custom objects, jobs, GraphQL console and profile |
+
+The browser talks to the Next.js server, which proxies `/api/*` to the Rust API
+and keeps the HttpOnly `squid-session` cookie same-origin. See
+[`docs/frontend.md`](./docs/frontend.md) for architecture and conventions.
 
 ## Architecture
 
@@ -148,7 +173,7 @@ flowchart LR
 | `crates/squid-auth` | Passwords, JWTs, refresh tokens, sessions, API keys, `AuthContext` |
 | `crates/squid-api` | Axum router, REST, GraphQL, CORS and auth middleware |
 | `crates/squid-server` | The runnable binary |
-| `apps/web` | Next.js app router frontend and API client |
+| `apps/web` | Next.js web client, same-origin API proxy and typed API clients |
 | `python/` | Optional Python client |
 | `docs/` | API, architecture, ADRs and operations notes |
 
@@ -164,6 +189,8 @@ and the ADRs in [`docs/adr/`](./docs/adr).
 - Auth: signup/signin sets an HttpOnly `squid-session` cookie. Data APIs also
   accept `Authorization: Bearer api_...` API keys. User access tokens are for
   `/metadata` only.
+- Proxy: the web client forwards `/api/*` to `BACKEND_URL`, so browser requests
+  and cookies stay same-origin.
 
 See [`docs/api.md`](./docs/api.md) for request/response shapes and the full
 operation list.
@@ -190,16 +217,16 @@ privately through the repository's security advisory channel, not a public issue
 ## Status and roadmap
 
 Implemented through Phase 5 (core CRM slices, metadata writes, roles, custom
-objects, search, files, webhooks) plus the first-party web client. Still open:
+objects, search, files, webhooks and jobs) plus the first-party web client. Still
+open:
 
 - [ ] Metadata-generated GraphQL types/routes for custom objects
 - [ ] OpenAPI document emission
-- [ ] Remaining REST routes and relation-filter/order coverage
-- [ ] Background jobs, cron and workflow engine
-- [ ] Webhook delivery for every object type
+- [ ] Remaining REST/GraphQL routes and relation-filter/order coverage
+- [ ] Workflow engine, cron scheduling and distributed job workers
 - [ ] OAuth, 2FA, app tokens and shared rate limiting
-- [ ] S3-compatible file storage
-- [ ] Import/export for every object, email, calendar, timeline and integrations
+- [ ] Live-provider verification for S3 storage
+- [ ] Email, calendar, timeline and third-party integrations
 - [ ] Threat model review, fuzz/property tests, benchmarks, SBOM and release docs
 
 The working checklist is
