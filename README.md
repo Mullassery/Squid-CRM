@@ -6,7 +6,7 @@
 
 Axum · PostgreSQL · GraphQL · REST · multi-tenant · metadata-driven · Next.js
 
-[![CI](https://github.com/Mullassery/Squid-CRM/actions/workflows/ci.yml/badge.svg)](https://github.com/Mullassery/Squid-CRM/actions/workflows/ci.yml)
+[![CI](../Squid-CRM/actions/workflows/ci.yml/badge.svg)](../Squid-CRM/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](./LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org/)
 [![Next.js](https://img.shields.io/badge/Next.js-16-black.svg)](https://nextjs.org/)
@@ -42,7 +42,7 @@ Axum · PostgreSQL · GraphQL · REST · multi-tenant · metadata-driven · Next
 Prerequisites: Rust 1.85+, Node.js 20+, Docker (or PostgreSQL 16).
 
 ```bash
-git clone https://github.com/Mullassery/Squid-CRM.git
+git clone ../Squid-CRM
 cd Squid-CRM
 
 docker compose up -d db
